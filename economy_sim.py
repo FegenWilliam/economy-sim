@@ -34,40 +34,49 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
 
-    # TODO: implement method to set price for an item
     def set_price(self, item_name: str, price: float) -> None:
         """
-        TODO:
-        - Store the price in self.prices
-        - Optionally validate that price >= 0
+        Set the selling price for an item in the player's store.
         """
-        pass
+        if price < 0:
+            raise ValueError(f"Price cannot be negative: {price}")
+        self.prices[item_name] = price
 
-    # TODO: implement method to produce items (spend cash to increase inventory)
     def produce_item(self, item: Item, quantity: int) -> None:
         """
-        TODO:
-        - Compute total production cost (item.base_cost * quantity)
-        - Check if player has enough cash
-        - Deduct cost from cash
-        - Increase inventory[item.name] by quantity
-        """
-        pass
+        Produce items by spending cash to increase inventory.
 
-    # TODO: implement method to sell items to a customer
+        Raises ValueError if player doesn't have enough cash.
+        """
+        if quantity < 0:
+            raise ValueError(f"Quantity cannot be negative: {quantity}")
+
+        total_cost = item.base_cost * quantity
+
+        if self.cash < total_cost:
+            raise ValueError(
+                f"{self.name} cannot afford to produce {quantity} {item.name}. "
+                f"Cost: ${total_cost:.2f}, Available: ${self.cash:.2f}"
+            )
+
+        self.cash -= total_cost
+        self.inventory[item.name] = self.inventory.get(item.name, 0) + quantity
+
     def sell_to_customer(self, item_name: str, quantity: int, unit_price: float) -> float:
         """
         Attempt to sell 'quantity' units of 'item_name' at 'unit_price'.
         Returns the total revenue actually realized.
-
-        TODO:
-        - Check available inventory for the item
-        - Determine how many units can actually be sold (min of requested vs inventory)
-        - Decrease inventory accordingly
-        - Increase cash by revenue (units_sold * unit_price)
-        - Return revenue
         """
-        pass
+        available = self.inventory.get(item_name, 0)
+        units_sold = min(quantity, available)
+
+        if units_sold > 0:
+            self.inventory[item_name] -= units_sold
+            revenue = units_sold * unit_price
+            self.cash += revenue
+            return revenue
+
+        return 0.0
 
 
 @dataclass
@@ -81,21 +90,46 @@ class CustomerNeed:
 class Customer:
     """Represents a customer with daily needs for items."""
     name: str
+    customer_type: str = "medium"  # "low", "medium", or "high"
+    budget: float = 0.0
 
-    # TODO: daily needs could be regenerated each day
+    def __post_init__(self):
+        """Set budget based on customer type if not already set."""
+        if self.budget == 0.0:
+            if self.customer_type == "low":
+                self.budget = 20.0
+            elif self.customer_type == "medium":
+                self.budget = 50.0
+            elif self.customer_type == "high":
+                self.budget = 100.0
+
     def generate_daily_needs(self, available_items: List[Item]) -> List[CustomerNeed]:
         """
-        Generate a random set of item needs for the day.
+        Generate a random set of item needs for the day based on budget.
 
-        TODO:
-        - Decide how many different item types this customer wants today
-        - For each chosen item, generate a random quantity (e.g. 1–10)
-        - Return as a list of CustomerNeed
-        - You can use 'random' module for randomness
+        Randomly selects items and quantities, ensuring total cost doesn't exceed budget.
         """
-        pass
+        if not available_items:
+            return []
 
-    # TODO: implement logic for choosing which player to buy from
+        needs = []
+        remaining_budget = self.budget
+
+        # Decide how many different item types to buy (1 to 3)
+        num_item_types = random.randint(1, min(3, len(available_items)))
+        selected_items = random.sample(available_items, num_item_types)
+
+        for item in selected_items:
+            # Calculate max quantity we can afford
+            max_affordable = int(remaining_budget / item.base_price)
+            if max_affordable > 0:
+                # Buy between 1 and min(5, max_affordable) units
+                quantity = random.randint(1, min(5, max_affordable))
+                needs.append(CustomerNeed(item_name=item.name, quantity=quantity))
+                remaining_budget -= quantity * item.base_price
+
+        return needs
+
     def choose_supplier(
         self,
         players: List[Player],
@@ -105,12 +139,29 @@ class Customer:
         """
         Decide which player to buy from for a given item and quantity.
 
-        TODO:
-        - Consider each player's price for the item (lowest price wins, for example)
-        - Optionally break ties randomly or based on who has enough stock
-        - Return the chosen Player or None if nobody can supply
+        Chooses the player with the lowest price who has at least some stock.
+        Breaks ties randomly.
         """
-        pass
+        candidates = []
+
+        for player in players:
+            # Check if player has this item in stock
+            if player.inventory.get(item_name, 0) > 0:
+                # Check if player has set a price
+                if item_name in player.prices:
+                    candidates.append((player, player.prices[item_name]))
+
+        if not candidates:
+            return None
+
+        # Find the lowest price
+        min_price = min(price for _, price in candidates)
+
+        # Get all players with the lowest price
+        best_players = [player for player, price in candidates if price == min_price]
+
+        # Return random player from best options
+        return random.choice(best_players)
 
 
 # -------------------------------------------------------------------
@@ -135,14 +186,15 @@ class GameState:
     items: List[Item] = field(default_factory=list)
     config: GameConfig = field(default_factory=GameConfig)
 
-    # TODO: helper to get item by name
     def get_item(self, item_name: str) -> Optional[Item]:
         """
-        TODO:
-        - Look up an item by its name in self.items
-        - Return the Item or None if not found
+        Look up an item by its name in self.items.
+        Returns the Item or None if not found.
         """
-        pass
+        for item in self.items:
+            if item.name == item_name:
+                return item
+        return None
 
 
 # -------------------------------------------------------------------
@@ -179,12 +231,57 @@ def create_players(names: List[str], starting_cash: float) -> List[Player]:
 
 def create_customers(num_customers: int) -> List[Customer]:
     """
-    Create a list of customers.
-
-    TODO:
-    - Give them more interesting names if desired
+    Create a list of customers with random types (low, medium, high spender).
     """
-    return [Customer(name=f"Customer_{i+1}") for i in range(num_customers)]
+    customers = []
+    customer_types = ["low", "medium", "high"]
+
+    for i in range(num_customers):
+        customer_type = random.choice(customer_types)
+        customers.append(Customer(name=f"Customer_{i+1}", customer_type=customer_type))
+
+    return customers
+
+
+# -------------------------------------------------------------------
+# Player strategies
+# -------------------------------------------------------------------
+
+def auto_production_strategy(player: Player, items: List[Item]) -> None:
+    """
+    Automatically produce items for a player based on simple strategy.
+
+    Each day, player tries to produce some inventory of each item type.
+    """
+    for item in items:
+        current_inventory = player.inventory.get(item.name, 0)
+
+        # Try to maintain inventory of at least 10 units per item
+        target_inventory = 10
+        if current_inventory < target_inventory:
+            quantity_to_produce = target_inventory - current_inventory
+            total_cost = item.base_cost * quantity_to_produce
+
+            # Only produce if we have enough cash
+            if player.cash >= total_cost:
+                try:
+                    player.produce_item(item, quantity_to_produce)
+                except ValueError:
+                    # Not enough cash, skip this item
+                    pass
+
+
+def auto_pricing_strategy(player: Player, items: List[Item]) -> None:
+    """
+    Automatically set prices for a player based on simple strategy.
+
+    Uses base_price with a small random variation to simulate competition.
+    """
+    for item in items:
+        # Set price to base_price with a random variation of +/- 10%
+        variation = random.uniform(0.9, 1.1)
+        price = item.base_price * variation
+        player.set_price(item.name, price)
 
 
 # -------------------------------------------------------------------
@@ -195,46 +292,51 @@ def run_day(game_state: GameState) -> None:
     """
     Simulate a single day in the economic game.
 
-    High-level steps (TODOs):
+    Steps:
     1. Let each player produce items / adjust prices for the day.
-       - For now this could be automated / AI-driven, or later you can hook
-         this to player input or a UI.
     2. For each customer:
-       - Generate daily needs (Customer.generate_daily_needs)
-       - For each need:
-         * Ask the customer to choose a supplier (Customer.choose_supplier)
-         * If a supplier exists, perform the sale using Player.sell_to_customer
-    3. Track statistics (e.g., total revenue per player, unmet demand).
+       - Generate daily needs
+       - For each need, choose a supplier and make the purchase
+    3. Track statistics
     4. Advance the day counter.
-
-    TODO:
-    - Implement all of the above steps.
-    - Optionally print a daily summary.
     """
 
-    # TODO: Step 1 – player decisions (production / pricing)
-    # Example idea:
-    # for player in game_state.players:
-    #     auto_production_strategy(player, game_state.items)
-    #     auto_pricing_strategy(player, game_state.items)
-    #
-    # These strategy functions would also be TODOs elsewhere.
+    print(f"\n=== Day {game_state.day} ===")
 
-    # TODO: Step 2 – simulate customers
-    # for customer in game_state.customers:
-    #     needs = customer.generate_daily_needs(game_state.items)
-    #     for need in needs:
-    #         supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity)
-    #         if supplier:
-    #             price = supplier.prices.get(need.item_name, default_price_here)
-    #             supplier.sell_to_customer(need.item_name, need.quantity, price)
-    #         else:
-    #             # Track unmet demand if desired
-    #             pass
+    # Step 1: Player decisions (production / pricing)
+    for player in game_state.players:
+        auto_production_strategy(player, game_state.items)
+        auto_pricing_strategy(player, game_state.items)
 
-    # TODO: Step 3 – collect statistics (e.g., total sales per player)
+    # Track daily statistics
+    daily_sales = {player.name: 0.0 for player in game_state.players}
+    unmet_demand = 0
 
-    # TODO: Step 4 – advance day counter
+    # Step 2: Simulate customers
+    for customer in game_state.customers:
+        needs = customer.generate_daily_needs(game_state.items)
+
+        for need in needs:
+            supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity)
+
+            if supplier:
+                price = supplier.prices.get(need.item_name, 0)
+                revenue = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                daily_sales[supplier.name] += revenue
+            else:
+                # Track unmet demand
+                unmet_demand += need.quantity
+
+    # Step 3: Print daily summary
+    print(f"\nDaily Sales:")
+    for player in game_state.players:
+        sales = daily_sales[player.name]
+        print(f"  {player.name}: ${sales:.2f} (Cash: ${player.cash:.2f})")
+
+    if unmet_demand > 0:
+        print(f"\nUnmet demand: {unmet_demand} items")
+
+    # Step 4: Advance day counter
     game_state.day += 1
 
 
@@ -245,23 +347,22 @@ def run_day(game_state: GameState) -> None:
 def run_game() -> None:
     """
     Top-level function to run the entire simulation for config.num_days.
-
-    TODO:
-    - Initialize items, players, and customers
-    - Loop from day 1 to num_days
-    - Call run_day(...) each iteration
-    - At the end, print final standings (who has the most cash, etc.)
     """
 
-    # TODO: create a default config or load from file
+    # Create game configuration
     config = GameConfig()
 
-    # TODO: initialize items, players, customers
+    print("=== ECONOMY SIMULATION ===")
+    print(f"Starting cash per player: ${config.starting_cash:.2f}")
+    print(f"Number of days: {config.num_days}")
+    print(f"Customers per day: {config.customers_per_day}")
+
+    # Initialize items, players, customers
     items = create_default_items()
     players = create_players(["Alice Corp", "Bob Ltd", "Charlie Inc"], config.starting_cash)
     customers = create_customers(config.customers_per_day)
 
-    # TODO: create GameState
+    # Create GameState
     game_state = GameState(
         day=1,
         players=players,
@@ -270,15 +371,27 @@ def run_game() -> None:
         config=config,
     )
 
-    # TODO: main loop
-    # for _ in range(config.num_days):
-    #     print(f"=== Day {game_state.day} ===")
-    #     run_day(game_state)
-    #     # Optionally show per-day summary here
+    # Main simulation loop
+    for _ in range(config.num_days):
+        run_day(game_state)
 
-    # TODO: after the loop, show final results / winner
+    # Show final results
+    print("\n" + "=" * 50)
+    print("=== FINAL STANDINGS ===")
+    print("=" * 50)
+
+    # Sort players by cash (descending)
+    sorted_players = sorted(game_state.players, key=lambda p: p.cash, reverse=True)
+
+    for i, player in enumerate(sorted_players, 1):
+        print(f"{i}. {player.name}")
+        print(f"   Cash: ${player.cash:.2f}")
+        print(f"   Inventory: {dict(player.inventory)}")
+        print()
+
+    winner = sorted_players[0]
+    print(f"🏆 Winner: {winner.name} with ${winner.cash:.2f}!")
 
 
 if __name__ == "__main__":
-    # TODO: decide if this should actually run the simulation or just be a library
     run_game()
