@@ -48,6 +48,9 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (quantity, vendor_name)
+    cashiers: int = 1  # Each cashier handles 10 customers per day
+    restockers: int = 1  # Each restocker handles 20 items per day
+    store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -62,6 +65,48 @@ class Player:
         Returns (quantity, vendor_name) or (0, "") if not set.
         """
         return self.buy_orders.get(item_name, (0, ""))
+
+    def get_max_products(self) -> int:
+        """Get max number of different products based on store level."""
+        return 3 + (self.store_level - 1)  # Level 1 = 3, Level 2 = 4, etc.
+
+    def get_max_customers(self) -> int:
+        """Get max number of customers that can be served per day."""
+        return self.cashiers * 10
+
+    def get_max_items_per_day(self) -> int:
+        """Get max number of items that can be restocked per day."""
+        return self.restockers * 20
+
+    def hire_employee(self, employee_type: str) -> bool:
+        """
+        Hire an employee (cashier or restocker).
+        Costs $500. Returns True if successful, False if not enough cash.
+        """
+        HIRING_COST = 500.0
+
+        if self.cash < HIRING_COST:
+            return False
+
+        self.cash -= HIRING_COST
+        if employee_type == "cashier":
+            self.cashiers += 1
+        elif employee_type == "restocker":
+            self.restockers += 1
+        else:
+            return False
+
+        return True
+
+    def pay_daily_wages(self) -> float:
+        """
+        Pay daily wages for all employees ($20 per employee).
+        Returns total wages paid.
+        """
+        total_employees = self.cashiers + self.restockers
+        wages = total_employees * 20.0
+        self.cash -= wages
+        return wages
 
     def set_price(self, item_name: str, price: float) -> None:
         """
@@ -441,14 +486,25 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     For vendors with random daily selection (vendors 1 & 2), fallback to cheapest
     available vendor if the selected vendor doesn't have the item.
 
+    Respects restocker limits (restockers * 20 items per day) and store level
+    (max different products).
+
     Returns a dictionary of items purchased: {item_name: quantity_bought}
     """
     purchases = {}
+    total_items_bought = 0
+    max_items = player.get_max_items_per_day()
+    max_products = player.get_max_products()
 
     # Get all non-zero buy orders
     active_orders = []
     for item_name, (quantity, vendor_name) in player.buy_orders.items():
         if quantity > 0:
+            # Check if player already has too many different products
+            current_products = len([item for item, qty in player.inventory.items() if qty > 0])
+            if item_name not in player.inventory and current_products >= max_products:
+                continue  # Skip this item, store is full of different products
+
             # Find the vendor
             vendor = game_state.get_vendor(vendor_name)
             if vendor:
@@ -477,18 +533,28 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     # Sort by price (cheapest first)
     active_orders.sort(key=lambda x: x[3])
 
-    # Execute orders in order
+    # Execute orders in order, respecting item limit
     for item_name, quantity, vendor, price in active_orders:
-        success = player.purchase_from_vendor(vendor, item_name, quantity)
+        if total_items_bought >= max_items:
+            break  # Reached restocker limit
+
+        # Limit quantity by remaining items restockers can handle
+        remaining_capacity = max_items - total_items_bought
+        actual_quantity = min(quantity, remaining_capacity)
+
+        success = player.purchase_from_vendor(vendor, item_name, actual_quantity)
         if success:
-            purchases[item_name] = quantity
+            purchases[item_name] = actual_quantity
+            total_items_bought += actual_quantity
         else:
             # Try to buy as many as possible with remaining cash
             max_affordable = int(player.cash / price)
             if max_affordable > 0:
-                partial_success = player.purchase_from_vendor(vendor, item_name, max_affordable)
+                affordable_quantity = min(max_affordable, remaining_capacity)
+                partial_success = player.purchase_from_vendor(vendor, item_name, affordable_quantity)
                 if partial_success:
-                    purchases[item_name] = max_affordable
+                    purchases[item_name] = affordable_quantity
+                    total_items_bought += affordable_quantity
 
     return purchases
 
@@ -550,13 +616,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     Simulate a single day in the economic game.
 
     Steps:
-    1. Apply daily price fluctuations to market
+    1. Apply daily price fluctuations and special events
     2. Refresh vendor inventory based on new market prices
     3. Execute buy orders for all players (from cheapest to most expensive)
     4. Let AI players adjust prices
-    5. For each customer, generate needs and make purchases
-    6. Track statistics
-    7. Advance the day counter
+    5. For each customer, generate needs and make purchases (limited by cashier capacity)
+    6. Pay employee wages
+    7. Track statistics
+    8. Advance the day counter
 
     Returns dictionary of daily sales per player.
     """
@@ -564,8 +631,35 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     if show_details:
         print(f"\n=== Day {game_state.day} ===")
 
-    # Step 1: Apply price fluctuations
+    # Step 1: Apply price fluctuations and special events
     apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
+
+    # Check for special events
+    if game_state.day % 30 == 0 and show_details:
+        # 30-day event: one item -50%, one item +50%
+        if len(game_state.items) >= 2:
+            selected_items = random.sample(game_state.items, 2)
+            # Item 1: -50%
+            old_price1 = game_state.market_prices[selected_items[0].name]
+            game_state.market_prices[selected_items[0].name] = old_price1 * 0.5
+            # Item 2: +50%
+            old_price2 = game_state.market_prices[selected_items[1].name]
+            game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
+            print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
+
+    # Calculate base customer count: num_players * 10 + day
+    base_customer_count = len(game_state.players) * 10 + game_state.day
+
+    # Check for 14-day event
+    if game_state.day % 14 == 0:
+        occurrence_count = game_state.day // 14
+        bonus_customers = 20 * occurrence_count
+        base_customer_count += bonus_customers
+        if show_details:
+            print(f"🎊 14-DAY EVENT! +{bonus_customers} customers today!")
+
+    if show_details:
+        print(f"Total customers today: {base_customer_count}")
 
     # Step 2: Refresh vendor inventory based on new market prices
     refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
@@ -595,34 +689,61 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Track daily statistics
     daily_sales = {player.name: 0.0 for player in game_state.players}
+    customers_served = {player.name: 0 for player in game_state.players}
     unmet_demand = 0
 
-    # Step 4: Simulate customers
-    for customer in game_state.customers:
+    # Step 5: Simulate customers with cashier limits
+    # Generate all customers for the day
+    all_customers = []
+    for i in range(base_customer_count):
+        customer_type = random.choice(["low", "medium", "high"])
+        customer = Customer(name=f"Customer_{i+1}", customer_type=customer_type)
+        all_customers.append(customer)
+
+    # Process each customer
+    for customer in all_customers:
         needs = customer.generate_daily_needs(game_state.items)
 
         for need in needs:
             supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity)
 
             if supplier:
-                price = supplier.prices.get(need.item_name, 0)
-                revenue = supplier.sell_to_customer(need.item_name, need.quantity, price)
-                daily_sales[supplier.name] += revenue
+                # Check if supplier can serve this customer (cashier limit)
+                if customers_served[supplier.name] < supplier.get_max_customers():
+                    price = supplier.prices.get(need.item_name, 0)
+                    revenue = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                    if revenue > 0:
+                        daily_sales[supplier.name] += revenue
+                        customers_served[supplier.name] += 1
+                else:
+                    # Supplier at cashier capacity, track unmet demand
+                    unmet_demand += need.quantity
             else:
                 # Track unmet demand
                 unmet_demand += need.quantity
 
-    # Step 5: Print daily summary
+    # Step 6: Pay employee wages
+    if show_details:
+        print(f"\nPaying employee wages...")
+
+    for player in game_state.players:
+        wages = player.pay_daily_wages()
+        if show_details:
+            print(f"  {player.name}: ${wages:.2f} ({player.cashiers} cashiers + {player.restockers} restockers)")
+
+    # Step 7: Print daily summary
     if show_details:
         print(f"\nDaily Sales:")
         for player in game_state.players:
             sales = daily_sales[player.name]
-            print(f"  {player.name}: ${sales:.2f} (Cash: ${player.cash:.2f})")
+            served = customers_served[player.name]
+            max_served = player.get_max_customers()
+            print(f"  {player.name}: ${sales:.2f} | Customers: {served}/{max_served} | Cash: ${player.cash:.2f}")
 
         if unmet_demand > 0:
             print(f"\nUnmet demand: {unmet_demand} items")
 
-    # Step 6: Advance day counter
+    # Step 8: Advance day counter
     game_state.day += 1
 
     return daily_sales
@@ -678,14 +799,23 @@ def display_vendor_table(game_state: GameState) -> None:
 
 def display_player_status(player: Player) -> None:
     """Display the player's current status."""
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 60)
     print(f"YOUR STORE: {player.name}")
-    print("=" * 50)
+    print("=" * 60)
     print(f"Cash: ${player.cash:.2f}")
-    print(f"\nInventory:")
+    print(f"\nStore Level: {player.store_level} (Max {player.get_max_products()} different products)")
+
+    print(f"\nEmployees:")
+    print(f"  Cashiers: {player.cashiers} (Max {player.get_max_customers()} customers/day)")
+    print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
+    total_employees = player.cashiers + player.restockers
+    print(f"  Daily wages: ${total_employees * 20:.2f}")
+
+    print(f"\nInventory ({len([i for i, q in player.inventory.items() if q > 0])}/{player.get_max_products()} products):")
     if player.inventory:
         for item_name, quantity in player.inventory.items():
-            print(f"  {item_name}: {quantity} units")
+            if quantity > 0:
+                print(f"  {item_name}: {quantity} units")
     else:
         print("  (empty)")
 
@@ -695,7 +825,7 @@ def display_player_status(player: Player) -> None:
             print(f"  {item_name}: ${price:.2f}")
     else:
         print("  (no prices set)")
-    print("=" * 50)
+    print("=" * 60)
 
 
 def vendor_menu(game_state: GameState, player: Player) -> None:
@@ -835,6 +965,63 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def employee_menu(game_state: GameState, player: Player) -> None:
+    """Menu for hiring employees."""
+    HIRING_COST = 500.0
+    DAILY_WAGE = 20.0
+
+    while True:
+        print("\n" + "=" * 60)
+        print("EMPLOYEE MENU - Hire Staff")
+        print("=" * 60)
+        print(f"\nYour Cash: ${player.cash:.2f}")
+        print(f"\nCurrent Employees:")
+        print(f"  Cashiers: {player.cashiers} (Max {player.get_max_customers()} customers/day)")
+        print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
+        total_employees = player.cashiers + player.restockers
+        print(f"  Total daily wages: ${total_employees * DAILY_WAGE:.2f}")
+
+        print(f"\nHiring Cost: ${HIRING_COST:.2f} per employee")
+        print(f"Daily Wage: ${DAILY_WAGE:.2f} per employee")
+
+        print("\nOptions:")
+        print("  1. Hire Cashier (+10 customers/day capacity)")
+        print("  2. Hire Restocker (+20 items/day capacity)")
+        print("  0. Back to Main Menu")
+
+        try:
+            choice = input("\nSelect option (0-2): ")
+            choice_num = int(choice)
+
+            if choice_num == 0:
+                break
+            elif choice_num == 1:
+                if player.cash < HIRING_COST:
+                    print(f"\n✗ Not enough cash! Need ${HIRING_COST:.2f}, have ${player.cash:.2f}")
+                else:
+                    success = player.hire_employee("cashier")
+                    if success:
+                        print(f"\n✓ Hired 1 cashier for ${HIRING_COST:.2f}")
+                        print(f"  New capacity: {player.get_max_customers()} customers/day")
+                    else:
+                        print("\n✗ Failed to hire cashier")
+            elif choice_num == 2:
+                if player.cash < HIRING_COST:
+                    print(f"\n✗ Not enough cash! Need ${HIRING_COST:.2f}, have ${player.cash:.2f}")
+                else:
+                    success = player.hire_employee("restocker")
+                    if success:
+                        print(f"\n✓ Hired 1 restocker for ${HIRING_COST:.2f}")
+                        print(f"  New capacity: {player.get_max_items_per_day()} items/day")
+                    else:
+                        print("\n✗ Failed to hire restocker")
+            else:
+                print("\n✗ Invalid option!")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+
+
 def pricing_menu(game_state: GameState, player: Player) -> None:
     """Menu for setting prices."""
     while True:
@@ -896,18 +1083,20 @@ def main_menu(game_state: GameState) -> bool:
         print(f"MAIN MENU - Day {game_state.day}")
         print("=" * 50)
         print(f"Your Cash: ${player.cash:.2f}")
+        print(f"Employees: {player.cashiers} cashiers, {player.restockers} restockers")
         print("\nOptions:")
         print("  1. Pass Day (Simulate)")
         print("  2. View Market Prices")
         print("  3. View Vendors")
         print("  4. Configure Buy Orders")
         print("  5. Set Your Prices")
-        print("  6. View Your Store Status")
-        print("  7. View Competitor Status")
+        print("  6. Hire Employees")
+        print("  7. View Your Store Status")
+        print("  8. View Competitor Status")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-7): ")
+            choice = input("\nSelect option (0-8): ")
             choice_num = int(choice)
 
             if choice_num == 0:
@@ -929,9 +1118,11 @@ def main_menu(game_state: GameState) -> bool:
             elif choice_num == 5:
                 pricing_menu(game_state, player)
             elif choice_num == 6:
+                employee_menu(game_state, player)
+            elif choice_num == 7:
                 display_player_status(player)
                 input("\nPress Enter to continue...")
-            elif choice_num == 7:
+            elif choice_num == 8:
                 print("\n" + "=" * 50)
                 print("COMPETITOR STATUS")
                 print("=" * 50)
@@ -939,6 +1130,7 @@ def main_menu(game_state: GameState) -> bool:
                     if p != player:
                         print(f"\n{p.name}:")
                         print(f"  Cash: ${p.cash:.2f}")
+                        print(f"  Employees: {p.cashiers} cashiers, {p.restockers} restockers")
                         print(f"  Inventory: {dict(p.inventory)}")
                         print(f"  Prices: {dict(p.prices)}")
                 print("=" * 50)
@@ -977,12 +1169,11 @@ def run_game() -> None:
         player_name = "Your Store"
 
     print(f"\nStarting cash: ${config.starting_cash:.2f}")
-    print(f"Customers per day: {config.customers_per_day}")
+    print(f"Customers formula: (num_players × 10) + day_number")
 
-    # Initialize items, vendors, customers
+    # Initialize items, vendors
     items = create_default_items()
     vendors = create_vendors()
-    customers = create_customers(config.customers_per_day)
     market_prices = initialize_market_prices(items)
 
     # Initialize vendor inventory for day 1
@@ -993,11 +1184,11 @@ def run_game() -> None:
     ai_players = create_players(["Alice Corp", "Bob Ltd"], config.starting_cash)
     all_players = [human_player] + ai_players
 
-    # Create GameState
+    # Create GameState (customers generated dynamically each day)
     game_state = GameState(
         day=1,
         players=all_players,
-        customers=customers,
+        customers=[],  # Customers generated dynamically in run_day()
         items=items,
         vendors=vendors,
         market_prices=market_prices,
