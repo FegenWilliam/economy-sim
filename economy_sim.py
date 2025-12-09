@@ -41,6 +41,16 @@ class Vendor:
 
 
 @dataclass
+class Upgrade:
+    """An upgrade that players can purchase once."""
+    name: str
+    cost: float
+    effect_type: str  # "max_customers", "max_items", "max_products", "xp_gain", "vendor_discount"
+    effect_value: float  # Amount of the effect
+    vendor_name: str = ""  # Only used for vendor_discount type
+
+
+@dataclass
 class Player:
     """Represents a company / player in the economic simulation."""
     name: str
@@ -53,6 +63,8 @@ class Player:
     store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
     experience: float = 0.0  # XP gained from profits
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
+    purchased_upgrades: List['Upgrade'] = field(default_factory=list)  # Upgrades bought by this player
+    is_human: bool = False  # Whether this is a human-controlled player
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -69,16 +81,45 @@ class Player:
         return self.buy_orders.get(item_name, (0, ""))
 
     def get_max_products(self) -> int:
-        """Get max number of different products based on store level."""
-        return 3 + (self.store_level - 1)  # Level 1 = 3, Level 2 = 4, etc.
+        """Get max number of different products based on store level and upgrades."""
+        base = 3 + (self.store_level - 1)  # Level 1 = 3, Level 2 = 4, etc.
+        bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_products")
+        return int(base + bonus)
 
     def get_max_customers(self) -> int:
         """Get max number of customers that can be served per day."""
-        return self.cashiers * 10
+        base = self.cashiers * 10
+        bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_customers")
+        return int(base + bonus)
 
     def get_max_items_per_day(self) -> int:
         """Get max number of items that can be restocked per day."""
-        return self.restockers * 20
+        base = self.restockers * 20
+        bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
+        return int(base + bonus)
+
+    def get_xp_multiplier(self) -> float:
+        """Get XP gain multiplier from upgrades."""
+        bonus_percent = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "xp_gain")
+        return 1.0 + (bonus_percent / 100.0)
+
+    def get_vendor_discount(self, vendor_name: str) -> float:
+        """Get discount percentage for a specific vendor."""
+        discount = sum(u.effect_value for u in self.purchased_upgrades
+                      if u.effect_type == "vendor_discount" and u.vendor_name == vendor_name)
+        return discount / 100.0  # Convert percentage to decimal
+
+    def purchase_upgrade(self, upgrade: 'Upgrade') -> bool:
+        """
+        Purchase an upgrade if player has enough cash.
+        Returns True if successful, False otherwise.
+        """
+        if self.cash < upgrade.cost:
+            return False
+
+        self.cash -= upgrade.cost
+        self.purchased_upgrades.append(upgrade)
+        return True
 
     def get_xp_for_next_level(self) -> float:
         """
@@ -90,9 +131,11 @@ class Player:
     def add_experience(self, xp: float) -> bool:
         """
         Add experience points and check for level up.
+        Applies XP multiplier from upgrades.
         Returns True if leveled up, False otherwise.
         """
-        self.experience += xp
+        actual_xp = xp * self.get_xp_multiplier()
+        self.experience += actual_xp
         xp_needed = self.get_xp_for_next_level()
 
         if self.experience >= xp_needed:
@@ -186,6 +229,7 @@ class Player:
         Purchase items from a vendor at their wholesale price.
         Returns True if successful, False if not enough cash.
         Also tracks the weighted average cost per item for profit calculation.
+        Applies vendor discount upgrades.
         """
         if quantity <= 0:
             return False
@@ -194,7 +238,10 @@ class Player:
         if vendor_price is None:
             return False
 
-        total_cost = vendor_price * quantity
+        # Apply vendor discount
+        discount = self.get_vendor_discount(vendor.name)
+        final_price = vendor_price * (1.0 - discount)
+        total_cost = final_price * quantity
 
         if self.cash < total_cost:
             return False
@@ -208,7 +255,7 @@ class Player:
         # Weighted average: (old_qty * old_cost + new_qty * new_cost) / total_qty
         new_total_qty = current_inventory + quantity
         if new_total_qty > 0:
-            weighted_cost = ((current_inventory * current_cost) + (quantity * vendor_price)) / new_total_qty
+            weighted_cost = ((current_inventory * current_cost) + (quantity * final_price)) / new_total_qty
             self.item_costs[item_name] = weighted_cost
 
         self.inventory[item_name] = new_total_qty
@@ -323,7 +370,9 @@ class GameState:
     vendors: List[Vendor] = field(default_factory=list)
     market_prices: Dict[str, float] = field(default_factory=dict)  # item_name -> current market price
     config: GameConfig = field(default_factory=GameConfig)
-    human_player: Optional[Player] = None  # The human-controlled player
+    human_players: List[Player] = field(default_factory=list)  # All human-controlled players
+    available_upgrades: List[Upgrade] = field(default_factory=list)  # Upgrades that can be purchased
+    current_player_index: int = 0  # For multiplayer turn management
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -484,6 +533,49 @@ def initialize_market_prices(items: List[Item]) -> Dict[str, float]:
     for item in items:
         market_prices[item.name] = item.base_price
     return market_prices
+
+
+def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
+    """
+    Create a list of default upgrades available for purchase.
+    Admins can add more upgrades to this list.
+    """
+    upgrades = [
+        # Customer capacity upgrades
+        Upgrade(name="Extra Cashier Station", cost=1000, effect_type="max_customers", effect_value=10),
+        Upgrade(name="Express Checkout Lane", cost=1500, effect_type="max_customers", effect_value=15),
+
+        # Buyout capacity upgrades
+        Upgrade(name="Warehouse Extension", cost=1200, effect_type="max_items", effect_value=20),
+        Upgrade(name="Loading Dock", cost=1800, effect_type="max_items", effect_value=30),
+
+        # Max different items upgrades
+        Upgrade(name="Additional Shelving", cost=800, effect_type="max_products", effect_value=2),
+        Upgrade(name="Display Cases", cost=1500, effect_type="max_products", effect_value=3),
+
+        # XP gain upgrades
+        Upgrade(name="Business Course", cost=2000, effect_type="xp_gain", effect_value=10),
+        Upgrade(name="MBA Program", cost=5000, effect_type="xp_gain", effect_value=25),
+    ]
+
+    # Add vendor discount upgrades for each vendor
+    for vendor in vendors:
+        upgrades.append(Upgrade(
+            name=f"Partnership with {vendor.name}",
+            cost=2500,
+            effect_type="vendor_discount",
+            effect_value=5,
+            vendor_name=vendor.name
+        ))
+        upgrades.append(Upgrade(
+            name=f"Premium Contract with {vendor.name}",
+            cost=5000,
+            effect_type="vendor_discount",
+            effect_value=10,
+            vendor_name=vendor.name
+        ))
+
+    return upgrades
 
 
 # -------------------------------------------------------------------
@@ -722,7 +814,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Step 4: AI player decisions (pricing only, buying is handled by orders)
     for player in game_state.players:
-        if player != game_state.human_player:  # Only automate AI players
+        if not player.is_human:  # Only automate AI players
             # Set up AI buy orders if not already set
             if not player.buy_orders:
                 auto_setup_buy_orders(player, game_state.items, game_state.vendors)
@@ -1105,6 +1197,91 @@ def employee_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def upgrades_menu(game_state: GameState, player: Player) -> None:
+    """Menu for purchasing store upgrades."""
+    while True:
+        print("\n" + "=" * 70)
+        print("STORE UPGRADES MENU")
+        print("=" * 70)
+        print(f"\nYour Cash: ${player.cash:.2f}")
+
+        # Show purchased upgrades
+        if player.purchased_upgrades:
+            print("\n📦 Your Upgrades:")
+            for upgrade in player.purchased_upgrades:
+                effect_desc = _get_upgrade_effect_description(upgrade)
+                print(f"  ✓ {upgrade.name} - {effect_desc}")
+        else:
+            print("\n📦 No upgrades purchased yet")
+
+        # Show available upgrades (not yet purchased)
+        print("\n🛒 Available Upgrades:")
+        available = []
+        for i, upgrade in enumerate(game_state.available_upgrades, 1):
+            # Check if already purchased
+            already_purchased = any(u.name == upgrade.name for u in player.purchased_upgrades)
+            if not already_purchased:
+                effect_desc = _get_upgrade_effect_description(upgrade)
+                print(f"  {i}. {upgrade.name} - ${upgrade.cost:.2f}")
+                print(f"      Effect: {effect_desc}")
+                available.append((i, upgrade))
+
+        if not available:
+            print("  (All upgrades purchased!)")
+
+        print("\n  0. Back to Main Menu")
+
+        try:
+            if not available:
+                input("\nPress Enter to continue...")
+                break
+
+            choice = input(f"\nSelect upgrade to purchase (0-{len(game_state.available_upgrades)}): ")
+            choice_num = int(choice)
+
+            if choice_num == 0:
+                break
+
+            # Find selected upgrade
+            selected_upgrade = None
+            for idx, upgrade in available:
+                if idx == choice_num:
+                    selected_upgrade = upgrade
+                    break
+
+            if selected_upgrade:
+                if player.cash < selected_upgrade.cost:
+                    print(f"\n✗ Not enough cash! Need ${selected_upgrade.cost:.2f}, have ${player.cash:.2f}")
+                else:
+                    success = player.purchase_upgrade(selected_upgrade)
+                    if success:
+                        effect_desc = _get_upgrade_effect_description(selected_upgrade)
+                        print(f"\n✓ Purchased {selected_upgrade.name} for ${selected_upgrade.cost:.2f}!")
+                        print(f"  Effect: {effect_desc}")
+                    else:
+                        print("\n✗ Failed to purchase upgrade")
+            else:
+                print("\n✗ Invalid upgrade selection!")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+
+
+def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
+    """Get a human-readable description of an upgrade's effect."""
+    if upgrade.effect_type == "max_customers":
+        return f"+{int(upgrade.effect_value)} max customers/day"
+    elif upgrade.effect_type == "max_items":
+        return f"+{int(upgrade.effect_value)} max items/day"
+    elif upgrade.effect_type == "max_products":
+        return f"+{int(upgrade.effect_value)} max product types"
+    elif upgrade.effect_type == "xp_gain":
+        return f"+{int(upgrade.effect_value)}% XP gain"
+    elif upgrade.effect_type == "vendor_discount":
+        return f"+{int(upgrade.effect_value)}% discount at {upgrade.vendor_name}"
+    return "Unknown effect"
+
+
 def pricing_menu(game_state: GameState, player: Player) -> None:
     """Menu for setting prices."""
     while True:
@@ -1159,7 +1336,7 @@ def main_menu(game_state: GameState) -> bool:
     Display main menu and handle user choice.
     Returns True to continue game, False to quit.
     """
-    player = game_state.human_player
+    player = game_state.human_players[game_state.current_player_index]
 
     while True:
         print("\n" + "=" * 50)
@@ -1176,10 +1353,11 @@ def main_menu(game_state: GameState) -> bool:
         print("  6. Hire Employees")
         print("  7. View Your Store Status")
         print("  8. View Competitor Status")
+        print("  9. Store Upgrades")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-8): ")
+            choice = input("\nSelect option (0-9): ")
             choice_num = int(choice)
 
             if choice_num == 0:
@@ -1218,6 +1396,8 @@ def main_menu(game_state: GameState) -> bool:
                         print(f"  Prices: {dict(p.prices)}")
                 print("=" * 50)
                 input("\nPress Enter to continue...")
+            elif choice_num == 9:
+                upgrades_menu(game_state, player)
             else:
                 print("\n✗ Invalid option!")
 
@@ -1246,10 +1426,26 @@ def run_game() -> None:
     print("The market prices fluctuate daily, so timing is everything!")
     print("\n" + "=" * 60)
 
-    # Get player name
-    player_name = input("\nEnter your store name: ").strip()
-    if not player_name:
-        player_name = "Your Store"
+    # Get number of human players
+    while True:
+        try:
+            num_humans_str = input("\nHow many human players? (1-4): ").strip()
+            num_humans = int(num_humans_str)
+            if 1 <= num_humans <= 4:
+                break
+            else:
+                print("Please enter a number between 1 and 4")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+
+    # Get names for human players
+    human_players = []
+    for i in range(num_humans):
+        player_name = input(f"\nEnter name for Player {i+1}: ").strip()
+        if not player_name:
+            player_name = f"Player {i+1}"
+        human_player = Player(name=player_name, cash=config.starting_cash, is_human=True)
+        human_players.append(human_player)
 
     print(f"\nStarting cash: ${config.starting_cash:.2f}")
     print(f"Customers formula: (num_players × 10) + day_number")
@@ -1262,10 +1458,12 @@ def run_game() -> None:
     # Initialize vendor inventory for day 1
     refresh_vendor_inventory(vendors, items, market_prices)
 
-    # Create human player and AI players
-    human_player = Player(name=player_name, cash=config.starting_cash)
+    # Create AI players
     ai_players = create_players(["Alice Corp", "Bob Ltd"], config.starting_cash)
-    all_players = [human_player] + ai_players
+    all_players = human_players + ai_players
+
+    # Create available upgrades
+    available_upgrades = create_default_upgrades(vendors)
 
     # Create GameState (customers generated dynamically each day)
     game_state = GameState(
@@ -1276,14 +1474,20 @@ def run_game() -> None:
         vendors=vendors,
         market_prices=market_prices,
         config=config,
-        human_player=human_player,
+        human_players=human_players,
+        available_upgrades=available_upgrades,
+        current_player_index=0,
     )
 
     # Show initial setup
     print("\n" + "=" * 60)
     print("GAME SETUP COMPLETE")
     print("=" * 60)
-    print(f"\nCompetitors:")
+    print(f"\nHuman Players:")
+    for player in human_players:
+        print(f"  - {player.name}")
+
+    print(f"\nAI Competitors:")
     for player in ai_players:
         print(f"  - {player.name}")
 
@@ -1300,7 +1504,23 @@ def run_game() -> None:
     # Main game loop
     game_running = True
     while game_running and game_state.day <= config.num_days:
-        game_running = main_menu(game_state)
+        # Let each human player take their turn
+        for i, player in enumerate(human_players):
+            game_state.current_player_index = i
+            if not game_running:
+                break
+
+            if len(human_players) > 1:
+                print(f"\n{'='*60}")
+                print(f"  {player.name}'s Turn")
+                print(f"{'='*60}")
+
+            game_running = main_menu(game_state)
+
+            # If player chose "Pass Day", break the turn loop so we don't have
+            # multiple players acting on the same day
+            if not game_running:
+                break
 
     # Show final results
     if not game_running:
@@ -1323,7 +1543,7 @@ def run_game() -> None:
 
     winner = sorted_players[0]
     print("\n" + "=" * 60)
-    if winner == human_player:
+    if winner.is_human:
         print("🎉 CONGRATULATIONS! YOU WON! 🎉")
     else:
         print(f"Winner: {winner.name}")
