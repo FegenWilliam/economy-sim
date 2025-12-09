@@ -51,6 +51,8 @@ class Player:
     cashiers: int = 1  # Each cashier handles 10 customers per day
     restockers: int = 1  # Each restocker handles 20 items per day
     store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
+    experience: float = 0.0  # XP gained from profits
+    item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -77,6 +79,27 @@ class Player:
     def get_max_items_per_day(self) -> int:
         """Get max number of items that can be restocked per day."""
         return self.restockers * 20
+
+    def get_xp_for_next_level(self) -> float:
+        """
+        Calculate XP needed for next level.
+        Formula: 500 * current_level + (10000 * (current_level // 10))
+        """
+        return 500 * self.store_level + (10000 * (self.store_level // 10))
+
+    def add_experience(self, xp: float) -> bool:
+        """
+        Add experience points and check for level up.
+        Returns True if leveled up, False otherwise.
+        """
+        self.experience += xp
+        xp_needed = self.get_xp_for_next_level()
+
+        if self.experience >= xp_needed:
+            self.experience -= xp_needed
+            self.store_level += 1
+            return True
+        return False
 
     def hire_employee(self, employee_type: str) -> bool:
         """
@@ -136,10 +159,11 @@ class Player:
         self.cash -= total_cost
         self.inventory[item.name] = self.inventory.get(item.name, 0) + quantity
 
-    def sell_to_customer(self, item_name: str, quantity: int, unit_price: float) -> float:
+    def sell_to_customer(self, item_name: str, quantity: int, unit_price: float) -> tuple:
         """
         Attempt to sell 'quantity' units of 'item_name' at 'unit_price'.
-        Returns the total revenue actually realized.
+        Returns (revenue, profit) tuple.
+        Profit = revenue - cost
         """
         available = self.inventory.get(item_name, 0)
         units_sold = min(quantity, available)
@@ -148,14 +172,20 @@ class Player:
             self.inventory[item_name] -= units_sold
             revenue = units_sold * unit_price
             self.cash += revenue
-            return revenue
 
-        return 0.0
+            # Calculate profit (revenue - cost)
+            cost_per_unit = self.item_costs.get(item_name, 0)
+            profit = revenue - (cost_per_unit * units_sold)
+
+            return (revenue, profit)
+
+        return (0.0, 0.0)
 
     def purchase_from_vendor(self, vendor: 'Vendor', item_name: str, quantity: int) -> bool:
         """
         Purchase items from a vendor at their wholesale price.
         Returns True if successful, False if not enough cash.
+        Also tracks the weighted average cost per item for profit calculation.
         """
         if quantity <= 0:
             return False
@@ -170,7 +200,18 @@ class Player:
             return False
 
         self.cash -= total_cost
-        self.inventory[item_name] = self.inventory.get(item_name, 0) + quantity
+
+        # Update weighted average cost
+        current_inventory = self.inventory.get(item_name, 0)
+        current_cost = self.item_costs.get(item_name, 0)
+
+        # Weighted average: (old_qty * old_cost + new_qty * new_cost) / total_qty
+        new_total_qty = current_inventory + quantity
+        if new_total_qty > 0:
+            weighted_cost = ((current_inventory * current_cost) + (quantity * vendor_price)) / new_total_qty
+            self.item_costs[item_name] = weighted_cost
+
+        self.inventory[item_name] = new_total_qty
         return True
 
 
@@ -689,6 +730,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Track daily statistics
     daily_sales = {player.name: 0.0 for player in game_state.players}
+    daily_profits = {player.name: 0.0 for player in game_state.players}
     customers_served = {player.name: 0 for player in game_state.players}
     unmet_demand = 0
 
@@ -711,9 +753,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 # Check if supplier can serve this customer (cashier limit)
                 if customers_served[supplier.name] < supplier.get_max_customers():
                     price = supplier.prices.get(need.item_name, 0)
-                    revenue = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                    revenue, profit = supplier.sell_to_customer(need.item_name, need.quantity, price)
                     if revenue > 0:
                         daily_sales[supplier.name] += revenue
+                        daily_profits[supplier.name] += profit
                         customers_served[supplier.name] += 1
                 else:
                     # Supplier at cashier capacity, track unmet demand
@@ -721,6 +764,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             else:
                 # Track unmet demand
                 unmet_demand += need.quantity
+
+    # Step 5.5: Award XP based on profit (before wages)
+    level_ups = {}
+    for player in game_state.players:
+        profit = daily_profits[player.name]
+        if profit > 0:
+            leveled_up = player.add_experience(profit)
+            if leveled_up:
+                level_ups[player.name] = player.store_level
 
     # Step 6: Pay employee wages
     if show_details:
@@ -733,12 +785,20 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Step 7: Print daily summary
     if show_details:
-        print(f"\nDaily Sales:")
+        print(f"\nDaily Results:")
         for player in game_state.players:
             sales = daily_sales[player.name]
+            profit = daily_profits[player.name]
             served = customers_served[player.name]
             max_served = player.get_max_customers()
-            print(f"  {player.name}: ${sales:.2f} | Customers: {served}/{max_served} | Cash: ${player.cash:.2f}")
+            xp_needed = player.get_xp_for_next_level()
+            print(f"  {player.name}:")
+            print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | XP: {player.experience:.0f}/{xp_needed:.0f}")
+            print(f"    Customers: {served}/{max_served} | Cash: ${player.cash:.2f}")
+
+            # Show level up if occurred
+            if player.name in level_ups:
+                print(f"    🎉 LEVEL UP! Now level {level_ups[player.name]} (max {player.get_max_products()} products)")
 
         if unmet_demand > 0:
             print(f"\nUnmet demand: {unmet_demand} items")
@@ -803,7 +863,10 @@ def display_player_status(player: Player) -> None:
     print(f"YOUR STORE: {player.name}")
     print("=" * 60)
     print(f"Cash: ${player.cash:.2f}")
+
+    xp_needed = player.get_xp_for_next_level()
     print(f"\nStore Level: {player.store_level} (Max {player.get_max_products()} different products)")
+    print(f"Experience: {player.experience:.0f}/{xp_needed:.0f} XP")
 
     print(f"\nEmployees:")
     print(f"  Cashiers: {player.cashiers} (Max {player.get_max_customers()} customers/day)")
@@ -952,6 +1015,26 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                     quantity = int(quantity_str)
 
                     if quantity >= 0:
+                        # Check product limit BEFORE setting buy order
+                        if quantity > 0:
+                            # Count how many different products will have quantity > 0
+                            products_with_orders = 0
+                            for check_item in game_state.items:
+                                check_qty, _ = player.get_buy_order(check_item.name)
+                                # Count this item if it will have quantity > 0
+                                if check_item.name == item.name:
+                                    if quantity > 0:
+                                        products_with_orders += 1
+                                else:
+                                    if check_qty > 0:
+                                        products_with_orders += 1
+
+                            max_products = player.get_max_products()
+                            if products_with_orders > max_products:
+                                print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
+                                print(f"   Please increase store level or reduce other buy orders.")
+                                continue
+
                         player.set_buy_order(item.name, quantity, selected_vendor.name)
                         print(f"\n✓ Buy order set: {quantity} {item.name} from {selected_vendor.name}")
                     else:
