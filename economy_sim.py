@@ -30,7 +30,10 @@ class Item:
 class Vendor:
     """A vendor that sells items to players at wholesale prices."""
     name: str
-    items: Dict[str, float] = field(default_factory=dict)  # item_name -> wholesale_price
+    pricing_multiplier: float = 1.0  # Multiplier applied to market price (e.g., 0.7 = 70% of market)
+    selection_type: str = "all"  # "random_daily", "price_threshold", "all"
+    selection_params: float = 0.0  # For random_daily: count of items. For price_threshold: max price
+    items: Dict[str, float] = field(default_factory=dict)  # item_name -> wholesale_price (refreshed daily)
 
     def get_price(self, item_name: str) -> Optional[float]:
         """Get the wholesale price for an item from this vendor."""
@@ -288,35 +291,88 @@ def create_customers(num_customers: int) -> List[Customer]:
     return customers
 
 
-def create_vendors(items: List[Item]) -> List[Vendor]:
+def create_vendors() -> List[Vendor]:
     """
-    Create vendors that sell items at different wholesale prices.
-    Each vendor specializes in certain items with varying prices.
+    Create 5 vendors with different pricing and selection strategies.
+
+    Vendor inventory is refreshed daily based on their selection type.
     """
     vendors = []
 
-    # Vendor 1: Budget supplier - lower prices but limited selection
-    vendor1_items = {}
-    for item in items[:2]:  # First 2 items
-        vendor1_items[item.name] = item.base_cost * 0.9  # 10% cheaper than base cost
+    # Vendor 1: 70% of market price, 1 random item per day
+    vendors.append(Vendor(
+        name="Lucky Deal Trader",
+        pricing_multiplier=0.70,
+        selection_type="random_daily",
+        selection_params=1  # 1 item
+    ))
 
-    vendors.append(Vendor(name="Budget Supplies Co.", items=vendor1_items))
+    # Vendor 2: 95% of market price, 5 random items per day
+    vendors.append(Vendor(
+        name="Discount Wholesale Co.",
+        pricing_multiplier=0.95,
+        selection_type="random_daily",
+        selection_params=5  # 5 items
+    ))
 
-    # Vendor 2: Premium supplier - higher prices but all items
-    vendor2_items = {}
-    for item in items:
-        vendor2_items[item.name] = item.base_cost * 1.1  # 10% more expensive
+    # Vendor 3: Market price, all items under $20 market price
+    vendors.append(Vendor(
+        name="Budget Goods Ltd.",
+        pricing_multiplier=1.0,
+        selection_type="price_threshold",
+        selection_params=20.0  # $20 threshold
+    ))
 
-    vendors.append(Vendor(name="Premium Wholesale Inc.", items=vendor2_items))
+    # Vendor 4: 105% of market price, all items under $50 market price
+    vendors.append(Vendor(
+        name="Premium Select Inc.",
+        pricing_multiplier=1.05,
+        selection_type="price_threshold",
+        selection_params=50.0  # $50 threshold
+    ))
 
-    # Vendor 3: Specialty supplier - medium prices, some items
-    vendor3_items = {}
-    for item in items[1:]:  # Last 2 items
-        vendor3_items[item.name] = item.base_cost * 1.0  # Same as base cost
-
-    vendors.append(Vendor(name="Specialty Goods Ltd.", items=vendor3_items))
+    # Vendor 5: 110% of market price, all items available
+    vendors.append(Vendor(
+        name="Universal Supply Corp.",
+        pricing_multiplier=1.10,
+        selection_type="all",
+        selection_params=0  # No limit
+    ))
 
     return vendors
+
+
+def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_prices: Dict[str, float]) -> None:
+    """
+    Refresh vendor inventory based on their selection type and current market prices.
+
+    This should be called at the start of each day.
+    """
+    for vendor in vendors:
+        vendor.items.clear()
+
+        if vendor.selection_type == "random_daily":
+            # Select N random items
+            num_items = int(vendor.selection_params)
+            if num_items > 0 and items:
+                selected_items = random.sample(items, min(num_items, len(items)))
+                for item in selected_items:
+                    market_price = market_prices.get(item.name, item.base_price)
+                    vendor.items[item.name] = market_price * vendor.pricing_multiplier
+
+        elif vendor.selection_type == "price_threshold":
+            # Select all items where market price is under threshold
+            price_threshold = vendor.selection_params
+            for item in items:
+                market_price = market_prices.get(item.name, item.base_price)
+                if market_price < price_threshold:
+                    vendor.items[item.name] = market_price * vendor.pricing_multiplier
+
+        elif vendor.selection_type == "all":
+            # Include all items
+            for item in items:
+                market_price = market_prices.get(item.name, item.base_price)
+                vendor.items[item.name] = market_price * vendor.pricing_multiplier
 
 
 def initialize_market_prices(items: List[Item]) -> Dict[str, float]:
@@ -415,10 +471,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     Steps:
     1. Apply daily price fluctuations to market
-    2. Let AI players purchase items and adjust prices
-    3. For each customer, generate needs and make purchases
-    4. Track statistics
-    5. Advance the day counter
+    2. Refresh vendor inventory based on new market prices
+    3. Let AI players purchase items and adjust prices
+    4. For each customer, generate needs and make purchases
+    5. Track statistics
+    6. Advance the day counter
 
     Returns dictionary of daily sales per player.
     """
@@ -429,7 +486,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 1: Apply price fluctuations
     apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
 
-    # Step 2: AI player decisions (production / pricing)
+    # Step 2: Refresh vendor inventory based on new market prices
+    refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
+
+    # Step 3: AI player decisions (production / pricing)
     for player in game_state.players:
         if player != game_state.human_player:  # Only automate AI players
             auto_production_strategy(player, game_state.items, game_state.vendors)
@@ -439,7 +499,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     daily_sales = {player.name: 0.0 for player in game_state.players}
     unmet_demand = 0
 
-    # Step 3: Simulate customers
+    # Step 4: Simulate customers
     for customer in game_state.customers:
         needs = customer.generate_daily_needs(game_state.items)
 
@@ -454,7 +514,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 # Track unmet demand
                 unmet_demand += need.quantity
 
-    # Step 4: Print daily summary
+    # Step 5: Print daily summary
     if show_details:
         print(f"\nDaily Sales:")
         for player in game_state.players:
@@ -464,7 +524,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if unmet_demand > 0:
             print(f"\nUnmet demand: {unmet_demand} items")
 
-    # Step 5: Advance day counter
+    # Step 6: Advance day counter
     game_state.day += 1
 
     return daily_sales
@@ -489,29 +549,33 @@ def display_market_table(game_state: GameState) -> None:
 
 def display_vendor_table(game_state: GameState) -> None:
     """Display all vendors and their prices."""
-    print("\n" + "=" * 60)
-    print("VENDOR PRICE TABLE")
-    print("=" * 60)
+    print("\n" + "=" * 80)
+    print("VENDOR INFORMATION")
+    print("=" * 80)
 
-    # Header
-    header = f"{'Vendor':<25}"
-    for item in game_state.items:
-        header += f"{item.name:>11}"
-    print(header)
-    print("-" * 60)
+    for i, vendor in enumerate(game_state.vendors, 1):
+        print(f"\n{i}. {vendor.name}")
 
-    # Vendor rows
-    for vendor in game_state.vendors:
-        row = f"{vendor.name:<25}"
-        for item in game_state.items:
-            price = vendor.get_price(item.name)
-            if price:
-                row += f"${price:>10.2f}"
-            else:
-                row += f"{'N/A':>11}"
-        print(row)
+        # Display vendor strategy
+        if vendor.selection_type == "random_daily":
+            print(f"   Strategy: {int(vendor.selection_params)} random item(s) per day")
+        elif vendor.selection_type == "price_threshold":
+            print(f"   Strategy: All items under ${vendor.selection_params:.2f} market price")
+        elif vendor.selection_type == "all":
+            print(f"   Strategy: All items available")
 
-    print("=" * 60)
+        print(f"   Pricing: {vendor.pricing_multiplier*100:.0f}% of market price")
+
+        # Display current inventory
+        print(f"   Current stock ({len(vendor.items)} items):")
+        if vendor.items:
+            for item_name, price in sorted(vendor.items.items()):
+                market_price = game_state.market_prices.get(item_name, 0)
+                print(f"      - {item_name}: ${price:.2f} (market: ${market_price:.2f})")
+        else:
+            print(f"      (no items available)")
+
+    print("=" * 80)
 
 
 def display_player_status(player: Player) -> None:
@@ -545,7 +609,7 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
 
         display_vendor_table(game_state)
 
-        print("\nAvailable Vendors:")
+        print("\nSelect Vendor:")
         for i, vendor in enumerate(game_state.vendors, 1):
             print(f"  {i}. {vendor.name}")
         print(f"  0. Back to Main Menu")
@@ -752,9 +816,12 @@ def run_game() -> None:
 
     # Initialize items, vendors, customers
     items = create_default_items()
-    vendors = create_vendors(items)
+    vendors = create_vendors()
     customers = create_customers(config.customers_per_day)
     market_prices = initialize_market_prices(items)
+
+    # Initialize vendor inventory for day 1
+    refresh_vendor_inventory(vendors, items, market_prices)
 
     # Create human player and AI players
     human_player = Player(name=player_name, cash=config.starting_cash)
