@@ -47,6 +47,21 @@ class Player:
     cash: float = 0.0
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
+    buy_orders: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (quantity, vendor_name)
+
+    def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
+        """
+        Set a buy order for an item: how many to buy and from which vendor.
+        If quantity is 0, the item will be skipped during buying.
+        """
+        self.buy_orders[item_name] = (quantity, vendor_name)
+
+    def get_buy_order(self, item_name: str) -> tuple:
+        """
+        Get the buy order for an item.
+        Returns (quantity, vendor_name) or (0, "") if not set.
+        """
+        return self.buy_orders.get(item_name, (0, ""))
 
     def set_price(self, item_name: str, price: float) -> None:
         """
@@ -416,36 +431,101 @@ def apply_daily_price_fluctuation(market_prices: Dict[str, float], items: List[I
 
 
 # -------------------------------------------------------------------
+# Buy order execution
+# -------------------------------------------------------------------
+
+def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
+    """
+    Execute a player's buy orders, purchasing from cheapest to most expensive items.
+
+    For vendors with random daily selection (vendors 1 & 2), fallback to cheapest
+    available vendor if the selected vendor doesn't have the item.
+
+    Returns a dictionary of items purchased: {item_name: quantity_bought}
+    """
+    purchases = {}
+
+    # Get all non-zero buy orders
+    active_orders = []
+    for item_name, (quantity, vendor_name) in player.buy_orders.items():
+        if quantity > 0:
+            # Find the vendor
+            vendor = game_state.get_vendor(vendor_name)
+            if vendor:
+                # Get the price from this vendor (might be None if item not available)
+                price = vendor.get_price(item_name)
+
+                # For random vendors, check if item is available, fallback if not
+                if vendor.selection_type == "random_daily" and price is None:
+                    # Find cheapest vendor that has this item
+                    cheapest_vendor = None
+                    cheapest_price = float('inf')
+
+                    for v in game_state.vendors:
+                        v_price = v.get_price(item_name)
+                        if v_price and v_price < cheapest_price:
+                            cheapest_price = v_price
+                            cheapest_vendor = v
+
+                    if cheapest_vendor:
+                        vendor = cheapest_vendor
+                        price = cheapest_price
+
+                if price is not None:
+                    active_orders.append((item_name, quantity, vendor, price))
+
+    # Sort by price (cheapest first)
+    active_orders.sort(key=lambda x: x[3])
+
+    # Execute orders in order
+    for item_name, quantity, vendor, price in active_orders:
+        success = player.purchase_from_vendor(vendor, item_name, quantity)
+        if success:
+            purchases[item_name] = quantity
+        else:
+            # Try to buy as many as possible with remaining cash
+            max_affordable = int(player.cash / price)
+            if max_affordable > 0:
+                partial_success = player.purchase_from_vendor(vendor, item_name, max_affordable)
+                if partial_success:
+                    purchases[item_name] = max_affordable
+
+    return purchases
+
+
+# -------------------------------------------------------------------
 # Player strategies
 # -------------------------------------------------------------------
 
-def auto_production_strategy(player: Player, items: List[Item], vendors: List[Vendor]) -> None:
+def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendor]) -> None:
     """
-    Automatically purchase items for AI players from vendors.
+    Automatically set up buy orders for AI players.
 
-    Each day, player tries to maintain inventory by purchasing from cheapest vendor.
+    AI players will buy to maintain inventory of at least 10 units per item,
+    always choosing the cheapest available vendor.
     """
     for item in items:
         current_inventory = player.inventory.get(item.name, 0)
 
         # Try to maintain inventory of at least 10 units per item
         target_inventory = 10
-        if current_inventory < target_inventory:
-            quantity_to_purchase = target_inventory - current_inventory
+        quantity_to_buy = max(0, target_inventory - current_inventory)
 
-            # Find cheapest vendor for this item
-            cheapest_vendor = None
-            cheapest_price = float('inf')
+        # Find cheapest vendor for this item
+        cheapest_vendor = None
+        cheapest_price = float('inf')
 
-            for vendor in vendors:
-                vendor_price = vendor.get_price(item.name)
-                if vendor_price and vendor_price < cheapest_price:
-                    cheapest_price = vendor_price
-                    cheapest_vendor = vendor
+        for vendor in vendors:
+            vendor_price = vendor.get_price(item.name)
+            if vendor_price and vendor_price < cheapest_price:
+                cheapest_price = vendor_price
+                cheapest_vendor = vendor
 
-            # Purchase from cheapest vendor if found
-            if cheapest_vendor:
-                player.purchase_from_vendor(cheapest_vendor, item.name, quantity_to_purchase)
+        # Set buy order
+        if cheapest_vendor and quantity_to_buy > 0:
+            player.set_buy_order(item.name, quantity_to_buy, cheapest_vendor.name)
+        else:
+            player.set_buy_order(item.name, 0, "")
 
 
 def auto_pricing_strategy(player: Player, market_prices: Dict[str, float]) -> None:
@@ -472,10 +552,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     Steps:
     1. Apply daily price fluctuations to market
     2. Refresh vendor inventory based on new market prices
-    3. Let AI players purchase items and adjust prices
-    4. For each customer, generate needs and make purchases
-    5. Track statistics
-    6. Advance the day counter
+    3. Execute buy orders for all players (from cheapest to most expensive)
+    4. Let AI players adjust prices
+    5. For each customer, generate needs and make purchases
+    6. Track statistics
+    7. Advance the day counter
 
     Returns dictionary of daily sales per player.
     """
@@ -489,10 +570,27 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 2: Refresh vendor inventory based on new market prices
     refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
 
-    # Step 3: AI player decisions (production / pricing)
+    # Step 3: Execute buy orders for ALL players
+    if show_details:
+        print("\nExecuting buy orders...")
+
+    for player in game_state.players:
+        purchases = execute_buy_orders(player, game_state)
+        if show_details and purchases:
+            total_spent = sum(
+                game_state.get_vendor(player.get_buy_order(item)[1]).get_price(item) * qty
+                if game_state.get_vendor(player.get_buy_order(item)[1])
+                else 0
+                for item, qty in purchases.items()
+            )
+            print(f"  {player.name}: Purchased {sum(purchases.values())} items")
+
+    # Step 4: AI player decisions (pricing only, buying is handled by orders)
     for player in game_state.players:
         if player != game_state.human_player:  # Only automate AI players
-            auto_production_strategy(player, game_state.items, game_state.vendors)
+            # Set up AI buy orders if not already set
+            if not player.buy_orders:
+                auto_setup_buy_orders(player, game_state.items, game_state.vendors)
             auto_pricing_strategy(player, game_state.market_prices)
 
     # Track daily statistics
@@ -670,6 +768,73 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def buy_order_menu(game_state: GameState, player: Player) -> None:
+    """Menu for setting buy orders (quantity and vendor selection per item)."""
+    while True:
+        print("\n" + "=" * 80)
+        print("BUY ORDER MENU - Configure Automatic Purchasing")
+        print("=" * 80)
+        print("\nCurrent Buy Orders:")
+        print(f"{'Item':<15} {'Quantity':>10} {'Vendor':<30}")
+        print("-" * 80)
+
+        for item in game_state.items:
+            quantity, vendor_name = player.get_buy_order(item.name)
+            vendor_display = vendor_name if vendor_name else "(none)"
+            print(f"{item.name:<15} {quantity:>10} {vendor_display:<30}")
+
+        print("\nSelect item to configure:")
+        for i, item in enumerate(game_state.items, 1):
+            print(f"  {i}. {item.name}")
+        print(f"  0. Back to Main Menu")
+
+        try:
+            choice = input(f"\nSelect item (0-{len(game_state.items)}): ")
+            choice_num = int(choice)
+
+            if choice_num == 0:
+                break
+
+            if 1 <= choice_num <= len(game_state.items):
+                item = game_state.items[choice_num - 1]
+
+                # Show vendor options
+                print(f"\n=== Configuring Buy Order for {item.name} ===")
+                print("\nAvailable Vendors:")
+                available_vendors = []
+                for i, vendor in enumerate(game_state.vendors, 1):
+                    price = vendor.get_price(item.name)
+                    if price:
+                        print(f"  {i}. {vendor.name} - ${price:.2f}")
+                        available_vendors.append((i, vendor))
+                    else:
+                        status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
+                        print(f"  {i}. {vendor.name} - {status}")
+                        available_vendors.append((i, vendor))
+
+                vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}): ")
+                vendor_num = int(vendor_choice)
+
+                if 1 <= vendor_num <= len(game_state.vendors):
+                    selected_vendor = game_state.vendors[vendor_num - 1]
+
+                    quantity_str = input(f"Enter quantity to buy (0 to skip): ")
+                    quantity = int(quantity_str)
+
+                    if quantity >= 0:
+                        player.set_buy_order(item.name, quantity, selected_vendor.name)
+                        print(f"\n✓ Buy order set: {quantity} {item.name} from {selected_vendor.name}")
+                    else:
+                        print("\n✗ Quantity must be non-negative!")
+                else:
+                    print("\n✗ Invalid vendor selection!")
+            else:
+                print("\n✗ Invalid item selection!")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+
+
 def pricing_menu(game_state: GameState, player: Player) -> None:
     """Menu for setting prices."""
     while True:
@@ -735,7 +900,7 @@ def main_menu(game_state: GameState) -> bool:
         print("  1. Pass Day (Simulate)")
         print("  2. View Market Prices")
         print("  3. View Vendors")
-        print("  4. Purchase from Vendors")
+        print("  4. Configure Buy Orders")
         print("  5. Set Your Prices")
         print("  6. View Your Store Status")
         print("  7. View Competitor Status")
@@ -760,7 +925,7 @@ def main_menu(game_state: GameState) -> bool:
                 display_vendor_table(game_state)
                 input("\nPress Enter to continue...")
             elif choice_num == 4:
-                vendor_menu(game_state, player)
+                buy_order_menu(game_state, player)
             elif choice_num == 5:
                 pricing_menu(game_state, player)
             elif choice_num == 6:
