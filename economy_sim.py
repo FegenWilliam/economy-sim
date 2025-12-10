@@ -245,6 +245,8 @@ class Player:
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
     purchased_upgrades: List['Upgrade'] = field(default_factory=list)  # Upgrades bought by this player
     is_human: bool = False  # Whether this is a human-controlled player
+    # Sales tracking for AI pricing strategy (yesterday's results)
+    daily_sales_data: Dict[str, Dict[str, any]] = field(default_factory=dict)  # item_name -> {units_sold, revenue, sold_out}
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -536,22 +538,29 @@ class Customer:
         self,
         players: List[Player],
         item_name: str,
-        quantity: int
+        quantity: int,
+        market_prices: Dict[str, float]
     ) -> Optional[Player]:
         """
         Decide which player to buy from for a given item and quantity.
 
         Chooses the player with the lowest price who has at least some stock.
+        Customers will only buy if the price is within 15% of market price.
         Breaks ties randomly.
         """
         candidates = []
+        market_price = market_prices.get(item_name, float('inf'))
+        max_acceptable_price = market_price * 1.15  # 15% above market price
 
         for player in players:
             # Check if player has this item in stock
             if player.inventory.get(item_name, 0) > 0:
                 # Check if player has set a price
                 if item_name in player.prices:
-                    candidates.append((player, player.prices[item_name]))
+                    price = player.prices[item_name]
+                    # Only consider if price is within 15% of market price
+                    if price <= max_acceptable_price:
+                        candidates.append((player, price))
 
         if not candidates:
             return None
@@ -999,19 +1008,71 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
             player.set_buy_order(item.name, 0, "")
 
 
-def auto_pricing_strategy(player: Player, market_prices: Dict[str, float]) -> None:
+def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items: List[Item] = None) -> None:
     """
-    Automatically set prices for AI players based on current market prices.
+    Intelligent pricing strategy for AI players.
 
-    Uses market price with a small random variation to simulate competition.
-    Rounds to nearest $0.25 for natural-looking prices.
+    Strategy:
+    - Never sell at a loss (price must be > cost)
+    - Adjust prices based on previous day's sales performance
+    - Consider unmet demand signals
+    - Compete on price when inventory isn't moving
+    - Raise prices when items sold out or high demand
     """
+    # Build a lookup for item base costs
+    item_costs_lookup = {}
+    if items:
+        for item in items:
+            item_costs_lookup[item.name] = item.base_cost
+
     for item_name, market_price in market_prices.items():
-        # Set price to market_price with a random variation of +/- 5%
-        variation = random.uniform(0.95, 1.05)
-        price = market_price * variation
-        # Round to nearest $0.25 for more natural prices
+        # Get the cost this player paid for the item (or base cost as fallback)
+        cost = player.item_costs.get(item_name, item_costs_lookup.get(item_name, 0))
+
+        # Get yesterday's sales data if available
+        sales_data = player.daily_sales_data.get(item_name, {})
+        units_sold = sales_data.get('units_sold', 0)
+        sold_out = sales_data.get('sold_out', False)
+        unmet_demand = sales_data.get('unmet_demand', 0)
+
+        # Get current price (if set) for incremental adjustments
+        current_price = player.prices.get(item_name, market_price)
+
+        # Determine pricing strategy based on sales performance
+        if not sales_data:
+            # No sales history - price competitively near market price
+            # Start slightly below market to attract customers
+            price = market_price * random.uniform(0.97, 1.03)
+        elif sold_out:
+            # Item sold out - raise price to increase profit margin
+            # Increase by 5-10% to test price ceiling
+            price = current_price * random.uniform(1.05, 1.10)
+        elif units_sold == 0:
+            # Didn't sell any - price is too high, lower it
+            # Drop by 5-10% to become more competitive
+            price = current_price * random.uniform(0.90, 0.95)
+        elif unmet_demand > 5:
+            # High unmet demand - raise prices to capture more value
+            price = current_price * random.uniform(1.03, 1.08)
+        else:
+            # Selling moderately - make small adjustments
+            # Slight random variation to stay competitive
+            price = current_price * random.uniform(0.98, 1.02)
+
+        # CRITICAL: Never sell below cost (ensure at least 10% margin)
+        min_profitable_price = cost * 1.10
+        if price < min_profitable_price:
+            price = min_profitable_price
+
+        # Don't price too far above market (customers won't buy >15% above market)
+        # Stay within 10% of market to be competitive
+        max_price = market_price * 1.10
+        if price > max_price:
+            price = max_price
+
+        # Round to nearest $0.25 for natural-looking prices
         price = round(price * 4) / 4
+
         player.set_price(item_name, price)
 
 
@@ -1223,7 +1284,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if not player.is_human:  # Only automate AI players
             # Update AI buy orders every day based on current inventory
             auto_setup_buy_orders(player, game_state.items, game_state.vendors, game_state.market_prices)
-            auto_pricing_strategy(player, game_state.market_prices)
+            auto_pricing_strategy(player, game_state.market_prices, game_state.items)
             # AI players can now purchase upgrades strategically
             auto_purchase_upgrades(player, game_state)
 
@@ -1253,6 +1314,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     unmet_demand = 0
     unmet_uncapped_demand = 0
 
+    # Track per-item sales data for pricing strategy
+    # player_name -> item_name -> {units_sold, revenue, starting_inventory}
+    per_item_sales = {player.name: {} for player in game_state.players}
+    # Track starting inventory before sales for each player/item
+    for player in game_state.players:
+        for item_name, quantity in player.inventory.items():
+            per_item_sales[player.name][item_name] = {
+                'units_sold': 0,
+                'revenue': 0.0,
+                'starting_inventory': quantity
+            }
+
+    # Track unmet demand per item (for pricing signals)
+    unmet_demand_per_item = {}  # item_name -> quantity
+
     # Step 5: Simulate customers with cashier limits
     # Generate all regular customers for the day
     all_customers = []
@@ -1266,7 +1342,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         needs = customer.generate_daily_needs(game_state.items)
 
         for need in needs:
-            supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity)
+            supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity, game_state.market_prices)
 
             if supplier:
                 # Check if supplier can serve this customer (cashier limit)
@@ -1277,12 +1353,24 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                         daily_sales[supplier.name] += revenue
                         daily_profits[supplier.name] += profit
                         customers_served[supplier.name] += 1
+
+                        # Track per-item sales
+                        if need.item_name not in per_item_sales[supplier.name]:
+                            per_item_sales[supplier.name][need.item_name] = {
+                                'units_sold': 0,
+                                'revenue': 0.0,
+                                'starting_inventory': 0
+                            }
+                        per_item_sales[supplier.name][need.item_name]['units_sold'] += need.quantity
+                        per_item_sales[supplier.name][need.item_name]['revenue'] += revenue
                 else:
                     # Supplier at cashier capacity, track unmet demand
                     unmet_demand += need.quantity
+                    unmet_demand_per_item[need.item_name] = unmet_demand_per_item.get(need.item_name, 0) + need.quantity
             else:
                 # Track unmet demand
                 unmet_demand += need.quantity
+                unmet_demand_per_item[need.item_name] = unmet_demand_per_item.get(need.item_name, 0) + need.quantity
 
     # Step 5.5: Process uncapped customers (no cashier limits)
     if uncapped_customer_count > 0:
@@ -1295,7 +1383,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             needs = customer.generate_daily_needs(game_state.items)
 
             for need in needs:
-                supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity)
+                supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity, game_state.market_prices)
 
                 if supplier:
                     # Uncapped customers bypass cashier limits
@@ -1305,9 +1393,20 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                         daily_sales[supplier.name] += revenue
                         daily_profits[supplier.name] += profit
                         uncapped_customers_served[supplier.name] += 1
+
+                        # Track per-item sales
+                        if need.item_name not in per_item_sales[supplier.name]:
+                            per_item_sales[supplier.name][need.item_name] = {
+                                'units_sold': 0,
+                                'revenue': 0.0,
+                                'starting_inventory': 0
+                            }
+                        per_item_sales[supplier.name][need.item_name]['units_sold'] += need.quantity
+                        per_item_sales[supplier.name][need.item_name]['revenue'] += revenue
                 else:
                     # Track unmet uncapped demand
                     unmet_uncapped_demand += need.quantity
+                    unmet_demand_per_item[need.item_name] = unmet_demand_per_item.get(need.item_name, 0) + need.quantity
 
     # Step 5.5: Calculate actual profits (Sales - Daily Spending, before wages)
     for player in game_state.players:
@@ -1356,6 +1455,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"\nUnmet regular demand: {unmet_demand} items")
         if unmet_uncapped_demand > 0:
             print(f"Unmet uncapped demand: {unmet_uncapped_demand} items")
+
+    # Step 7.5: Store per-item sales data for AI pricing strategy
+    for player in game_state.players:
+        player.daily_sales_data = {}
+        for item_name, data in per_item_sales[player.name].items():
+            # Check if item sold out (inventory reached 0)
+            current_inventory = player.inventory.get(item_name, 0)
+            sold_out = (data['starting_inventory'] > 0 and current_inventory == 0)
+
+            player.daily_sales_data[item_name] = {
+                'units_sold': data['units_sold'],
+                'revenue': data['revenue'],
+                'sold_out': sold_out,
+                'unmet_demand': unmet_demand_per_item.get(item_name, 0)
+            }
 
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
