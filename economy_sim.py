@@ -1208,7 +1208,12 @@ def weighted_random_sample(items: List[Item], demand_map: Dict[str, float], k: i
 def update_item_demand(game_state: GameState) -> List[str]:
     """
     Update demand for 1/4 of available products (rounded up).
-    Each selected item's demand changes by ±0.2 to 0.4.
+
+    First, resets extreme demand values to prevent long hype trains or slumps:
+    - Items at 2.0 (max) → reset to 1.0
+    - Items at 0.1 (min) → reset to 0.5
+
+    Then, randomly changes demand for 1/4 of items by ±0.2 to 0.4.
     Demand is clamped between 0.1 and 2.0.
 
     Returns list of item names that had demand changes.
@@ -1216,25 +1221,42 @@ def update_item_demand(game_state: GameState) -> List[str]:
     if not game_state.items:
         return []
 
-    # Calculate how many items to update (1/4 rounded up)
+    updated_items = []
+
+    # Step 1: Reset extreme demand values (prevents monotone hype trains/slumps)
+    for item in game_state.items:
+        current_demand = game_state.item_demand.get(item.name, 1.0)
+
+        if current_demand >= 2.0:
+            # Max demand → reset to normal
+            game_state.item_demand[item.name] = 1.0
+            updated_items.append(item.name)
+        elif current_demand <= 0.1:
+            # Min demand → boost to 0.5
+            game_state.item_demand[item.name] = 0.5
+            updated_items.append(item.name)
+
+    # Step 2: Apply random changes to 1/4 of items
     num_items_to_update = max(1, (len(game_state.items) + 3) // 4)  # Ceiling division
 
-    # Randomly select items to update
+    # Randomly select items to update (may include items already reset)
     items_to_update = random.sample(game_state.items, min(num_items_to_update, len(game_state.items)))
 
-    updated_items = []
     for item in items_to_update:
         # Generate random change between -0.4 and +0.4
         change = random.uniform(-0.4, 0.4)
 
-        # Get current demand (default to 1.0 if not set)
+        # Get current demand (may have been reset above)
         current_demand = game_state.item_demand.get(item.name, 1.0)
 
         # Apply change and clamp between 0.1 and 2.0
         new_demand = max(0.1, min(2.0, current_demand + change))
 
         game_state.item_demand[item.name] = new_demand
-        updated_items.append(item.name)
+
+        # Only add to updated_items if not already there
+        if item.name not in updated_items:
+            updated_items.append(item.name)
 
     return updated_items
 

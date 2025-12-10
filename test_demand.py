@@ -29,6 +29,28 @@ for i in range(3):
     for item_name in updated:
         print(f"    {item_name}: {game_state.item_demand[item_name]:.2f}")
 
+# Test 2.5: Test extreme value resets
+print("\nTest 2.5: Extreme value resets")
+# Set items to extreme values
+game_state.item_demand["Bread"] = 2.0  # Should reset to 1.0 next update
+game_state.item_demand["Milk"] = 0.1   # Should reset to 0.5 next update
+game_state.item_demand["Eggs"] = 1.5   # Normal value, no reset
+
+print("Before update:")
+for item in items:
+    print(f"  {item.name}: {game_state.item_demand[item.name]:.2f}")
+
+updated = update_item_demand(game_state)
+print("\nAfter update:")
+for item in items:
+    demand_val = game_state.item_demand[item.name]
+    indicator = ""
+    if item.name == "Bread" and demand_val == 1.0:
+        indicator = " ✓ (reset from 2.0)"
+    elif item.name == "Milk" and demand_val == 0.5:
+        indicator = " ✓ (reset from 0.1)"
+    print(f"  {item.name}: {demand_val:.2f}{indicator}")
+
 # Test 3: Test weighted selection
 print("\nTest 3: Weighted selection")
 # Set different demands
