@@ -1533,8 +1533,8 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
         if price > max_price:
             price = max_price
 
-        # Round to nearest $0.25 for natural-looking prices
-        price = round(price * 4) / 4
+        # Round to nearest $0.05 for natural-looking prices
+        price = round(price * 20) / 20
 
         player.set_price(item_name, price)
 
@@ -1875,44 +1875,97 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         customer_counted_at_store = {}
         customer_bought_anything = False
 
+        # NEW LOGIC: Sort needs by market price (most expensive first)
+        # Customer finds cheapest store for most expensive item, then stays there
+        needs_with_prices = []
         for need in needs:
-            # Get all valid suppliers sorted by price (cheapest first)
-            sorted_suppliers = customer.get_all_suppliers_sorted(game_state.players, need.item_name, need.quantity, game_state.market_prices)
+            market_price = game_state.market_prices.get(need.item_name, 0)
+            needs_with_prices.append((need, market_price))
 
-            # Try each supplier in order until we find one with capacity
-            purchase_made = False
-            for supplier in sorted_suppliers:
-                # Check if supplier can serve this customer (cashier limit)
-                if customers_served[supplier.name] < supplier.get_max_customers():
-                    price = supplier.prices.get(need.item_name, 0)
-                    revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price)
-                    if revenue > 0:
-                        daily_sales[supplier.name] += revenue
-                        daily_profits[supplier.name] += profit
+        # Sort by price descending (most expensive first)
+        needs_with_prices.sort(key=lambda x: x[1], reverse=True)
+        remaining_needs = [need for need, _ in needs_with_prices]
 
-                        # Only count each customer once per store (not once per item)
-                        if supplier.name not in customer_counted_at_store:
-                            customers_served[supplier.name] += 1
-                            customer_counted_at_store[supplier.name] = True
+        # Current supplier (the store customer is shopping at)
+        current_supplier = None
 
-                        # Track per-item sales
-                        if need.item_name not in per_item_sales[supplier.name]:
-                            per_item_sales[supplier.name][need.item_name] = {
-                                'units_sold': 0,
-                                'revenue': 0.0,
-                                'starting_inventory': 0
-                            }
-                        per_item_sales[supplier.name][need.item_name]['units_sold'] += actual_units_sold
-                        per_item_sales[supplier.name][need.item_name]['revenue'] += revenue
+        while remaining_needs:
+            # If no current supplier, find cheapest supplier for the most expensive remaining item
+            if current_supplier is None:
+                most_expensive_need = remaining_needs[0]
+                sorted_suppliers = customer.get_all_suppliers_sorted(
+                    game_state.players,
+                    most_expensive_need.item_name,
+                    most_expensive_need.quantity,
+                    game_state.market_prices
+                )
 
-                        purchase_made = True
-                        customer_bought_anything = True
-                        break  # Successfully purchased, move to next need
+                # Find a supplier with capacity
+                found_supplier = False
+                for supplier in sorted_suppliers:
+                    if customers_served[supplier.name] < supplier.get_max_customers():
+                        current_supplier = supplier
+                        found_supplier = True
+                        break
 
-            # If no supplier could fulfill the need (all at capacity or no stock)
-            if not purchase_made:
-                unmet_demand += need.quantity
-                unmet_demand_per_item[need.item_name] = unmet_demand_per_item.get(need.item_name, 0) + need.quantity
+                if not found_supplier:
+                    # No supplier available, mark as unmet and move to next item
+                    unmet_demand += most_expensive_need.quantity
+                    unmet_demand_per_item[most_expensive_need.item_name] = (
+                        unmet_demand_per_item.get(most_expensive_need.item_name, 0) + most_expensive_need.quantity
+                    )
+                    remaining_needs.remove(most_expensive_need)
+                    continue
+
+            # Try to purchase as many items as possible from current supplier
+            purchased_needs = []
+            for need in remaining_needs:
+                # Check if current supplier has this item
+                if (need.item_name in current_supplier.inventory and
+                    current_supplier.inventory[need.item_name] > 0 and
+                    need.item_name in current_supplier.prices):
+
+                    # Check if price is acceptable
+                    market_price = game_state.market_prices.get(need.item_name, float('inf'))
+                    max_acceptable_price = market_price * 1.15
+                    supplier_price = current_supplier.prices[need.item_name]
+
+                    if supplier_price <= max_acceptable_price:
+                        # Purchase from current supplier
+                        revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
+                            need.item_name, need.quantity, supplier_price
+                        )
+
+                        if revenue > 0:
+                            # Track sales
+                            daily_sales[current_supplier.name] += revenue
+                            daily_profits[current_supplier.name] += profit
+
+                            # Count customer at this store (only once)
+                            if current_supplier.name not in customer_counted_at_store:
+                                customers_served[current_supplier.name] += 1
+                                customer_counted_at_store[current_supplier.name] = True
+
+                            # Track per-item sales
+                            if need.item_name not in per_item_sales[current_supplier.name]:
+                                per_item_sales[current_supplier.name][need.item_name] = {
+                                    'units_sold': 0,
+                                    'revenue': 0.0,
+                                    'starting_inventory': 0
+                                }
+                            per_item_sales[current_supplier.name][need.item_name]['units_sold'] += actual_units_sold
+                            per_item_sales[current_supplier.name][need.item_name]['revenue'] += revenue
+
+                            customer_bought_anything = True
+                            purchased_needs.append(need)
+
+            # Remove purchased items from remaining needs
+            for need in purchased_needs:
+                remaining_needs.remove(need)
+
+            # If there are still remaining needs, reset supplier to force finding cheapest for next item
+            if remaining_needs:
+                current_supplier = None
 
         # Track customer type statistics
         if customer.customer_type in customer_type_stats['bought_something']:
