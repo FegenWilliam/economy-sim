@@ -1214,13 +1214,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     for player in game_state.players:
         purchases = execute_buy_orders(player, game_state)
         if show_details and purchases:
-            total_spent = sum(
-                game_state.get_vendor(player.get_buy_order(item)[1]).get_price(item) * qty
-                if game_state.get_vendor(player.get_buy_order(item)[1])
-                else 0
-                for item, qty in purchases.items()
-            )
-            print(f"  {player.name}: Purchased {sum(purchases.values())} items")
+            total_spent = 0
+            for item, qty in purchases.items():
+                vendor = game_state.get_vendor(player.get_buy_order(item)[1])
+                if vendor:
+                    price = vendor.get_price(item)
+                    if price is not None:
+                        total_spent += price * qty
+            print(f"  {player.name}: Purchased {sum(purchases.values())} items (spent ${total_spent:.2f})")
 
     # Step 4: AI player decisions (pricing, buying, and upgrades)
     for player in game_state.players:
