@@ -982,8 +982,10 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
                 cheapest_price = vendor_price
                 cheapest_vendor = vendor
 
-        # Set buy order
-        if cheapest_vendor and quantity_to_buy > 0:
+        # Only buy if available at a good price (≤ 100% of market price)
+        # This prevents AI from buying from expensive "Universal Supply" vendor
+        market_price = market_prices.get(item.name, item.base_price)
+        if cheapest_vendor and quantity_to_buy > 0 and cheapest_price <= market_price:
             player.set_buy_order(item.name, quantity_to_buy, cheapest_vendor.name)
         else:
             player.set_buy_order(item.name, 0, "")
