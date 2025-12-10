@@ -710,9 +710,10 @@ class Customer:
             elif self.customer_type == "kid":
                 self.budget = 10.0
 
-    def generate_daily_needs(self, available_items: List[Item], market_prices: Dict[str, float] = None) -> List[CustomerNeed]:
+    def generate_daily_needs(self, available_items: List[Item], market_prices: Dict[str, float] = None, item_demand: Dict[str, float] = None) -> List[CustomerNeed]:
         """
         Generate a random set of item needs for the day based on budget.
+        Uses item demand as weights for selection - higher demand items are more likely to be chosen.
 
         For uncapped customers: only buy 1 expensive item (base_price >= 100).
         For hoarder: buys 3-10 of 1 item only (budget $40).
@@ -724,14 +725,19 @@ class Customer:
         if not available_items:
             return []
 
+        # Default to equal demand if not provided
+        if item_demand is None:
+            item_demand = {}
+
         needs = []
 
         # Uncapped customers buy exactly 1 expensive item
         if self.customer_type == "uncapped":
             expensive_items = [item for item in available_items if item.base_price >= 100]
             if expensive_items:
-                selected_item = random.choice(expensive_items)
-                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+                selected_item = weighted_random_choice(expensive_items, item_demand)
+                if selected_item:
+                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
             return needs
 
         # Hoarder: buys 3-10 of 1 item only
@@ -739,10 +745,11 @@ class Customer:
             # Filter items that fit within budget for at least 3 units
             affordable_items = [item for item in available_items if item.base_price * 3 <= self.budget]
             if affordable_items:
-                selected_item = random.choice(affordable_items)
-                max_qty = min(10, int(self.budget / selected_item.base_price))
-                quantity = random.randint(3, max_qty)
-                needs.append(CustomerNeed(item_name=selected_item.name, quantity=quantity))
+                selected_item = weighted_random_choice(affordable_items, item_demand)
+                if selected_item:
+                    max_qty = min(10, int(self.budget / selected_item.base_price))
+                    quantity = random.randint(3, max_qty)
+                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=quantity))
             return needs
 
         # Rich Guy: buys only items that cost >$50 (uses market prices if available, else base price)
@@ -757,7 +764,7 @@ class Customer:
                 remaining_budget = self.budget
                 # Buy 1-3 different expensive items
                 num_item_types = random.randint(1, min(3, len(expensive_items)))
-                selected_items = random.sample(expensive_items, num_item_types)
+                selected_items = weighted_random_sample(expensive_items, item_demand, num_item_types)
 
                 for item in selected_items:
                     price = market_prices.get(item.name, item.base_price) if market_prices else item.base_price
@@ -777,8 +784,9 @@ class Customer:
                 cheap_items = [item for item in available_items if item.base_price < 10.0]
 
             if cheap_items:
-                selected_item = random.choice(cheap_items)
-                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+                selected_item = weighted_random_choice(cheap_items, item_demand)
+                if selected_item:
+                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
             return needs
 
         # A Kid: buys exactly 2 items that cost <$5
@@ -790,7 +798,7 @@ class Customer:
                 kid_items = [item for item in available_items if item.base_price < 5.0]
 
             if len(kid_items) >= 2:
-                selected_items = random.sample(kid_items, 2)
+                selected_items = weighted_random_sample(kid_items, item_demand, 2)
                 for item in selected_items:
                     needs.append(CustomerNeed(item_name=item.name, quantity=1))
             elif len(kid_items) == 1:
@@ -803,7 +811,7 @@ class Customer:
 
         # Decide how many different item types to buy (1 to 3)
         num_item_types = random.randint(1, min(3, len(available_items)))
-        selected_items = random.sample(available_items, num_item_types)
+        selected_items = weighted_random_sample(available_items, item_demand, num_item_types)
 
         for item in selected_items:
             # Calculate max quantity we can afford
@@ -924,6 +932,7 @@ class GameState:
     current_player_index: int = 0  # For multiplayer turn management
     unlocked_product_indices: List[int] = field(default_factory=list)  # Indices of products from catalog that have been unlocked
     event_price_changes: Dict[str, float] = field(default_factory=dict)  # Tracks items with temporary event prices and their original prices
+    item_demand: Dict[str, float] = field(default_factory=dict)  # item_name -> demand multiplier (0.1 to 2.0)
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -1006,6 +1015,7 @@ def unlock_new_product(game_state: GameState) -> Optional[Item]:
     game_state.items.append(new_item)
     game_state.unlocked_product_indices.append(selected_index)
     game_state.market_prices[new_item.name] = new_item.base_price
+    game_state.item_demand[new_item.name] = 1.0  # Initialize demand at normal level
 
     return new_item
 
@@ -1130,6 +1140,125 @@ def initialize_market_prices(items: List[Item]) -> Dict[str, float]:
     for item in items:
         market_prices[item.name] = item.base_price
     return market_prices
+
+
+def initialize_item_demand(items: List[Item]) -> Dict[str, float]:
+    """
+    Initialize demand for all items. Starts at 1.0 (normal demand).
+    Demand ranges from 0.1 (lowest) to 2.0 (highest).
+    """
+    demand = {}
+    for item in items:
+        demand[item.name] = 1.0
+    return demand
+
+
+def weighted_random_choice(items: List[Item], demand_map: Dict[str, float]) -> Optional[Item]:
+    """
+    Select a random item from the list using demand as weights.
+    Higher demand = higher probability of being selected.
+
+    Returns None if items list is empty.
+    """
+    if not items:
+        return None
+
+    # Get weights for each item (default to 1.0 if not in demand_map)
+    weights = [demand_map.get(item.name, 1.0) for item in items]
+
+    # Use random.choices which supports weights
+    selected = random.choices(items, weights=weights, k=1)
+    return selected[0] if selected else None
+
+
+def weighted_random_sample(items: List[Item], demand_map: Dict[str, float], k: int) -> List[Item]:
+    """
+    Select k random items from the list using demand as weights (without replacement).
+    Higher demand = higher probability of being selected.
+
+    Returns a list of selected items (may be fewer than k if not enough items available).
+    """
+    if not items or k <= 0:
+        return []
+
+    k = min(k, len(items))  # Can't sample more than available
+
+    # Get weights for each item
+    weights = [demand_map.get(item.name, 1.0) for item in items]
+
+    # Sample without replacement
+    # We'll use a manual approach since random.sample doesn't support weights
+    selected = []
+    remaining_items = items.copy()
+    remaining_weights = weights.copy()
+
+    for _ in range(k):
+        # Choose one item based on weights
+        chosen = random.choices(remaining_items, weights=remaining_weights, k=1)[0]
+        selected.append(chosen)
+
+        # Remove chosen item and its weight
+        idx = remaining_items.index(chosen)
+        remaining_items.pop(idx)
+        remaining_weights.pop(idx)
+
+    return selected
+
+
+def update_item_demand(game_state: GameState) -> List[str]:
+    """
+    Update demand for 1/4 of available products (rounded up).
+
+    First, resets extreme demand values to prevent long hype trains or slumps:
+    - Items at 2.0 (max) → reset to 1.0
+    - Items at 0.1 (min) → reset to 0.5
+
+    Then, randomly changes demand for 1/4 of items by ±0.2 to 0.4.
+    Demand is clamped between 0.1 and 2.0.
+
+    Returns list of item names that had demand changes.
+    """
+    if not game_state.items:
+        return []
+
+    updated_items = []
+
+    # Step 1: Reset extreme demand values (prevents monotone hype trains/slumps)
+    for item in game_state.items:
+        current_demand = game_state.item_demand.get(item.name, 1.0)
+
+        if current_demand >= 2.0:
+            # Max demand → reset to normal
+            game_state.item_demand[item.name] = 1.0
+            updated_items.append(item.name)
+        elif current_demand <= 0.1:
+            # Min demand → boost to 0.5
+            game_state.item_demand[item.name] = 0.5
+            updated_items.append(item.name)
+
+    # Step 2: Apply random changes to 1/4 of items
+    num_items_to_update = max(1, (len(game_state.items) + 3) // 4)  # Ceiling division
+
+    # Randomly select items to update (may include items already reset)
+    items_to_update = random.sample(game_state.items, min(num_items_to_update, len(game_state.items)))
+
+    for item in items_to_update:
+        # Generate random change between -0.4 and +0.4
+        change = random.uniform(-0.4, 0.4)
+
+        # Get current demand (may have been reset above)
+        current_demand = game_state.item_demand.get(item.name, 1.0)
+
+        # Apply change and clamp between 0.1 and 2.0
+        new_demand = max(0.1, min(2.0, current_demand + change))
+
+        game_state.item_demand[item.name] = new_demand
+
+        # Only add to updated_items if not already there
+        if item.name not in updated_items:
+            updated_items.append(item.name)
+
+    return updated_items
 
 
 def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
@@ -1708,6 +1837,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"\n🎁 NEW PRODUCT UNLOCKED: {new_product.name} (${new_product.base_price:.2f})")
             print(f"   Total products available: {len(game_state.items)}")
 
+    # Step 0.5: Update item demand daily
+    updated_items = update_item_demand(game_state)
+    if show_details and updated_items:
+        print(f"\n📊 DEMAND UPDATE: {len(updated_items)} items had demand changes")
+        # Show top 3 demand changes if there are any
+        demand_changes = [(item_name, game_state.item_demand[item_name]) for item_name in updated_items[:3]]
+        for item_name, demand in demand_changes:
+            if demand >= 1.5:
+                emoji = "📈"
+            elif demand <= 0.5:
+                emoji = "📉"
+            else:
+                emoji = "➡️"
+            print(f"   {emoji} {item_name}: {demand:.2f}x demand")
+
     # Step 1: Reset any event price changes from previous day
     if game_state.event_price_changes:
         for item_name, original_price in game_state.event_price_changes.items():
@@ -1865,7 +2009,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Process each regular customer (with cashier limits)
     for customer in all_customers:
-        needs = customer.generate_daily_needs(game_state.items, game_state.market_prices)
+        needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
 
         # Track demand for each item the customer wants
         for need in needs:
@@ -1986,7 +2130,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             uncapped_customers.append(customer)
 
         for customer in uncapped_customers:
-            needs = customer.generate_daily_needs(game_state.items, game_state.market_prices)
+            needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
 
             # Track demand for each item the uncapped customer wants
             for need in needs:
@@ -3125,6 +3269,7 @@ def run_game() -> None:
         items = create_default_items()
         vendors = create_vendors()
         market_prices = initialize_market_prices(items)
+        item_demand = initialize_item_demand(items)
 
         # Initialize vendor inventory for day 1
         refresh_vendor_inventory(vendors, items, market_prices)
@@ -3149,6 +3294,7 @@ def run_game() -> None:
             available_upgrades=available_upgrades,
             current_player_index=0,
             unlocked_product_indices=[0, 1, 2],  # Start with first 3 products unlocked
+            item_demand=item_demand,
         )
 
         # Set global game state for signal handler
