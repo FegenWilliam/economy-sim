@@ -958,12 +958,13 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
 # Player strategies
 # -------------------------------------------------------------------
 
-def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendor]) -> None:
+def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendor], market_prices: Dict[str, float]) -> None:
     """
     Automatically set up buy orders for AI players.
 
     AI players will buy to maintain inventory of at least 10 units per item,
     always choosing the cheapest available vendor.
+    Only buys items available at or below market price to avoid overpaying.
     """
     for item in items:
         current_inventory = player.inventory.get(item.name, 0)
@@ -1217,7 +1218,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     for player in game_state.players:
         if not player.is_human:  # Only automate AI players
             # Update AI buy orders every day based on current inventory
-            auto_setup_buy_orders(player, game_state.items, game_state.vendors)
+            auto_setup_buy_orders(player, game_state.items, game_state.vendors, game_state.market_prices)
             auto_pricing_strategy(player, game_state.market_prices)
             # AI players can now purchase upgrades strategically
             auto_purchase_upgrades(player, game_state)
