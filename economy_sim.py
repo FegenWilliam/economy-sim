@@ -1090,7 +1090,8 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
             player.set_buy_order(item.name, 0, "")
 
 
-def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items: List[Item] = None) -> None:
+def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items: List[Item] = None,
+                         all_players: List[Player] = None, vendors: List[Vendor] = None) -> None:
     """
     Intelligent pricing strategy for AI players.
 
@@ -1100,12 +1101,33 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
     - Consider unmet demand signals
     - Compete on price when inventory isn't moving
     - Raise prices when items sold out or high demand
+    - Consider competitor prices (human and AI)
+    - Consider vendor wholesale prices to understand market dynamics
     """
     # Build a lookup for item base costs
     item_costs_lookup = {}
     if items:
         for item in items:
             item_costs_lookup[item.name] = item.base_cost
+
+    # Build competitor price lookup (prices set by other players)
+    competitor_prices = {}  # item_name -> list of competitor prices
+    if all_players:
+        for other_player in all_players:
+            if other_player.name != player.name:  # Don't include self
+                for item_name, price in other_player.prices.items():
+                    if item_name not in competitor_prices:
+                        competitor_prices[item_name] = []
+                    competitor_prices[item_name].append(price)
+
+    # Build vendor price lookup (wholesale prices from vendors)
+    vendor_prices = {}  # item_name -> list of vendor wholesale prices
+    if vendors:
+        for vendor in vendors:
+            for item_name, price in vendor.items.items():
+                if item_name not in vendor_prices:
+                    vendor_prices[item_name] = []
+                vendor_prices[item_name].append(price)
 
     for item_name, market_price in market_prices.items():
         # Get the cost this player paid for the item (or base cost as fallback)
@@ -1120,26 +1142,60 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
         # Get current price (if set) for incremental adjustments
         current_price = player.prices.get(item_name, market_price)
 
-        # Determine pricing strategy based on sales performance
+        # Analyze competitor prices
+        comp_prices = competitor_prices.get(item_name, [])
+        min_competitor_price = min(comp_prices) if comp_prices else None
+        avg_competitor_price = sum(comp_prices) / len(comp_prices) if comp_prices else None
+        max_competitor_price = max(comp_prices) if comp_prices else None
+
+        # Analyze vendor prices (to understand supply costs)
+        vend_prices = vendor_prices.get(item_name, [])
+        min_vendor_price = min(vend_prices) if vend_prices else None
+        avg_vendor_price = sum(vend_prices) / len(vend_prices) if vend_prices else None
+
+        # Determine pricing strategy based on sales performance and competition
         if not sales_data:
-            # No sales history - price competitively near market price
-            # Start slightly below market to attract customers
-            price = market_price * random.uniform(0.97, 1.03)
+            # No sales history - price competitively based on competitors
+            if min_competitor_price:
+                # Undercut the cheapest competitor slightly
+                price = min_competitor_price * random.uniform(0.95, 0.99)
+            else:
+                # No competitors - price near market
+                price = market_price * random.uniform(0.97, 1.03)
         elif sold_out:
             # Item sold out - raise price to increase profit margin
-            # Increase by 5-10% to test price ceiling
-            price = current_price * random.uniform(1.05, 1.10)
+            # But don't go too far above competitors if they exist
+            if max_competitor_price:
+                # Try to match the highest competitor, maybe slightly above
+                price = max_competitor_price * random.uniform(0.98, 1.05)
+            else:
+                # No competitors - raise significantly
+                price = current_price * random.uniform(1.05, 1.10)
         elif units_sold == 0:
-            # Didn't sell any - price is too high, lower it
-            # Drop by 5-10% to become more competitive
-            price = current_price * random.uniform(0.90, 0.95)
+            # Didn't sell any - price is too high
+            if min_competitor_price and current_price > min_competitor_price:
+                # We're more expensive than competitors - match or undercut them
+                price = min_competitor_price * random.uniform(0.93, 0.97)
+            else:
+                # Lower price generally
+                price = current_price * random.uniform(0.90, 0.95)
         elif unmet_demand > 5:
             # High unmet demand - raise prices to capture more value
-            price = current_price * random.uniform(1.03, 1.08)
+            # But be mindful of competitor prices
+            if avg_competitor_price:
+                # Try to stay competitive but increase toward competitor average
+                price = min(current_price * random.uniform(1.03, 1.08),
+                           avg_competitor_price * random.uniform(0.98, 1.02))
+            else:
+                price = current_price * random.uniform(1.03, 1.08)
         else:
-            # Selling moderately - make small adjustments
-            # Slight random variation to stay competitive
-            price = current_price * random.uniform(0.98, 1.02)
+            # Selling moderately - stay competitive with market
+            if avg_competitor_price:
+                # Target slightly below average competitor price
+                price = avg_competitor_price * random.uniform(0.96, 1.00)
+            else:
+                # No competitors - make small adjustments
+                price = current_price * random.uniform(0.98, 1.02)
 
         # CRITICAL: Never sell below cost (ensure at least 10% margin)
         min_profitable_price = cost * 1.10
@@ -1378,7 +1434,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if not player.is_human:  # Only automate AI players
             # Update AI buy orders every day based on current inventory
             auto_setup_buy_orders(player, game_state.items, game_state.vendors, game_state.market_prices)
-            auto_pricing_strategy(player, game_state.market_prices, game_state.items)
+            auto_pricing_strategy(player, game_state.market_prices, game_state.items,
+                                game_state.players, game_state.vendors)
             # AI players can now purchase upgrades strategically
             auto_purchase_upgrades(player, game_state)
 
@@ -1564,6 +1621,25 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             # Show level up if occurred
             if player.name in level_ups:
                 print(f"    🎉 LEVEL UP! Now level {level_ups[player.name]} (max {player.get_max_products()} products)")
+
+            # Show inventory (end of day)
+            if player.inventory:
+                inventory_items = [f"{item}: {qty}" for item, qty in sorted(player.inventory.items())]
+                inventory_str = ", ".join(inventory_items)
+                print(f"    Inventory: {inventory_str}")
+            else:
+                print(f"    Inventory: (empty)")
+
+            # Show pricing for sold items only
+            sold_items = per_item_sales[player.name].keys()
+            if sold_items:
+                pricing_items = []
+                for item_name in sorted(sold_items):
+                    if item_name in player.prices:
+                        pricing_items.append(f"{item_name}: ${player.prices[item_name]:.2f}")
+                if pricing_items:
+                    pricing_str = ", ".join(pricing_items)
+                    print(f"    Pricing (sold): {pricing_str}")
 
         if unmet_demand > 0:
             print(f"\nUnmet regular demand: {unmet_demand} items")
