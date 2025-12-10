@@ -994,11 +994,14 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float]) -> No
     Automatically set prices for AI players based on current market prices.
 
     Uses market price with a small random variation to simulate competition.
+    Rounds to nearest $0.25 for natural-looking prices.
     """
     for item_name, market_price in market_prices.items():
         # Set price to market_price with a random variation of +/- 5%
         variation = random.uniform(0.95, 1.05)
         price = market_price * variation
+        # Round to nearest $0.25 for more natural prices
+        price = round(price * 4) / 4
         player.set_price(item_name, price)
 
 
@@ -1207,7 +1210,17 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 2: Refresh vendor inventory based on new market prices
     refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
 
-    # Step 3: Execute buy orders for ALL players
+    # Step 3: AI player decisions (pricing, buying, and upgrades)
+    # Done BEFORE buy orders so they can purchase inventory on Day 1
+    for player in game_state.players:
+        if not player.is_human:  # Only automate AI players
+            # Update AI buy orders every day based on current inventory
+            auto_setup_buy_orders(player, game_state.items, game_state.vendors)
+            auto_pricing_strategy(player, game_state.market_prices)
+            # AI players can now purchase upgrades strategically
+            auto_purchase_upgrades(player, game_state)
+
+    # Step 4: Execute buy orders for ALL players
     if show_details:
         print("\nExecuting buy orders...")
 
@@ -1222,15 +1235,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     if price is not None:
                         total_spent += price * qty
             print(f"  {player.name}: Purchased {sum(purchases.values())} items (spent ${total_spent:.2f})")
-
-    # Step 4: AI player decisions (pricing, buying, and upgrades)
-    for player in game_state.players:
-        if not player.is_human:  # Only automate AI players
-            # Update AI buy orders every day based on current inventory
-            auto_setup_buy_orders(player, game_state.items, game_state.vendors)
-            auto_pricing_strategy(player, game_state.market_prices)
-            # AI players can now purchase upgrades strategically
-            auto_purchase_upgrades(player, game_state)
 
     # Track daily statistics
     daily_sales = {player.name: 0.0 for player in game_state.players}
