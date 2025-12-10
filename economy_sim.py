@@ -1225,9 +1225,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 4: AI player decisions (pricing, buying, and upgrades)
     for player in game_state.players:
         if not player.is_human:  # Only automate AI players
-            # Set up AI buy orders if not already set
-            if not player.buy_orders:
-                auto_setup_buy_orders(player, game_state.items, game_state.vendors)
+            # Update AI buy orders every day based on current inventory
+            auto_setup_buy_orders(player, game_state.items, game_state.vendors)
             auto_pricing_strategy(player, game_state.market_prices)
             # AI players can now purchase upgrades strategically
             auto_purchase_upgrades(player, game_state)
