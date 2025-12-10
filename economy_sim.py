@@ -29,6 +29,20 @@ class Item:
     base_cost: float  # cost to produce 1 unit
     base_price: float  # default selling price (can be overridden by players)
 
+    def __post_init__(self):
+        """Validate that base_price and base_cost have a reasonable ratio."""
+        if self.base_cost <= 0:
+            raise ValueError(f"Item {self.name}: base_cost must be positive, got {self.base_cost}")
+        if self.base_price <= 0:
+            raise ValueError(f"Item {self.name}: base_price must be positive, got {self.base_price}")
+        # Ensure base_price is at least 1.2x base_cost to avoid price bound contradictions
+        # (Market price fluctuation uses max(base_cost * 1.2, min(price, base_price * 2.0)))
+        if self.base_price < self.base_cost * 1.2:
+            raise ValueError(
+                f"Item {self.name}: base_price ({self.base_price}) must be at least "
+                f"1.2x base_cost ({self.base_cost * 1.2:.2f}) to avoid pricing contradictions"
+            )
+
 
 # Product catalog - items that can be unlocked over time
 PRODUCT_CATALOG = [
@@ -377,8 +391,8 @@ class Player:
         """
         Set the selling price for an item in the player's store.
         """
-        if price < 0:
-            raise ValueError(f"Price cannot be negative: {price}")
+        if price <= 0:
+            raise ValueError(f"Price must be positive: {price}")
         self.prices[item_name] = price
 
     def produce_item(self, item: Item, quantity: int) -> None:
@@ -399,7 +413,16 @@ class Player:
             )
 
         self.cash -= total_cost
-        self.inventory[item.name] = self.inventory.get(item.name, 0) + quantity
+
+        # Update weighted average cost for profit tracking
+        current_inventory = self.inventory.get(item.name, 0)
+        current_cost = self.item_costs.get(item.name, 0)
+        new_total_qty = current_inventory + quantity
+        if new_total_qty > 0:
+            weighted_cost = ((current_inventory * current_cost) + (quantity * item.base_cost)) / new_total_qty
+            self.item_costs[item.name] = weighted_cost
+
+        self.inventory[item.name] = current_inventory + quantity
 
     def sell_to_customer(self, item_name: str, quantity: int, unit_price: float) -> tuple:
         """
@@ -525,6 +548,8 @@ class Customer:
 
         for item in selected_items:
             # Calculate max quantity we can afford
+            if item.base_price <= 0:
+                continue  # Skip items with invalid pricing
             max_affordable = int(remaining_budget / item.base_price)
             if max_affordable > 0:
                 # Buy between 1 and min(5, max_affordable) units
@@ -602,6 +627,7 @@ class GameState:
     available_upgrades: List[Upgrade] = field(default_factory=list)  # Upgrades that can be purchased
     current_player_index: int = 0  # For multiplayer turn management
     unlocked_product_indices: List[int] = field(default_factory=list)  # Indices of products from catalog that have been unlocked
+    event_price_changes: Dict[str, float] = field(default_factory=dict)  # Tracks items with temporary event prices and their original prices
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -774,11 +800,11 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
                     vendor.items[item.name] = market_price * vendor.pricing_multiplier
 
         elif vendor.selection_type == "price_threshold":
-            # Select all items where market price is under threshold
+            # Select all items where market price is at or under threshold
             price_threshold = vendor.selection_params
             for item in items:
                 market_price = market_prices.get(item.name, item.base_price)
-                if market_price < price_threshold:
+                if market_price <= price_threshold:
                     vendor.items[item.name] = market_price * vendor.pricing_multiplier
 
         elif vendor.selection_type == "all":
@@ -901,7 +927,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
         if quantity > 0:
             # Check if player already has too many different products
             current_products = len([item for item, qty in player.inventory.items() if qty > 0])
-            if item_name not in player.inventory and current_products >= max_products:
+            if player.inventory.get(item_name, 0) == 0 and current_products >= max_products:
                 continue  # Skip this item, store is full of different products
 
             # Find the vendor
@@ -909,11 +935,6 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
             if vendor:
                 # Get the price from this vendor (might be None if item not available)
                 price = vendor.get_price(item_name)
-
-                # Debug output for troubleshooting
-                if price is None and vendor.selection_type == "random_daily":
-                    print(f"  🔍 {player.name}: Ordered {item_name} from {vendor.name}, but they don't have it!")
-                    print(f"      {vendor.name} current stock: {list(vendor.items.keys())}")
 
                 # For random vendors, check if item is available, fallback if not
                 if vendor.selection_type == "random_daily" and price is None:
@@ -929,7 +950,6 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
                             cheapest_vendor = v
 
                     if cheapest_vendor:
-                        print(f"  ⚠️  {player.name}: {item_name} not available at {original_vendor_name}, using {cheapest_vendor.name} (${cheapest_price:.2f})")
                         vendor = cheapest_vendor
                         price = cheapest_price
 
@@ -999,10 +1019,11 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
                 cheapest_price = vendor_price
                 cheapest_vendor = vendor
 
-        # Only buy if available at a good price (≤ 100% of market price)
-        # This prevents AI from buying from expensive "Universal Supply" vendor
+        # Only buy if available at a reasonable price (≤ 110% of market price)
+        # Allows some flexibility while preventing overpaying at expensive vendors
         market_price = market_prices.get(item.name, item.base_price)
-        if cheapest_vendor and quantity_to_buy > 0 and cheapest_price <= market_price:
+        max_acceptable_price = market_price * 1.10
+        if cheapest_vendor and quantity_to_buy > 0 and cheapest_price <= max_acceptable_price:
             player.set_buy_order(item.name, quantity_to_buy, cheapest_vendor.name)
         else:
             player.set_buy_order(item.name, 0, "")
@@ -1065,8 +1086,8 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
             price = min_profitable_price
 
         # Don't price too far above market (customers won't buy >15% above market)
-        # Stay within 10% of market to be competitive
-        max_price = market_price * 1.10
+        # Stay within 14% of market to be competitive while maximizing profit
+        max_price = market_price * 1.14
         if price > max_price:
             price = max_price
 
@@ -1130,6 +1151,10 @@ def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
     # Score each upgrade based on current needs and situation
     scored_upgrades = []
     for upgrade in affordable_upgrades:
+        # Skip upgrades with invalid cost (prevents division by zero)
+        if upgrade.cost <= 0:
+            continue
+
         score = 0
 
         # Customer capacity upgrades - high priority if approaching limit
@@ -1241,7 +1266,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"\n🎁 NEW PRODUCT UNLOCKED: {new_product.name} (${new_product.base_price:.2f})")
             print(f"   Total products available: {len(game_state.items)}")
 
-    # Step 1: Apply price fluctuations and special events
+    # Step 1: Reset any event price changes from previous day
+    if game_state.event_price_changes:
+        for item_name, original_price in game_state.event_price_changes.items():
+            game_state.market_prices[item_name] = original_price
+        game_state.event_price_changes.clear()
+
+    # Apply price fluctuations and special events
     apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
 
     # Check for special events
@@ -1251,9 +1282,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             selected_items = random.sample(game_state.items, 2)
             # Item 1: -50%
             old_price1 = game_state.market_prices[selected_items[0].name]
+            game_state.event_price_changes[selected_items[0].name] = old_price1
             game_state.market_prices[selected_items[0].name] = old_price1 * 0.5
             # Item 2: +50%
             old_price2 = game_state.market_prices[selected_items[1].name]
+            game_state.event_price_changes[selected_items[1].name] = old_price2
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 

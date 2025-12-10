@@ -63,7 +63,11 @@ def test_pricing_strategy():
         for item_name, price in player.prices.items():
             cost = player.item_costs.get(item_name, 0)
             assert price > cost, f"Price {price} should be > cost {cost} for {item_name}"
-            print(f"  ✓ {item_name}: ${price:.2f} (cost: ${cost:.2f}, margin: {((price/cost - 1) * 100):.1f}%)")
+            if cost > 0:
+                margin = ((price/cost - 1) * 100)
+                print(f"  ✓ {item_name}: ${price:.2f} (cost: ${cost:.2f}, margin: {margin:.1f}%)")
+            else:
+                print(f"  ✓ {item_name}: ${price:.2f} (cost: ${cost:.2f})")
 
     # Simulate some sales for Day 2
     print("\n=== Simulating sales for Day 1 ===")
