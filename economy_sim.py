@@ -30,6 +30,182 @@ class Item:
     base_price: float  # default selling price (can be overridden by players)
 
 
+# Product catalog - items that can be unlocked over time
+PRODUCT_CATALOG = [
+    # Groceries & Food (cheap items)
+    Item("Bread", 2.0, 5.0),
+    Item("Milk", 3.0, 6.0),
+    Item("Eggs", 2.5, 5.5),
+    Item("Cheese", 4.0, 8.0),
+    Item("Butter", 3.5, 7.0),
+    Item("Yogurt", 2.0, 4.5),
+    Item("Cereal", 3.0, 6.5),
+    Item("Rice", 5.0, 10.0),
+    Item("Pasta", 2.0, 4.0),
+    Item("Canned Soup", 1.5, 3.5),
+    Item("Frozen Pizza", 4.0, 8.5),
+    Item("Ice Cream", 3.5, 7.5),
+    Item("Soda", 1.5, 3.0),
+    Item("Orange Juice", 3.0, 6.0),
+    Item("Coffee", 6.0, 12.0),
+    Item("Tea Bags", 3.0, 6.5),
+    Item("Sugar", 2.0, 4.5),
+    Item("Flour", 3.0, 6.0),
+    Item("Cooking Oil", 4.0, 8.0),
+    Item("Salt", 1.0, 2.5),
+    Item("Pepper", 2.0, 4.5),
+    Item("Ketchup", 2.5, 5.0),
+    Item("Mustard", 2.0, 4.5),
+    Item("Mayo", 3.0, 6.0),
+    Item("BBQ Sauce", 3.5, 7.0),
+
+    # Fresh Produce
+    Item("Apples", 2.5, 5.5),
+    Item("Bananas", 1.5, 3.5),
+    Item("Oranges", 3.0, 6.0),
+    Item("Grapes", 4.0, 8.5),
+    Item("Strawberries", 4.5, 9.0),
+    Item("Tomatoes", 2.5, 5.5),
+    Item("Lettuce", 2.0, 4.5),
+    Item("Carrots", 1.5, 3.5),
+    Item("Potatoes", 2.0, 4.0),
+    Item("Onions", 1.5, 3.5),
+
+    # Household Items
+    Item("Paper Towels", 5.0, 10.0),
+    Item("Toilet Paper", 8.0, 15.0),
+    Item("Dish Soap", 3.0, 6.5),
+    Item("Laundry Detergent", 8.0, 16.0),
+    Item("Trash Bags", 5.0, 10.5),
+    Item("Sponges", 2.5, 5.5),
+    Item("Aluminum Foil", 4.0, 8.5),
+    Item("Plastic Wrap", 3.5, 7.5),
+    Item("Light Bulbs", 6.0, 12.0),
+    Item("Batteries", 5.0, 10.0),
+    Item("Candles", 4.0, 8.5),
+    Item("Air Freshener", 3.5, 7.5),
+
+    # Personal Care
+    Item("Shampoo", 5.0, 10.0),
+    Item("Conditioner", 5.0, 10.0),
+    Item("Body Wash", 4.5, 9.0),
+    Item("Toothpaste", 3.0, 6.5),
+    Item("Toothbrush", 2.5, 5.5),
+    Item("Deodorant", 4.0, 8.5),
+    Item("Razor Blades", 8.0, 16.0),
+    Item("Shaving Cream", 4.5, 9.0),
+    Item("Hand Soap", 3.0, 6.5),
+    Item("Hand Sanitizer", 3.5, 7.5),
+    Item("Tissues", 2.5, 5.5),
+    Item("Cotton Swabs", 2.0, 4.5),
+
+    # Electronics (cheap to mid-range)
+    Item("Phone Charger", 8.0, 16.0),
+    Item("USB Cable", 5.0, 10.0),
+    Item("Earbuds", 12.0, 25.0),
+    Item("Phone Case", 10.0, 20.0),
+    Item("Screen Protector", 6.0, 12.0),
+    Item("Mouse Pad", 7.0, 15.0),
+    Item("Keyboard", 25.0, 50.0),
+    Item("Computer Mouse", 15.0, 30.0),
+    Item("Webcam", 35.0, 70.0),
+    Item("Microphone", 40.0, 80.0),
+    Item("USB Flash Drive", 10.0, 20.0),
+    Item("SD Card", 12.0, 25.0),
+    Item("HDMI Cable", 8.0, 16.0),
+    Item("Power Strip", 15.0, 30.0),
+    Item("Desk Lamp", 20.0, 40.0),
+    Item("Alarm Clock", 12.0, 25.0),
+    Item("Calculator", 10.0, 20.0),
+    Item("Portable Speaker", 30.0, 60.0),
+    Item("Bluetooth Headphones", 45.0, 90.0),
+
+    # Office Supplies
+    Item("Pens", 3.0, 6.5),
+    Item("Pencils", 2.5, 5.5),
+    Item("Notebooks", 4.0, 8.5),
+    Item("Sticky Notes", 3.5, 7.5),
+    Item("Stapler", 8.0, 16.0),
+    Item("Tape Dispenser", 6.0, 12.0),
+    Item("Scissors", 5.0, 10.0),
+    Item("Ruler", 2.0, 4.5),
+    Item("Binder", 4.5, 9.0),
+    Item("File Folders", 6.0, 12.5),
+    Item("Printer Paper", 15.0, 30.0),
+
+    # Mid-range Electronics
+    Item("Tablet", 150.0, 300.0),
+    Item("E-Reader", 80.0, 160.0),
+    Item("Smart Watch", 120.0, 240.0),
+    Item("Fitness Tracker", 60.0, 120.0),
+    Item("Wireless Earbuds", 70.0, 140.0),
+    Item("Gaming Mouse", 45.0, 90.0),
+    Item("Gaming Keyboard", 60.0, 120.0),
+    Item("Monitor", 150.0, 300.0),
+    Item("External Hard Drive", 55.0, 110.0),
+    Item("Wireless Router", 50.0, 100.0),
+    Item("Smart Plug", 15.0, 30.0),
+    Item("Security Camera", 40.0, 80.0),
+    Item("Video Doorbell", 80.0, 160.0),
+
+    # Appliances & Home Electronics (higher priced)
+    Item("Coffee Maker", 40.0, 80.0),
+    Item("Toaster", 25.0, 50.0),
+    Item("Blender", 35.0, 70.0),
+    Item("Microwave", 80.0, 160.0),
+    Item("Air Fryer", 70.0, 140.0),
+    Item("Slow Cooker", 35.0, 70.0),
+    Item("Electric Kettle", 30.0, 60.0),
+    Item("Hair Dryer", 25.0, 50.0),
+    Item("Iron", 20.0, 40.0),
+    Item("Vacuum Cleaner", 120.0, 240.0),
+    Item("Fan", 35.0, 70.0),
+    Item("Space Heater", 45.0, 90.0),
+    Item("Humidifier", 40.0, 80.0),
+    Item("Air Purifier", 90.0, 180.0),
+
+    # Expensive Electronics
+    Item("Laptop", 400.0, 800.0),
+    Item("Gaming Console", 300.0, 600.0),
+    Item("4K TV", 350.0, 700.0),
+    Item("Soundbar", 150.0, 300.0),
+    Item("Noise-Cancelling Headphones", 180.0, 360.0),
+    Item("Drone", 250.0, 500.0),
+    Item("VR Headset", 300.0, 600.0),
+    Item("Digital Camera", 400.0, 800.0),
+    Item("Projector", 300.0, 600.0),
+    Item("Smart Thermostat", 120.0, 240.0),
+    Item("Robot Vacuum", 200.0, 400.0),
+    Item("Electric Scooter", 350.0, 700.0),
+
+    # Luxury Items (expensive)
+    Item("Designer Handbag", 600.0, 1200.0),
+    Item("Leather Wallet", 100.0, 200.0),
+    Item("Sunglasses", 150.0, 300.0),
+    Item("Perfume", 80.0, 160.0),
+    Item("Cologne", 70.0, 140.0),
+    Item("Watch", 200.0, 400.0),
+    Item("Jewelry Box", 60.0, 120.0),
+    Item("Gold Necklace", 500.0, 1000.0),
+    Item("Silver Bracelet", 150.0, 300.0),
+    Item("Diamond Earrings", 800.0, 1600.0),
+    Item("Designer Shoes", 300.0, 600.0),
+    Item("Leather Jacket", 250.0, 500.0),
+    Item("Cashmere Sweater", 180.0, 360.0),
+    Item("Silk Scarf", 80.0, 160.0),
+    Item("Designer Jeans", 120.0, 240.0),
+
+    # Additional Items (Sports & Outdoor)
+    Item("Yoga Mat", 20.0, 40.0),
+    Item("Dumbbells", 30.0, 60.0),
+    Item("Tennis Racket", 60.0, 120.0),
+    Item("Basketball", 15.0, 30.0),
+    Item("Camping Tent", 100.0, 200.0),
+    Item("Sleeping Bag", 50.0, 100.0),
+    Item("Hiking Boots", 80.0, 160.0),
+]
+
+
 @dataclass
 class Vendor:
     """A vendor that sells items to players at wholesale prices."""
@@ -377,6 +553,7 @@ class GameState:
     human_players: List[Player] = field(default_factory=list)  # All human-controlled players
     available_upgrades: List[Upgrade] = field(default_factory=list)  # Upgrades that can be purchased
     current_player_index: int = 0  # For multiplayer turn management
+    unlocked_product_indices: List[int] = field(default_factory=list)  # Indices of products from catalog that have been unlocked
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -405,16 +582,50 @@ class GameState:
 
 def create_default_items() -> List[Item]:
     """
-    Create some default items for the simulation.
-
-    TODO:
-    - Adjust items, base_cost, and base_price as desired
+    Create the starting items for the simulation.
+    Returns first 3 items from product catalog.
     """
-    return [
-        Item(name="Bread", base_cost=2.0, base_price=5.0),
-        Item(name="Milk", base_cost=3.0, base_price=6.0),
-        Item(name="Fruit", base_cost=1.0, base_price=4.0),
+    # Start with first 3 items (Bread, Milk, Eggs)
+    return [PRODUCT_CATALOG[0], PRODUCT_CATALOG[1], PRODUCT_CATALOG[2]]
+
+
+def unlock_new_product(game_state: GameState) -> Optional[Item]:
+    """
+    Unlock a new product from the catalog.
+    Before day 50: only unlock items with base_price <= 100
+    After day 50: can unlock any item
+
+    Returns the unlocked Item or None if no valid items available.
+    """
+    # Get indices of products not yet unlocked
+    available_indices = [
+        i for i in range(len(PRODUCT_CATALOG))
+        if i not in game_state.unlocked_product_indices
     ]
+
+    if not available_indices:
+        return None  # All products unlocked
+
+    # Filter by price threshold before day 50
+    if game_state.day < 50:
+        available_indices = [
+            i for i in available_indices
+            if PRODUCT_CATALOG[i].base_price <= 100
+        ]
+
+    if not available_indices:
+        return None  # No valid products available
+
+    # Randomly select one
+    selected_index = random.choice(available_indices)
+    new_item = PRODUCT_CATALOG[selected_index]
+
+    # Add to game state
+    game_state.items.append(new_item)
+    game_state.unlocked_product_indices.append(selected_index)
+    game_state.market_prices[new_item.name] = new_item.base_price
+
+    return new_item
 
 
 def create_players(names: List[str], starting_cash: float) -> List[Player]:
@@ -767,6 +978,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     if show_details:
         print(f"\n=== Day {game_state.day} ===")
+
+    # Step 0: Unlock new product every 5 days
+    if game_state.day % 5 == 0 and game_state.day > 0:
+        new_product = unlock_new_product(game_state)
+        if new_product and show_details:
+            print(f"\n🎁 NEW PRODUCT UNLOCKED: {new_product.name} (${new_product.base_price:.2f})")
+            print(f"   Total products available: {len(game_state.items)}")
 
     # Step 1: Apply price fluctuations and special events
     apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
@@ -1431,6 +1649,7 @@ def serialize_game_state(game_state: GameState) -> dict:
     return {
         "day": game_state.day,
         "current_player_index": game_state.current_player_index,
+        "unlocked_product_indices": game_state.unlocked_product_indices,
         "config": {
             "starting_cash": game_state.config.starting_cash,
             "num_days": game_state.config.num_days,
@@ -1578,6 +1797,7 @@ def deserialize_game_state(data: dict) -> GameState:
         human_players=human_players,
         available_upgrades=available_upgrades,
         current_player_index=data["current_player_index"],
+        unlocked_product_indices=data.get("unlocked_product_indices", []),
     )
 
     return game_state
@@ -1730,6 +1950,7 @@ def run_game() -> None:
             human_players=human_players,
             available_upgrades=available_upgrades,
             current_player_index=0,
+            unlocked_product_indices=[0, 1, 2],  # Start with first 3 products unlocked
         )
 
         # Set global game state for signal handler
