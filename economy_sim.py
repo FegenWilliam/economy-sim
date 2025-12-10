@@ -1002,6 +1002,140 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float]) -> No
         player.set_price(item_name, price)
 
 
+def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
+    """
+    Automatically purchase upgrades for AI players based on strategic decision-making.
+
+    Strategy:
+    1. Maintain a cash reserve (at least $2000 + $1000 per store level)
+    2. Prioritize capacity upgrades when hitting limits
+    3. Invest in efficiency upgrades (XP, vendor discounts) mid-game
+    4. Purchase production lines for high-volume items late-game
+    """
+    # Calculate minimum cash reserve (increases with store level)
+    min_reserve = 2000 + (1000 * player.store_level)
+    available_cash = player.cash - min_reserve
+
+    if available_cash <= 0:
+        return  # Not enough cash to safely purchase upgrades
+
+    # Get all available upgrades
+    all_upgrades = game_state.available_upgrades.copy()
+
+    # Add production line upgrades dynamically
+    production_line_upgrades = []
+    for item in game_state.items:
+        if not player.has_production_line(item.name):
+            upgrade_cost = item.base_cost * 10000
+            if upgrade_cost <= available_cash:  # Only consider affordable production lines
+                production_line_upgrades.append(Upgrade(
+                    name=f"Production Line: {item.name}",
+                    cost=upgrade_cost,
+                    effect_type="production_line",
+                    effect_value=0,
+                    vendor_name=item.name
+                ))
+
+    all_upgrades.extend(production_line_upgrades)
+
+    # Filter out already purchased upgrades (except production lines which are tracked differently)
+    available_upgrades = []
+    for upgrade in all_upgrades:
+        if upgrade.effect_type == "production_line":
+            # Already filtered above by has_production_line check
+            available_upgrades.append(upgrade)
+        elif upgrade not in player.purchased_upgrades:
+            available_upgrades.append(upgrade)
+
+    # Filter by affordability
+    affordable_upgrades = [u for u in available_upgrades if u.cost <= available_cash]
+
+    if not affordable_upgrades:
+        return  # No affordable upgrades
+
+    # Score each upgrade based on current needs and situation
+    scored_upgrades = []
+    for upgrade in affordable_upgrades:
+        score = 0
+
+        # Customer capacity upgrades - high priority if approaching limit
+        if upgrade.effect_type == "max_customers":
+            # Higher priority if we have good cash flow
+            if player.cash > 5000:
+                score = 80 + (upgrade.effect_value / upgrade.cost * 1000)
+
+        # Inventory capacity upgrades - medium-high priority
+        elif upgrade.effect_type == "max_items":
+            score = 70 + (upgrade.effect_value / upgrade.cost * 1000)
+
+        # Product variety upgrades - important for growth
+        elif upgrade.effect_type == "max_products":
+            current_max = player.get_max_products()
+            # Higher priority if we're likely to need more product slots
+            if player.store_level >= 3:
+                score = 75 + (upgrade.effect_value / upgrade.cost * 2000)
+            else:
+                score = 60 + (upgrade.effect_value / upgrade.cost * 2000)
+
+        # XP gain upgrades - good mid-game investment
+        elif upgrade.effect_type == "xp_gain":
+            if player.store_level >= 5:
+                score = 65 + (upgrade.effect_value / upgrade.cost * 500)
+            else:
+                score = 85 + (upgrade.effect_value / upgrade.cost * 500)  # Higher priority early
+
+        # Wage reduction - excellent late-game investment
+        elif upgrade.effect_type == "wage_reduction":
+            total_employees = player.cashiers + player.restockers
+            daily_savings = upgrade.effect_value * total_employees
+            # ROI-based scoring: higher score if payback period is short
+            if daily_savings > 0:
+                payback_days = upgrade.cost / daily_savings
+                score = max(50, 100 - payback_days)  # Better score for faster payback
+
+        # Vendor discounts - valuable for high-volume purchasing
+        elif upgrade.effect_type == "vendor_discount":
+            # Estimate value based on typical daily spending
+            score = 60 + (upgrade.effect_value / upgrade.cost * 800)
+
+        # Production lines - late-game investment for high-volume items
+        elif upgrade.effect_type == "production_line":
+            item_name = upgrade.vendor_name
+            current_inventory = player.inventory.get(item_name, 0)
+
+            # Only invest in production lines for items we actively stock
+            if current_inventory > 0:
+                # Higher score for expensive items (more savings)
+                market_price = game_state.market_prices.get(item_name, 0)
+                daily_savings = market_price * 0.5 * 10  # Assume 10 units sold per day
+
+                if daily_savings > 0:
+                    payback_days = upgrade.cost / daily_savings
+                    # Only pursue if payback is reasonable (< 100 days)
+                    if payback_days < 100:
+                        score = max(40, 90 - (payback_days / 2))
+                    else:
+                        score = 30  # Low priority for poor ROI
+            else:
+                score = 20  # Very low priority for items we don't stock
+
+        scored_upgrades.append((score, upgrade))
+
+    # Sort by score (highest first)
+    scored_upgrades.sort(reverse=True, key=lambda x: x[0])
+
+    # Purchase the highest-scoring affordable upgrade
+    if scored_upgrades:
+        best_score, best_upgrade = scored_upgrades[0]
+
+        # Only purchase if score is reasonable (above 40)
+        if best_score >= 40:
+            success = player.purchase_upgrade(best_upgrade)
+            if success:
+                # AI purchases are silent (no print statements)
+                pass
+
+
 # -------------------------------------------------------------------
 # Daily simulation logic
 # -------------------------------------------------------------------
@@ -1088,13 +1222,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             )
             print(f"  {player.name}: Purchased {sum(purchases.values())} items")
 
-    # Step 4: AI player decisions (pricing only, buying is handled by orders)
+    # Step 4: AI player decisions (pricing, buying, and upgrades)
     for player in game_state.players:
         if not player.is_human:  # Only automate AI players
             # Set up AI buy orders if not already set
             if not player.buy_orders:
                 auto_setup_buy_orders(player, game_state.items, game_state.vendors)
             auto_pricing_strategy(player, game_state.market_prices)
+            # AI players can now purchase upgrades strategically
+            auto_purchase_upgrades(player, game_state)
 
     # Track daily statistics
     daily_sales = {player.name: 0.0 for player in game_state.players}
