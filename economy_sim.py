@@ -453,7 +453,7 @@ class CustomerNeed:
 class Customer:
     """Represents a customer with daily needs for items."""
     name: str
-    customer_type: str = "medium"  # "low", "medium", or "high"
+    customer_type: str = "medium"  # "low", "medium", "high", or "uncapped"
     budget: float = 0.0
 
     def __post_init__(self):
@@ -465,17 +465,30 @@ class Customer:
                 self.budget = 50.0
             elif self.customer_type == "high":
                 self.budget = 100.0
+            elif self.customer_type == "uncapped":
+                self.budget = 10000.0  # Effectively unlimited for 1 expensive item
 
     def generate_daily_needs(self, available_items: List[Item]) -> List[CustomerNeed]:
         """
         Generate a random set of item needs for the day based on budget.
 
-        Randomly selects items and quantities, ensuring total cost doesn't exceed budget.
+        For uncapped customers: only buy 1 expensive item (base_price >= 100).
+        For other customers: randomly selects items and quantities.
         """
         if not available_items:
             return []
 
         needs = []
+
+        # Uncapped customers buy exactly 1 expensive item
+        if self.customer_type == "uncapped":
+            expensive_items = [item for item in available_items if item.base_price >= 100]
+            if expensive_items:
+                selected_item = random.choice(expensive_items)
+                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+            return needs
+
+        # Regular customers (low, medium, high)
         remaining_budget = self.budget
 
         # Decide how many different item types to buy (1 to 3)
@@ -1013,8 +1026,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if show_details:
             print(f"🎊 14-DAY EVENT! +{bonus_customers} customers today!")
 
+    # Calculate uncapped customers (starts at day 50, +1 every 10 days)
+    uncapped_customer_count = 0
+    if game_state.day >= 50:
+        uncapped_customer_count = ((game_state.day - 40) // 10)
+
     if show_details:
-        print(f"Total customers today: {base_customer_count}")
+        print(f"Regular customers today: {base_customer_count}")
+        if uncapped_customer_count > 0:
+            print(f"💎 Uncapped customers today: {uncapped_customer_count} (looking for expensive items ≥$100)")
 
     # Step 2: Refresh vendor inventory based on new market prices
     refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
@@ -1046,17 +1066,19 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     daily_sales = {player.name: 0.0 for player in game_state.players}
     daily_profits = {player.name: 0.0 for player in game_state.players}
     customers_served = {player.name: 0 for player in game_state.players}
+    uncapped_customers_served = {player.name: 0 for player in game_state.players}
     unmet_demand = 0
+    unmet_uncapped_demand = 0
 
     # Step 5: Simulate customers with cashier limits
-    # Generate all customers for the day
+    # Generate all regular customers for the day
     all_customers = []
     for i in range(base_customer_count):
         customer_type = random.choice(["low", "medium", "high"])
         customer = Customer(name=f"Customer_{i+1}", customer_type=customer_type)
         all_customers.append(customer)
 
-    # Process each customer
+    # Process each regular customer (with cashier limits)
     for customer in all_customers:
         needs = customer.generate_daily_needs(game_state.items)
 
@@ -1078,6 +1100,31 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             else:
                 # Track unmet demand
                 unmet_demand += need.quantity
+
+    # Step 5.5: Process uncapped customers (no cashier limits)
+    if uncapped_customer_count > 0:
+        uncapped_customers = []
+        for i in range(uncapped_customer_count):
+            customer = Customer(name=f"Uncapped_{i+1}", customer_type="uncapped")
+            uncapped_customers.append(customer)
+
+        for customer in uncapped_customers:
+            needs = customer.generate_daily_needs(game_state.items)
+
+            for need in needs:
+                supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity)
+
+                if supplier:
+                    # Uncapped customers bypass cashier limits
+                    price = supplier.prices.get(need.item_name, 0)
+                    revenue, profit = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                    if revenue > 0:
+                        daily_sales[supplier.name] += revenue
+                        daily_profits[supplier.name] += profit
+                        uncapped_customers_served[supplier.name] += 1
+                else:
+                    # Track unmet uncapped demand
+                    unmet_uncapped_demand += need.quantity
 
     # Step 5.5: Award XP based on profit (before wages)
     level_ups = {}
@@ -1104,18 +1151,24 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             sales = daily_sales[player.name]
             profit = daily_profits[player.name]
             served = customers_served[player.name]
+            uncapped_served = uncapped_customers_served[player.name]
             max_served = player.get_max_customers()
             xp_needed = player.get_xp_for_next_level()
             print(f"  {player.name}:")
             print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | XP: {player.experience:.0f}/{xp_needed:.0f}")
-            print(f"    Customers: {served}/{max_served} | Cash: ${player.cash:.2f}")
+            customer_info = f"Regular: {served}/{max_served}"
+            if uncapped_customer_count > 0:
+                customer_info += f" | 💎 Uncapped: {uncapped_served}"
+            print(f"    Customers: {customer_info} | Cash: ${player.cash:.2f}")
 
             # Show level up if occurred
             if player.name in level_ups:
                 print(f"    🎉 LEVEL UP! Now level {level_ups[player.name]} (max {player.get_max_products()} products)")
 
         if unmet_demand > 0:
-            print(f"\nUnmet demand: {unmet_demand} items")
+            print(f"\nUnmet regular demand: {unmet_demand} items")
+        if unmet_uncapped_demand > 0:
+            print(f"Unmet uncapped demand: {unmet_uncapped_demand} items")
 
     # Step 8: Advance day counter
     game_state.day += 1
@@ -1553,6 +1606,52 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def display_customer_forecast(game_state: GameState) -> None:
+    """Display expected customer traffic for the day."""
+    print("\n" + "=" * 60)
+    print("CUSTOMER FORECAST")
+    print("=" * 60)
+    print(f"\nDay {game_state.day} Expected Customers:")
+
+    # Calculate base customer count
+    base_customer_count = len(game_state.players) * 10 + game_state.day
+
+    # Check for 14-day event
+    event_bonus = 0
+    if game_state.day % 14 == 0:
+        occurrence_count = game_state.day // 14
+        event_bonus = 20 * occurrence_count
+        base_customer_count += event_bonus
+
+    # Calculate uncapped customers
+    uncapped_customer_count = 0
+    if game_state.day >= 50:
+        uncapped_customer_count = ((game_state.day - 40) // 10)
+
+    print(f"\n📊 Regular Customers: {base_customer_count}")
+    print(f"   - These customers are limited by your cashier capacity")
+    print(f"   - Types: Low ($20), Medium ($50), High ($100) budgets")
+
+    if event_bonus > 0:
+        print(f"\n🎊 14-Day Event Bonus: +{event_bonus} customers!")
+
+    if uncapped_customer_count > 0:
+        print(f"\n💎 Uncapped Customers: {uncapped_customer_count}")
+        print(f"   - These customers BYPASS cashier limits!")
+        print(f"   - Each buys exactly 1 expensive item (≥$100)")
+        expensive_items = [item for item in game_state.items if item.base_price >= 100]
+        print(f"   - Available expensive items: {len(expensive_items)}")
+        if len(expensive_items) > 0:
+            print(f"   - Price range: ${min(i.base_price for i in expensive_items):.2f} - ${max(i.base_price for i in expensive_items):.2f}")
+    elif game_state.day < 50:
+        print(f"\n💎 Uncapped Customers: Not yet available")
+        print(f"   - Unlock at day 50 (in {50 - game_state.day} days)")
+
+    total = base_customer_count + uncapped_customer_count
+    print(f"\n🎯 Total Expected: {total} customers")
+    print("=" * 60)
+
+
 def main_menu(game_state: GameState) -> bool:
     """
     Display main menu and handle user choice.
@@ -1576,11 +1675,18 @@ def main_menu(game_state: GameState) -> bool:
         print("  7. View Your Store Status")
         print("  8. View Competitor Status")
         print("  9. Store Upgrades")
+        print("  c. Customer Forecast")
         print("  s. Save Game")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-9, s): ").strip().lower()
+            choice = input("\nSelect option (0-9, c, s): ").strip().lower()
+
+            # Handle customer forecast
+            if choice == 'c':
+                display_customer_forecast(game_state)
+                input("\nPress Enter to continue...")
+                continue
 
             # Handle save command
             if choice == 's':
