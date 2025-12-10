@@ -552,8 +552,8 @@ class Customer:
                 continue  # Skip items with invalid pricing
             max_affordable = int(remaining_budget / item.base_price)
             if max_affordable > 0:
-                # Buy between 1 and min(5, max_affordable) units
-                quantity = random.randint(1, min(5, max_affordable))
+                # Buy between 1 and min(2, max_affordable) units - most customers buy 1-2 of each item
+                quantity = random.randint(1, min(2, max_affordable))
                 needs.append(CustomerNeed(item_name=item.name, quantity=quantity))
                 remaining_budget -= quantity * item.base_price
 
