@@ -1159,12 +1159,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     Steps:
     1. Apply daily price fluctuations and special events
-    2. Refresh vendor inventory based on new market prices
+    2. Let AI players adjust buy orders and prices
     3. Execute buy orders for all players (from cheapest to most expensive)
-    4. Let AI players adjust prices
-    5. For each customer, generate needs and make purchases (limited by cashier capacity)
-    6. Pay employee wages
-    7. Track statistics
+    4. For each customer, generate needs and make purchases (limited by cashier capacity)
+    5. Pay employee wages
+    6. Track statistics
+    7. Refresh vendor inventory for next day (at END of day)
     8. Advance the day counter
 
     Returns dictionary of daily sales per player.
@@ -1217,18 +1217,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if uncapped_customer_count > 0:
             print(f"💎 Uncapped customers today: {uncapped_customer_count} (looking for expensive items ≥$100)")
 
-    # Step 2: Refresh vendor inventory based on new market prices
-    refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
-
-    # Step 2.5: Clear buy orders for random vendors (they change daily)
-    # This prevents stale buy orders from before vendor refresh
-    random_vendor_names = [v.name for v in game_state.vendors if v.selection_type == "random_daily"]
-    for player in game_state.players:
-        for item_name, (qty, vendor_name) in list(player.buy_orders.items()):
-            if vendor_name in random_vendor_names:
-                player.set_buy_order(item_name, 0, "")  # Clear the order
-
-    # Step 3: AI player decisions (pricing, buying, and upgrades)
+    # Step 2: AI player decisions (pricing, buying, and upgrades)
     # Done BEFORE buy orders so they can purchase inventory on Day 1
     for player in game_state.players:
         if not player.is_human:  # Only automate AI players
@@ -1368,7 +1357,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if unmet_uncapped_demand > 0:
             print(f"Unmet uncapped demand: {unmet_uncapped_demand} items")
 
-    # Step 8: Advance day counter
+    # Step 8: Refresh vendor inventory for next day
+    # Done at END of day so buy orders are set for current vendor inventory
+    refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
+
+    # Step 9: Advance day counter
     game_state.day += 1
 
     return daily_sales
