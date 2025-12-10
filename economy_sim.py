@@ -901,6 +901,11 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
                 # Get the price from this vendor (might be None if item not available)
                 price = vendor.get_price(item_name)
 
+                # Debug output for troubleshooting
+                if price is None and vendor.selection_type == "random_daily":
+                    print(f"  🔍 {player.name}: Ordered {item_name} from {vendor.name}, but they don't have it!")
+                    print(f"      {vendor.name} current stock: {list(vendor.items.keys())}")
+
                 # For random vendors, check if item is available, fallback if not
                 if vendor.selection_type == "random_daily" and price is None:
                     original_vendor_name = vendor.name
@@ -1214,6 +1219,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Step 2: Refresh vendor inventory based on new market prices
     refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
+
+    # Step 2.5: Clear buy orders for random vendors (they change daily)
+    # This prevents stale buy orders from before vendor refresh
+    random_vendor_names = [v.name for v in game_state.vendors if v.selection_type == "random_daily"]
+    for player in game_state.players:
+        for item_name, (qty, vendor_name) in list(player.buy_orders.items()):
+            if vendor_name in random_vendor_names:
+                player.set_buy_order(item_name, 0, "")  # Clear the order
 
     # Step 3: AI player decisions (pricing, buying, and upgrades)
     # Done BEFORE buy orders so they can purchase inventory on Day 1
