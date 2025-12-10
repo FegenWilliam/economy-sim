@@ -1230,28 +1230,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     daily_spending = {player.name: 0.0 for player in game_state.players}
 
     for player in game_state.players:
+        # Track actual cash spent (accounts for vendor fallbacks, discounts, etc.)
+        cash_before = player.cash
         purchases = execute_buy_orders(player, game_state)
-        if purchases:
-            # Calculate actual amount spent
-            total_spent = 0
-            for item, qty in purchases.items():
-                vendor = game_state.get_vendor(player.get_buy_order(item)[1])
-                if vendor:
-                    price = vendor.get_price(item)
-                    if price is not None:
-                        # Apply any discounts to get actual price paid
-                        discount = player.get_vendor_discount(vendor.name)
-                        actual_price = price * (1.0 - discount)
-                        # Check if production line was used
-                        market_price = game_state.market_prices.get(item, 0)
-                        prod_price = player.get_production_line_price(item, market_price)
-                        if prod_price is not None:
-                            actual_price = prod_price
-                        total_spent += actual_price * qty
+        cash_after = player.cash
+        actual_spent = cash_before - cash_after
 
-            daily_spending[player.name] = total_spent
-            if show_details:
-                print(f"  {player.name}: Purchased {sum(purchases.values())} items (spent ${total_spent:.2f})")
+        daily_spending[player.name] = actual_spent
+        if show_details and purchases:
+            print(f"  {player.name}: Purchased {sum(purchases.values())} items (spent ${actual_spent:.2f})")
 
     # Track daily statistics
     daily_sales = {player.name: 0.0 for player in game_state.players}
