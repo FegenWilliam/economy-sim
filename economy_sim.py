@@ -289,6 +289,17 @@ class Player:
                       if u.effect_type == "vendor_discount" and u.vendor_name == vendor_name)
         return discount / 100.0  # Convert percentage to decimal
 
+    def has_production_line(self, item_name: str) -> bool:
+        """Check if player owns a production line for a specific item."""
+        return any(u.effect_type == "production_line" and u.vendor_name == item_name
+                  for u in self.purchased_upgrades)
+
+    def get_production_line_price(self, item_name: str, market_price: float) -> Optional[float]:
+        """Get the production line price (50% of market price) if owned."""
+        if self.has_production_line(item_name):
+            return market_price * 0.5
+        return None
+
     def purchase_upgrade(self, upgrade: 'Upgrade') -> bool:
         """
         Purchase an upgrade if player has enough cash.
@@ -346,11 +357,17 @@ class Player:
 
     def pay_daily_wages(self) -> float:
         """
-        Pay daily wages for all employees ($20 per employee).
+        Pay daily wages for all employees ($20 per employee, reduced by wage_reduction upgrades).
         Returns total wages paid.
         """
         total_employees = self.cashiers + self.restockers
-        wages = total_employees * 20.0
+        base_wage = 20.0
+
+        # Apply wage reduction upgrades
+        wage_reduction = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "wage_reduction")
+        actual_wage = max(0, base_wage - wage_reduction)
+
+        wages = total_employees * actual_wage
         self.cash -= wages
         return wages
 
@@ -404,23 +421,32 @@ class Player:
 
         return (0.0, 0.0)
 
-    def purchase_from_vendor(self, vendor: 'Vendor', item_name: str, quantity: int) -> bool:
+    def purchase_from_vendor(self, vendor: 'Vendor', item_name: str, quantity: int, market_price: float = 0) -> bool:
         """
         Purchase items from a vendor at their wholesale price.
         Returns True if successful, False if not enough cash.
         Also tracks the weighted average cost per item for profit calculation.
-        Applies vendor discount upgrades.
+        Applies vendor discount upgrades and production line pricing.
         """
         if quantity <= 0:
             return False
 
-        vendor_price = vendor.get_price(item_name)
-        if vendor_price is None:
-            return False
+        # Check if player owns production line for this item (takes priority)
+        production_price = self.get_production_line_price(item_name, market_price) if market_price > 0 else None
 
-        # Apply vendor discount
-        discount = self.get_vendor_discount(vendor.name)
-        final_price = vendor_price * (1.0 - discount)
+        if production_price is not None:
+            # Use production line pricing (50% of market)
+            final_price = production_price
+        else:
+            # Use vendor pricing
+            vendor_price = vendor.get_price(item_name)
+            if vendor_price is None:
+                return False
+
+            # Apply vendor discount
+            discount = self.get_vendor_discount(vendor.name)
+            final_price = vendor_price * (1.0 - discount)
+
         total_cost = final_price * quantity
 
         if self.cash < total_cost:
@@ -784,6 +810,9 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
         # XP gain upgrades
         Upgrade(name="Business Course", cost=2000, effect_type="xp_gain", effect_value=10),
         Upgrade(name="MBA Program", cost=5000, effect_type="xp_gain", effect_value=25),
+
+        # Wage reduction upgrade
+        Upgrade(name="Employee Benefits Package", cost=10000, effect_type="wage_reduction", effect_value=5),
     ]
 
     # Add vendor discount upgrades for each vendor
@@ -903,16 +932,21 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
         remaining_capacity = max_items - total_items_bought
         actual_quantity = min(quantity, remaining_capacity)
 
-        success = player.purchase_from_vendor(vendor, item_name, actual_quantity)
+        # Get market price for production line check
+        market_price = game_state.market_prices.get(item_name, 0)
+
+        success = player.purchase_from_vendor(vendor, item_name, actual_quantity, market_price)
         if success:
             purchases[item_name] = actual_quantity
             total_items_bought += actual_quantity
         else:
             # Try to buy as many as possible with remaining cash
-            max_affordable = int(player.cash / price)
+            # Recalculate price if production line owned
+            actual_price = player.get_production_line_price(item_name, market_price) or price
+            max_affordable = int(player.cash / actual_price)
             if max_affordable > 0:
                 affordable_quantity = min(max_affordable, remaining_capacity)
-                partial_success = player.purchase_from_vendor(vendor, item_name, affordable_quantity)
+                partial_success = player.purchase_from_vendor(vendor, item_name, affordable_quantity, market_price)
                 if partial_success:
                     purchases[item_name] = affordable_quantity
                     total_items_bought += affordable_quantity
@@ -1239,7 +1273,10 @@ def display_player_status(player: Player) -> None:
     print(f"  Cashiers: {player.cashiers} (Max {player.get_max_customers()} customers/day)")
     print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
     total_employees = player.cashiers + player.restockers
-    print(f"  Daily wages: ${total_employees * 20:.2f}")
+    base_wage = 20.0
+    wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
+    actual_wage = max(0, base_wage - wage_reduction)
+    print(f"  Daily wages: ${total_employees * actual_wage:.2f} (${actual_wage:.2f}/employee)")
 
     print(f"\nInventory ({len([i for i, q in player.inventory.items() if q > 0])}/{player.get_max_products()} products):")
     if player.inventory:
@@ -1313,9 +1350,14 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
                     quantity = int(quantity_str)
 
                     if quantity > 0:
-                        success = player.purchase_from_vendor(vendor, selected_item_name, quantity)
+                        market_price = game_state.market_prices.get(selected_item_name, 0)
+                        success = player.purchase_from_vendor(vendor, selected_item_name, quantity, market_price)
                         if success:
-                            total_cost = vendor.get_price(selected_item_name) * quantity
+                            # Calculate actual cost (may be production line pricing)
+                            actual_price = player.get_production_line_price(selected_item_name, market_price)
+                            if actual_price is None:
+                                actual_price = vendor.get_price(selected_item_name)
+                            total_cost = actual_price * quantity
                             print(f"\n✓ Purchased {quantity} {selected_item_name} for ${total_cost:.2f}")
                         else:
                             print(f"\n✗ Failed to purchase. Not enough cash!")
@@ -1418,7 +1460,7 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
 def employee_menu(game_state: GameState, player: Player) -> None:
     """Menu for hiring employees."""
     HIRING_COST = 500.0
-    DAILY_WAGE = 20.0
+    BASE_WAGE = 20.0
 
     while True:
         print("\n" + "=" * 60)
@@ -1429,10 +1471,17 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         print(f"  Cashiers: {player.cashiers} (Max {player.get_max_customers()} customers/day)")
         print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
         total_employees = player.cashiers + player.restockers
-        print(f"  Total daily wages: ${total_employees * DAILY_WAGE:.2f}")
+
+        # Calculate actual wage with upgrades
+        wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
+        actual_wage = max(0, BASE_WAGE - wage_reduction)
+        print(f"  Total daily wages: ${total_employees * actual_wage:.2f}")
 
         print(f"\nHiring Cost: ${HIRING_COST:.2f} per employee")
-        print(f"Daily Wage: ${DAILY_WAGE:.2f} per employee")
+        if wage_reduction > 0:
+            print(f"Daily Wage: ${actual_wage:.2f} per employee (reduced from ${BASE_WAGE:.2f})")
+        else:
+            print(f"Daily Wage: ${actual_wage:.2f} per employee")
 
         print("\nOptions:")
         print("  1. Hire Cashier (+10 customers/day capacity)")
@@ -1472,6 +1521,100 @@ def employee_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def production_line_menu(game_state: GameState, player: Player) -> None:
+    """Menu for purchasing production line upgrades (own production for items)."""
+    while True:
+        print("\n" + "=" * 80)
+        print("PRODUCTION LINE UPGRADES - Own Your Supply Chain")
+        print("=" * 80)
+        print(f"\nYour Cash: ${player.cash:.2f}")
+        print("\nOwning a production line gives you:")
+        print("  • Automatic 'Own' vendor for that item")
+        print("  • Purchase at 50% of market price (incredible savings!)")
+        print("  • Perfect for late-game investment")
+
+        # Show owned production lines
+        owned_lines = [u for u in player.purchased_upgrades if u.effect_type == "production_line"]
+        if owned_lines:
+            print("\n✅ Your Production Lines:")
+            for upgrade in owned_lines:
+                item_name = upgrade.vendor_name
+                market_price = game_state.market_prices.get(item_name, 0)
+                own_price = market_price * 0.5
+                print(f"  • {item_name}: ${own_price:.2f} (50% of ${market_price:.2f} market)")
+        else:
+            print("\n✅ No production lines owned yet")
+
+        # Show available production lines (only for unlocked products)
+        print("\n🏭 Available Production Lines:")
+        available = []
+        for i, item in enumerate(game_state.items, 1):
+            # Check if already owned
+            already_owned = player.has_production_line(item.name)
+            if not already_owned:
+                # Calculate cost: 10,000 times the base cost
+                upgrade_cost = item.base_cost * 10000
+                market_price = game_state.market_prices.get(item.name, item.base_price)
+                own_price = market_price * 0.5
+
+                print(f"  {i}. {item.name}")
+                print(f"      Cost: ${upgrade_cost:,.2f} | Current Market: ${market_price:.2f} → Own: ${own_price:.2f}")
+                available.append((i, item, upgrade_cost))
+
+        if not available:
+            print("  (All production lines owned!)")
+
+        print("\n  0. Back to Upgrades Menu")
+
+        try:
+            if not available:
+                input("\nPress Enter to continue...")
+                break
+
+            choice = input(f"\nSelect production line to purchase (0-{len(game_state.items)}): ")
+            choice_num = int(choice)
+
+            if choice_num == 0:
+                break
+
+            # Find selected item
+            selected_item = None
+            selected_cost = 0
+            for idx, item, cost in available:
+                if idx == choice_num:
+                    selected_item = item
+                    selected_cost = cost
+                    break
+
+            if selected_item:
+                if player.cash < selected_cost:
+                    print(f"\n✗ Not enough cash! Need ${selected_cost:,.2f}, have ${player.cash:.2f}")
+                else:
+                    # Create and purchase the production line upgrade
+                    production_upgrade = Upgrade(
+                        name=f"Production Line: {selected_item.name}",
+                        cost=selected_cost,
+                        effect_type="production_line",
+                        effect_value=0,  # Not used
+                        vendor_name=selected_item.name  # Store item name in vendor_name field
+                    )
+
+                    success = player.purchase_upgrade(production_upgrade)
+                    if success:
+                        market_price = game_state.market_prices.get(selected_item.name, selected_item.base_price)
+                        own_price = market_price * 0.5
+                        print(f"\n✓ Purchased Production Line: {selected_item.name} for ${selected_cost:,.2f}!")
+                        print(f"  You can now purchase {selected_item.name} at ${own_price:.2f} (50% of market)")
+                        print(f"  This will be used automatically when buying!")
+                    else:
+                        print("\n✗ Failed to purchase production line")
+            else:
+                print("\n✗ Invalid selection!")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+
+
 def upgrades_menu(game_state: GameState, player: Player) -> None:
     """Menu for purchasing store upgrades."""
     while True:
@@ -1504,14 +1647,21 @@ def upgrades_menu(game_state: GameState, player: Player) -> None:
         if not available:
             print("  (All upgrades purchased!)")
 
-        print("\n  0. Back to Main Menu")
+        print("\n  p. Production Line Upgrades (Late Game)")
+        print("  0. Back to Main Menu")
 
         try:
-            if not available:
-                input("\nPress Enter to continue...")
-                break
+            choice = input(f"\nSelect upgrade to purchase (0-{len(game_state.available_upgrades)}, p): ").strip().lower()
 
-            choice = input(f"\nSelect upgrade to purchase (0-{len(game_state.available_upgrades)}): ")
+            # Handle production line submenu
+            if choice == 'p':
+                production_line_menu(game_state, player)
+                continue
+
+            if not available and choice != '0':
+                input("\nPress Enter to continue...")
+                continue
+
             choice_num = int(choice)
 
             if choice_num == 0:
@@ -1554,6 +1704,10 @@ def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
         return f"+{int(upgrade.effect_value)}% XP gain"
     elif upgrade.effect_type == "vendor_discount":
         return f"+{int(upgrade.effect_value)}% discount at {upgrade.vendor_name}"
+    elif upgrade.effect_type == "wage_reduction":
+        return f"-${int(upgrade.effect_value)} daily wage per employee (from $20 to $15)"
+    elif upgrade.effect_type == "production_line":
+        return f"Own production for {upgrade.vendor_name} (50% market price)"
     return "Unknown effect"
 
 
