@@ -903,6 +903,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
 
                 # For random vendors, check if item is available, fallback if not
                 if vendor.selection_type == "random_daily" and price is None:
+                    original_vendor_name = vendor.name
                     # Find cheapest vendor that has this item
                     cheapest_vendor = None
                     cheapest_price = float('inf')
@@ -914,6 +915,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
                             cheapest_vendor = v
 
                     if cheapest_vendor:
+                        print(f"  ⚠️  {player.name}: {item_name} not available at {original_vendor_name}, using {cheapest_vendor.name} (${cheapest_price:.2f})")
                         vendor = cheapest_vendor
                         price = cheapest_price
 
