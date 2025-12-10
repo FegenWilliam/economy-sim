@@ -622,6 +622,9 @@ class Player:
             cost_per_unit = self.item_costs.get(item_name, 0)
             profit = revenue - (cost_per_unit * units_sold)
 
+            # Award +1 XP for each item sold (helps with leveling regardless of profit)
+            self.add_experience(units_sold * 1.0)
+
             return (revenue, profit, units_sold)
 
         return (0.0, 0.0, 0)
@@ -1340,14 +1343,19 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
     Intelligent pricing strategy for AI players.
 
     Strategy:
+    - Alice Corp: Volume strategy - aims to be the cheapest and sell maximum units
+    - Bob Ltd: Profit margin strategy - maintains higher prices while staying competitive
+
+    Common rules:
     - Never sell at a loss (price must be > cost)
     - Adjust prices based on previous day's sales performance
     - Consider unmet demand signals
-    - Compete on price when inventory isn't moving
-    - Raise prices when items sold out or high demand
     - Consider competitor prices (human and AI)
     - Consider vendor wholesale prices to understand market dynamics
     """
+    # Determine AI strategy based on player name
+    is_alice = "Alice" in player.name  # Volume strategy - be the cheapest
+    is_bob = "Bob" in player.name  # Profit margin strategy - maximize profit per item
     # Build a lookup for item base costs
     item_costs_lookup = {}
     if items:
@@ -1398,51 +1406,124 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
         avg_vendor_price = sum(vend_prices) / len(vend_prices) if vend_prices else None
 
         # Determine pricing strategy based on sales performance and competition
-        if not sales_data:
-            # No sales history - price competitively based on competitors
-            if min_competitor_price:
-                # Undercut the cheapest competitor slightly
-                price = min_competitor_price * random.uniform(0.95, 0.99)
+        if is_alice:
+            # ALICE: Volume strategy - always aim to be the cheapest
+            if not sales_data:
+                # No sales history - undercut market aggressively
+                if min_competitor_price:
+                    price = min_competitor_price * random.uniform(0.90, 0.95)
+                else:
+                    price = market_price * random.uniform(0.93, 0.97)
+            elif sold_out:
+                # Even if sold out, Alice only raises price slightly (volume over margin)
+                if min_competitor_price:
+                    price = min_competitor_price * random.uniform(0.95, 0.98)
+                else:
+                    price = current_price * random.uniform(1.01, 1.03)
+            elif units_sold == 0:
+                # Aggressively cut prices to move inventory
+                if min_competitor_price:
+                    price = min_competitor_price * random.uniform(0.88, 0.93)
+                else:
+                    price = current_price * random.uniform(0.85, 0.90)
+            elif unmet_demand > 5:
+                # Even with high demand, only moderate increase (want volume)
+                if min_competitor_price:
+                    price = min_competitor_price * random.uniform(0.96, 0.99)
+                else:
+                    price = current_price * random.uniform(1.00, 1.03)
             else:
-                # No competitors - price near market
-                price = market_price * random.uniform(0.97, 1.03)
-        elif sold_out:
-            # Item sold out - raise price to increase profit margin
-            # But don't go too far above competitors if they exist
-            if max_competitor_price:
-                # Try to match the highest competitor, maybe slightly above
-                price = max_competitor_price * random.uniform(0.98, 1.05)
-            else:
-                # No competitors - raise significantly
-                price = current_price * random.uniform(1.05, 1.10)
-        elif units_sold == 0:
-            # Didn't sell any - price is too high
-            if min_competitor_price and current_price > min_competitor_price:
-                # We're more expensive than competitors - match or undercut them
-                price = min_competitor_price * random.uniform(0.93, 0.97)
-            else:
-                # Lower price generally
-                price = current_price * random.uniform(0.90, 0.95)
-        elif unmet_demand > 5:
-            # High unmet demand - raise prices to capture more value
-            # But be mindful of competitor prices
-            if avg_competitor_price:
-                # Try to stay competitive but increase toward competitor average
-                price = min(current_price * random.uniform(1.03, 1.08),
-                           avg_competitor_price * random.uniform(0.98, 1.02))
-            else:
-                price = current_price * random.uniform(1.03, 1.08)
-        else:
-            # Selling moderately - stay competitive with market
-            if avg_competitor_price:
-                # Target slightly below average competitor price
-                price = avg_competitor_price * random.uniform(0.96, 1.00)
-            else:
-                # No competitors - make small adjustments
-                price = current_price * random.uniform(0.98, 1.02)
+                # Normal sales - stay cheapest
+                if min_competitor_price:
+                    price = min_competitor_price * random.uniform(0.92, 0.97)
+                else:
+                    price = market_price * random.uniform(0.95, 0.98)
 
-        # CRITICAL: Never sell below cost (ensure at least 10% margin)
-        min_profitable_price = cost * 1.10
+        elif is_bob:
+            # BOB: Profit margin strategy - maximize profit per item while staying competitive
+            if not sales_data:
+                # No sales history - price at higher end but competitive
+                if avg_competitor_price:
+                    price = avg_competitor_price * random.uniform(0.98, 1.05)
+                else:
+                    price = market_price * random.uniform(1.00, 1.08)
+            elif sold_out:
+                # Sold out - raise prices more aggressively for profit
+                if max_competitor_price:
+                    price = max_competitor_price * random.uniform(1.00, 1.08)
+                else:
+                    price = current_price * random.uniform(1.08, 1.15)
+            elif units_sold == 0:
+                # Didn't sell - reduce price but maintain margin
+                if avg_competitor_price:
+                    price = avg_competitor_price * random.uniform(0.95, 1.00)
+                else:
+                    price = current_price * random.uniform(0.93, 0.97)
+            elif unmet_demand > 5:
+                # High demand - raise prices significantly to maximize profit
+                if avg_competitor_price:
+                    price = max(current_price * random.uniform(1.05, 1.12),
+                               avg_competitor_price * random.uniform(1.00, 1.05))
+                else:
+                    price = current_price * random.uniform(1.05, 1.12)
+            else:
+                # Normal sales - maintain healthy margins
+                if avg_competitor_price:
+                    price = avg_competitor_price * random.uniform(0.98, 1.04)
+                else:
+                    price = current_price * random.uniform(1.00, 1.05)
+        else:
+            # Default strategy (for any other AI players)
+            if not sales_data:
+                # No sales history - price competitively based on competitors
+                if min_competitor_price:
+                    # Undercut the cheapest competitor slightly
+                    price = min_competitor_price * random.uniform(0.95, 0.99)
+                else:
+                    # No competitors - price near market
+                    price = market_price * random.uniform(0.97, 1.03)
+            elif sold_out:
+                # Item sold out - raise price to increase profit margin
+                # But don't go too far above competitors if they exist
+                if max_competitor_price:
+                    # Try to match the highest competitor, maybe slightly above
+                    price = max_competitor_price * random.uniform(0.98, 1.05)
+                else:
+                    # No competitors - raise significantly
+                    price = current_price * random.uniform(1.05, 1.10)
+            elif units_sold == 0:
+                # Didn't sell any - price is too high
+                if min_competitor_price and current_price > min_competitor_price:
+                    # We're more expensive than competitors - match or undercut them
+                    price = min_competitor_price * random.uniform(0.93, 0.97)
+                else:
+                    # Lower price generally
+                    price = current_price * random.uniform(0.90, 0.95)
+            elif unmet_demand > 5:
+                # High unmet demand - raise prices to capture more value
+                # But be mindful of competitor prices
+                if avg_competitor_price:
+                    # Try to stay competitive but increase toward competitor average
+                    price = min(current_price * random.uniform(1.03, 1.08),
+                               avg_competitor_price * random.uniform(0.98, 1.02))
+                else:
+                    price = current_price * random.uniform(1.03, 1.08)
+            else:
+                # Selling moderately - stay competitive with market
+                if avg_competitor_price:
+                    # Target slightly below average competitor price
+                    price = avg_competitor_price * random.uniform(0.96, 1.00)
+                else:
+                    # No competitors - make small adjustments
+                    price = current_price * random.uniform(0.98, 1.02)
+
+        # CRITICAL: Never sell below cost
+        # Bob needs higher margin to survive (15%), Alice can work with 10%
+        if is_bob:
+            min_profitable_price = cost * 1.15  # Bob needs 15% margin minimum
+        else:
+            min_profitable_price = cost * 1.10  # Others need 10% margin
+
         if price < min_profitable_price:
             price = min_profitable_price
 
@@ -1898,9 +1979,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 level_ups[player.name] = player.store_level
 
     # Step 6: Pay employee wages (monthly - every 30 days)
-    if show_details:
-        print(f"\nPaying employee wages...")
-
     for player in game_state.players:
         wages = player.pay_monthly_wages(game_state.day)
         if show_details and wages > 0:
