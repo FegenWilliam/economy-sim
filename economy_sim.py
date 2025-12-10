@@ -1520,12 +1520,19 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             uncapped_served = uncapped_customers_served[player.name]
             max_served = player.get_max_customers()
             xp_needed = player.get_xp_for_next_level()
+
+            # Calculate total items sold
+            total_items_sold = sum(
+                data['units_sold']
+                for data in per_item_sales[player.name].values()
+            )
+
             print(f"  {player.name}:")
             print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | XP: {player.experience:.0f}/{xp_needed:.0f}")
             customer_info = f"Regular: {served}/{max_served}"
             if uncapped_customer_count > 0:
                 customer_info += f" | 💎 Uncapped: {uncapped_served}"
-            print(f"    Customers: {customer_info} | Cash: ${player.cash:.2f}")
+            print(f"    Customers: {customer_info} | Items Sold: {total_items_sold} | Cash: ${player.cash:.2f}")
 
             # Show level up if occurred
             if player.name in level_ups:
