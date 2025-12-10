@@ -12,6 +12,10 @@ This file is mostly TODOs to be filled in by an AI code assistant.
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 import random
+import json
+import signal
+import sys
+import os
 
 
 # -------------------------------------------------------------------
@@ -24,6 +28,182 @@ class Item:
     name: str
     base_cost: float  # cost to produce 1 unit
     base_price: float  # default selling price (can be overridden by players)
+
+
+# Product catalog - items that can be unlocked over time
+PRODUCT_CATALOG = [
+    # Groceries & Food (cheap items)
+    Item("Bread", 2.0, 5.0),
+    Item("Milk", 3.0, 6.0),
+    Item("Eggs", 2.5, 5.5),
+    Item("Cheese", 4.0, 8.0),
+    Item("Butter", 3.5, 7.0),
+    Item("Yogurt", 2.0, 4.5),
+    Item("Cereal", 3.0, 6.5),
+    Item("Rice", 5.0, 10.0),
+    Item("Pasta", 2.0, 4.0),
+    Item("Canned Soup", 1.5, 3.5),
+    Item("Frozen Pizza", 4.0, 8.5),
+    Item("Ice Cream", 3.5, 7.5),
+    Item("Soda", 1.5, 3.0),
+    Item("Orange Juice", 3.0, 6.0),
+    Item("Coffee", 6.0, 12.0),
+    Item("Tea Bags", 3.0, 6.5),
+    Item("Sugar", 2.0, 4.5),
+    Item("Flour", 3.0, 6.0),
+    Item("Cooking Oil", 4.0, 8.0),
+    Item("Salt", 1.0, 2.5),
+    Item("Pepper", 2.0, 4.5),
+    Item("Ketchup", 2.5, 5.0),
+    Item("Mustard", 2.0, 4.5),
+    Item("Mayo", 3.0, 6.0),
+    Item("BBQ Sauce", 3.5, 7.0),
+
+    # Fresh Produce
+    Item("Apples", 2.5, 5.5),
+    Item("Bananas", 1.5, 3.5),
+    Item("Oranges", 3.0, 6.0),
+    Item("Grapes", 4.0, 8.5),
+    Item("Strawberries", 4.5, 9.0),
+    Item("Tomatoes", 2.5, 5.5),
+    Item("Lettuce", 2.0, 4.5),
+    Item("Carrots", 1.5, 3.5),
+    Item("Potatoes", 2.0, 4.0),
+    Item("Onions", 1.5, 3.5),
+
+    # Household Items
+    Item("Paper Towels", 5.0, 10.0),
+    Item("Toilet Paper", 8.0, 15.0),
+    Item("Dish Soap", 3.0, 6.5),
+    Item("Laundry Detergent", 8.0, 16.0),
+    Item("Trash Bags", 5.0, 10.5),
+    Item("Sponges", 2.5, 5.5),
+    Item("Aluminum Foil", 4.0, 8.5),
+    Item("Plastic Wrap", 3.5, 7.5),
+    Item("Light Bulbs", 6.0, 12.0),
+    Item("Batteries", 5.0, 10.0),
+    Item("Candles", 4.0, 8.5),
+    Item("Air Freshener", 3.5, 7.5),
+
+    # Personal Care
+    Item("Shampoo", 5.0, 10.0),
+    Item("Conditioner", 5.0, 10.0),
+    Item("Body Wash", 4.5, 9.0),
+    Item("Toothpaste", 3.0, 6.5),
+    Item("Toothbrush", 2.5, 5.5),
+    Item("Deodorant", 4.0, 8.5),
+    Item("Razor Blades", 8.0, 16.0),
+    Item("Shaving Cream", 4.5, 9.0),
+    Item("Hand Soap", 3.0, 6.5),
+    Item("Hand Sanitizer", 3.5, 7.5),
+    Item("Tissues", 2.5, 5.5),
+    Item("Cotton Swabs", 2.0, 4.5),
+
+    # Electronics (cheap to mid-range)
+    Item("Phone Charger", 8.0, 16.0),
+    Item("USB Cable", 5.0, 10.0),
+    Item("Earbuds", 12.0, 25.0),
+    Item("Phone Case", 10.0, 20.0),
+    Item("Screen Protector", 6.0, 12.0),
+    Item("Mouse Pad", 7.0, 15.0),
+    Item("Keyboard", 25.0, 50.0),
+    Item("Computer Mouse", 15.0, 30.0),
+    Item("Webcam", 35.0, 70.0),
+    Item("Microphone", 40.0, 80.0),
+    Item("USB Flash Drive", 10.0, 20.0),
+    Item("SD Card", 12.0, 25.0),
+    Item("HDMI Cable", 8.0, 16.0),
+    Item("Power Strip", 15.0, 30.0),
+    Item("Desk Lamp", 20.0, 40.0),
+    Item("Alarm Clock", 12.0, 25.0),
+    Item("Calculator", 10.0, 20.0),
+    Item("Portable Speaker", 30.0, 60.0),
+    Item("Bluetooth Headphones", 45.0, 90.0),
+
+    # Office Supplies
+    Item("Pens", 3.0, 6.5),
+    Item("Pencils", 2.5, 5.5),
+    Item("Notebooks", 4.0, 8.5),
+    Item("Sticky Notes", 3.5, 7.5),
+    Item("Stapler", 8.0, 16.0),
+    Item("Tape Dispenser", 6.0, 12.0),
+    Item("Scissors", 5.0, 10.0),
+    Item("Ruler", 2.0, 4.5),
+    Item("Binder", 4.5, 9.0),
+    Item("File Folders", 6.0, 12.5),
+    Item("Printer Paper", 15.0, 30.0),
+
+    # Mid-range Electronics
+    Item("Tablet", 150.0, 300.0),
+    Item("E-Reader", 80.0, 160.0),
+    Item("Smart Watch", 120.0, 240.0),
+    Item("Fitness Tracker", 60.0, 120.0),
+    Item("Wireless Earbuds", 70.0, 140.0),
+    Item("Gaming Mouse", 45.0, 90.0),
+    Item("Gaming Keyboard", 60.0, 120.0),
+    Item("Monitor", 150.0, 300.0),
+    Item("External Hard Drive", 55.0, 110.0),
+    Item("Wireless Router", 50.0, 100.0),
+    Item("Smart Plug", 15.0, 30.0),
+    Item("Security Camera", 40.0, 80.0),
+    Item("Video Doorbell", 80.0, 160.0),
+
+    # Appliances & Home Electronics (higher priced)
+    Item("Coffee Maker", 40.0, 80.0),
+    Item("Toaster", 25.0, 50.0),
+    Item("Blender", 35.0, 70.0),
+    Item("Microwave", 80.0, 160.0),
+    Item("Air Fryer", 70.0, 140.0),
+    Item("Slow Cooker", 35.0, 70.0),
+    Item("Electric Kettle", 30.0, 60.0),
+    Item("Hair Dryer", 25.0, 50.0),
+    Item("Iron", 20.0, 40.0),
+    Item("Vacuum Cleaner", 120.0, 240.0),
+    Item("Fan", 35.0, 70.0),
+    Item("Space Heater", 45.0, 90.0),
+    Item("Humidifier", 40.0, 80.0),
+    Item("Air Purifier", 90.0, 180.0),
+
+    # Expensive Electronics
+    Item("Laptop", 400.0, 800.0),
+    Item("Gaming Console", 300.0, 600.0),
+    Item("4K TV", 350.0, 700.0),
+    Item("Soundbar", 150.0, 300.0),
+    Item("Noise-Cancelling Headphones", 180.0, 360.0),
+    Item("Drone", 250.0, 500.0),
+    Item("VR Headset", 300.0, 600.0),
+    Item("Digital Camera", 400.0, 800.0),
+    Item("Projector", 300.0, 600.0),
+    Item("Smart Thermostat", 120.0, 240.0),
+    Item("Robot Vacuum", 200.0, 400.0),
+    Item("Electric Scooter", 350.0, 700.0),
+
+    # Luxury Items (expensive)
+    Item("Designer Handbag", 600.0, 1200.0),
+    Item("Leather Wallet", 100.0, 200.0),
+    Item("Sunglasses", 150.0, 300.0),
+    Item("Perfume", 80.0, 160.0),
+    Item("Cologne", 70.0, 140.0),
+    Item("Watch", 200.0, 400.0),
+    Item("Jewelry Box", 60.0, 120.0),
+    Item("Gold Necklace", 500.0, 1000.0),
+    Item("Silver Bracelet", 150.0, 300.0),
+    Item("Diamond Earrings", 800.0, 1600.0),
+    Item("Designer Shoes", 300.0, 600.0),
+    Item("Leather Jacket", 250.0, 500.0),
+    Item("Cashmere Sweater", 180.0, 360.0),
+    Item("Silk Scarf", 80.0, 160.0),
+    Item("Designer Jeans", 120.0, 240.0),
+
+    # Additional Items (Sports & Outdoor)
+    Item("Yoga Mat", 20.0, 40.0),
+    Item("Dumbbells", 30.0, 60.0),
+    Item("Tennis Racket", 60.0, 120.0),
+    Item("Basketball", 15.0, 30.0),
+    Item("Camping Tent", 100.0, 200.0),
+    Item("Sleeping Bag", 50.0, 100.0),
+    Item("Hiking Boots", 80.0, 160.0),
+]
 
 
 @dataclass
@@ -273,7 +453,7 @@ class CustomerNeed:
 class Customer:
     """Represents a customer with daily needs for items."""
     name: str
-    customer_type: str = "medium"  # "low", "medium", or "high"
+    customer_type: str = "medium"  # "low", "medium", "high", or "uncapped"
     budget: float = 0.0
 
     def __post_init__(self):
@@ -285,17 +465,30 @@ class Customer:
                 self.budget = 50.0
             elif self.customer_type == "high":
                 self.budget = 100.0
+            elif self.customer_type == "uncapped":
+                self.budget = 10000.0  # Effectively unlimited for 1 expensive item
 
     def generate_daily_needs(self, available_items: List[Item]) -> List[CustomerNeed]:
         """
         Generate a random set of item needs for the day based on budget.
 
-        Randomly selects items and quantities, ensuring total cost doesn't exceed budget.
+        For uncapped customers: only buy 1 expensive item (base_price >= 100).
+        For other customers: randomly selects items and quantities.
         """
         if not available_items:
             return []
 
         needs = []
+
+        # Uncapped customers buy exactly 1 expensive item
+        if self.customer_type == "uncapped":
+            expensive_items = [item for item in available_items if item.base_price >= 100]
+            if expensive_items:
+                selected_item = random.choice(expensive_items)
+                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+            return needs
+
+        # Regular customers (low, medium, high)
         remaining_budget = self.budget
 
         # Decide how many different item types to buy (1 to 3)
@@ -373,6 +566,7 @@ class GameState:
     human_players: List[Player] = field(default_factory=list)  # All human-controlled players
     available_upgrades: List[Upgrade] = field(default_factory=list)  # Upgrades that can be purchased
     current_player_index: int = 0  # For multiplayer turn management
+    unlocked_product_indices: List[int] = field(default_factory=list)  # Indices of products from catalog that have been unlocked
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -401,16 +595,50 @@ class GameState:
 
 def create_default_items() -> List[Item]:
     """
-    Create some default items for the simulation.
-
-    TODO:
-    - Adjust items, base_cost, and base_price as desired
+    Create the starting items for the simulation.
+    Returns first 3 items from product catalog.
     """
-    return [
-        Item(name="Bread", base_cost=2.0, base_price=5.0),
-        Item(name="Milk", base_cost=3.0, base_price=6.0),
-        Item(name="Fruit", base_cost=1.0, base_price=4.0),
+    # Start with first 3 items (Bread, Milk, Eggs)
+    return [PRODUCT_CATALOG[0], PRODUCT_CATALOG[1], PRODUCT_CATALOG[2]]
+
+
+def unlock_new_product(game_state: GameState) -> Optional[Item]:
+    """
+    Unlock a new product from the catalog.
+    Before day 50: only unlock items with base_price <= 100
+    After day 50: can unlock any item
+
+    Returns the unlocked Item or None if no valid items available.
+    """
+    # Get indices of products not yet unlocked
+    available_indices = [
+        i for i in range(len(PRODUCT_CATALOG))
+        if i not in game_state.unlocked_product_indices
     ]
+
+    if not available_indices:
+        return None  # All products unlocked
+
+    # Filter by price threshold before day 50
+    if game_state.day < 50:
+        available_indices = [
+            i for i in available_indices
+            if PRODUCT_CATALOG[i].base_price <= 100
+        ]
+
+    if not available_indices:
+        return None  # No valid products available
+
+    # Randomly select one
+    selected_index = random.choice(available_indices)
+    new_item = PRODUCT_CATALOG[selected_index]
+
+    # Add to game state
+    game_state.items.append(new_item)
+    game_state.unlocked_product_indices.append(selected_index)
+    game_state.market_prices[new_item.name] = new_item.base_price
+
+    return new_item
 
 
 def create_players(names: List[str], starting_cash: float) -> List[Player]:
@@ -764,6 +992,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     if show_details:
         print(f"\n=== Day {game_state.day} ===")
 
+    # Step 0: Unlock new product every 5 days
+    if game_state.day % 5 == 0 and game_state.day > 0:
+        new_product = unlock_new_product(game_state)
+        if new_product and show_details:
+            print(f"\n🎁 NEW PRODUCT UNLOCKED: {new_product.name} (${new_product.base_price:.2f})")
+            print(f"   Total products available: {len(game_state.items)}")
+
     # Step 1: Apply price fluctuations and special events
     apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
 
@@ -791,8 +1026,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if show_details:
             print(f"🎊 14-DAY EVENT! +{bonus_customers} customers today!")
 
+    # Calculate uncapped customers (starts at day 50, +1 every 10 days)
+    uncapped_customer_count = 0
+    if game_state.day >= 50:
+        uncapped_customer_count = ((game_state.day - 40) // 10)
+
     if show_details:
-        print(f"Total customers today: {base_customer_count}")
+        print(f"Regular customers today: {base_customer_count}")
+        if uncapped_customer_count > 0:
+            print(f"💎 Uncapped customers today: {uncapped_customer_count} (looking for expensive items ≥$100)")
 
     # Step 2: Refresh vendor inventory based on new market prices
     refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
@@ -824,17 +1066,19 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     daily_sales = {player.name: 0.0 for player in game_state.players}
     daily_profits = {player.name: 0.0 for player in game_state.players}
     customers_served = {player.name: 0 for player in game_state.players}
+    uncapped_customers_served = {player.name: 0 for player in game_state.players}
     unmet_demand = 0
+    unmet_uncapped_demand = 0
 
     # Step 5: Simulate customers with cashier limits
-    # Generate all customers for the day
+    # Generate all regular customers for the day
     all_customers = []
     for i in range(base_customer_count):
         customer_type = random.choice(["low", "medium", "high"])
         customer = Customer(name=f"Customer_{i+1}", customer_type=customer_type)
         all_customers.append(customer)
 
-    # Process each customer
+    # Process each regular customer (with cashier limits)
     for customer in all_customers:
         needs = customer.generate_daily_needs(game_state.items)
 
@@ -856,6 +1100,31 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             else:
                 # Track unmet demand
                 unmet_demand += need.quantity
+
+    # Step 5.5: Process uncapped customers (no cashier limits)
+    if uncapped_customer_count > 0:
+        uncapped_customers = []
+        for i in range(uncapped_customer_count):
+            customer = Customer(name=f"Uncapped_{i+1}", customer_type="uncapped")
+            uncapped_customers.append(customer)
+
+        for customer in uncapped_customers:
+            needs = customer.generate_daily_needs(game_state.items)
+
+            for need in needs:
+                supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity)
+
+                if supplier:
+                    # Uncapped customers bypass cashier limits
+                    price = supplier.prices.get(need.item_name, 0)
+                    revenue, profit = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                    if revenue > 0:
+                        daily_sales[supplier.name] += revenue
+                        daily_profits[supplier.name] += profit
+                        uncapped_customers_served[supplier.name] += 1
+                else:
+                    # Track unmet uncapped demand
+                    unmet_uncapped_demand += need.quantity
 
     # Step 5.5: Award XP based on profit (before wages)
     level_ups = {}
@@ -882,18 +1151,24 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             sales = daily_sales[player.name]
             profit = daily_profits[player.name]
             served = customers_served[player.name]
+            uncapped_served = uncapped_customers_served[player.name]
             max_served = player.get_max_customers()
             xp_needed = player.get_xp_for_next_level()
             print(f"  {player.name}:")
             print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | XP: {player.experience:.0f}/{xp_needed:.0f}")
-            print(f"    Customers: {served}/{max_served} | Cash: ${player.cash:.2f}")
+            customer_info = f"Regular: {served}/{max_served}"
+            if uncapped_customer_count > 0:
+                customer_info += f" | 💎 Uncapped: {uncapped_served}"
+            print(f"    Customers: {customer_info} | Cash: ${player.cash:.2f}")
 
             # Show level up if occurred
             if player.name in level_ups:
                 print(f"    🎉 LEVEL UP! Now level {level_ups[player.name]} (max {player.get_max_products()} products)")
 
         if unmet_demand > 0:
-            print(f"\nUnmet demand: {unmet_demand} items")
+            print(f"\nUnmet regular demand: {unmet_demand} items")
+        if unmet_uncapped_demand > 0:
+            print(f"Unmet uncapped demand: {unmet_uncapped_demand} items")
 
     # Step 8: Advance day counter
     game_state.day += 1
@@ -1331,6 +1606,52 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def display_customer_forecast(game_state: GameState) -> None:
+    """Display expected customer traffic for the day."""
+    print("\n" + "=" * 60)
+    print("CUSTOMER FORECAST")
+    print("=" * 60)
+    print(f"\nDay {game_state.day} Expected Customers:")
+
+    # Calculate base customer count
+    base_customer_count = len(game_state.players) * 10 + game_state.day
+
+    # Check for 14-day event
+    event_bonus = 0
+    if game_state.day % 14 == 0:
+        occurrence_count = game_state.day // 14
+        event_bonus = 20 * occurrence_count
+        base_customer_count += event_bonus
+
+    # Calculate uncapped customers
+    uncapped_customer_count = 0
+    if game_state.day >= 50:
+        uncapped_customer_count = ((game_state.day - 40) // 10)
+
+    print(f"\n📊 Regular Customers: {base_customer_count}")
+    print(f"   - These customers are limited by your cashier capacity")
+    print(f"   - Types: Low ($20), Medium ($50), High ($100) budgets")
+
+    if event_bonus > 0:
+        print(f"\n🎊 14-Day Event Bonus: +{event_bonus} customers!")
+
+    if uncapped_customer_count > 0:
+        print(f"\n💎 Uncapped Customers: {uncapped_customer_count}")
+        print(f"   - These customers BYPASS cashier limits!")
+        print(f"   - Each buys exactly 1 expensive item (≥$100)")
+        expensive_items = [item for item in game_state.items if item.base_price >= 100]
+        print(f"   - Available expensive items: {len(expensive_items)}")
+        if len(expensive_items) > 0:
+            print(f"   - Price range: ${min(i.base_price for i in expensive_items):.2f} - ${max(i.base_price for i in expensive_items):.2f}")
+    elif game_state.day < 50:
+        print(f"\n💎 Uncapped Customers: Not yet available")
+        print(f"   - Unlock at day 50 (in {50 - game_state.day} days)")
+
+    total = base_customer_count + uncapped_customer_count
+    print(f"\n🎯 Total Expected: {total} customers")
+    print("=" * 60)
+
+
 def main_menu(game_state: GameState) -> bool:
     """
     Display main menu and handle user choice.
@@ -1354,10 +1675,28 @@ def main_menu(game_state: GameState) -> bool:
         print("  7. View Your Store Status")
         print("  8. View Competitor Status")
         print("  9. Store Upgrades")
+        print("  c. Customer Forecast")
+        print("  s. Save Game")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-9): ")
+            choice = input("\nSelect option (0-9, c, s): ").strip().lower()
+
+            # Handle customer forecast
+            if choice == 'c':
+                display_customer_forecast(game_state)
+                input("\nPress Enter to continue...")
+                continue
+
+            # Handle save command
+            if choice == 's':
+                if save_game(game_state):
+                    print(f"\n✓ Game saved successfully to {SAVE_FILE}")
+                else:
+                    print("\n✗ Failed to save game")
+                input("\nPress Enter to continue...")
+                continue
+
             choice_num = int(choice)
 
             if choice_num == 0:
@@ -1406,6 +1745,226 @@ def main_menu(game_state: GameState) -> bool:
 
 
 # -------------------------------------------------------------------
+# Save/Load System
+# -------------------------------------------------------------------
+
+SAVE_FILE = "economy_sim_save.json"
+
+def serialize_game_state(game_state: GameState) -> dict:
+    """Convert GameState to a JSON-serializable dictionary."""
+    return {
+        "day": game_state.day,
+        "current_player_index": game_state.current_player_index,
+        "unlocked_product_indices": game_state.unlocked_product_indices,
+        "config": {
+            "starting_cash": game_state.config.starting_cash,
+            "num_days": game_state.config.num_days,
+            "customers_per_day": game_state.config.customers_per_day,
+        },
+        "items": [
+            {"name": item.name, "base_cost": item.base_cost, "base_price": item.base_price}
+            for item in game_state.items
+        ],
+        "market_prices": game_state.market_prices,
+        "vendors": [
+            {
+                "name": vendor.name,
+                "pricing_multiplier": vendor.pricing_multiplier,
+                "selection_type": vendor.selection_type,
+                "selection_params": vendor.selection_params,
+                "items": vendor.items,
+            }
+            for vendor in game_state.vendors
+        ],
+        "players": [
+            {
+                "name": player.name,
+                "cash": player.cash,
+                "inventory": player.inventory,
+                "prices": player.prices,
+                "buy_orders": {k: list(v) for k, v in player.buy_orders.items()},
+                "cashiers": player.cashiers,
+                "restockers": player.restockers,
+                "store_level": player.store_level,
+                "experience": player.experience,
+                "item_costs": player.item_costs,
+                "purchased_upgrades": [
+                    {
+                        "name": upgrade.name,
+                        "cost": upgrade.cost,
+                        "effect_type": upgrade.effect_type,
+                        "effect_value": upgrade.effect_value,
+                        "vendor_name": upgrade.vendor_name,
+                    }
+                    for upgrade in player.purchased_upgrades
+                ],
+                "is_human": player.is_human,
+            }
+            for player in game_state.players
+        ],
+        "available_upgrades": [
+            {
+                "name": upgrade.name,
+                "cost": upgrade.cost,
+                "effect_type": upgrade.effect_type,
+                "effect_value": upgrade.effect_value,
+                "vendor_name": upgrade.vendor_name,
+            }
+            for upgrade in game_state.available_upgrades
+        ],
+    }
+
+
+def deserialize_game_state(data: dict) -> GameState:
+    """Load GameState from a JSON dictionary."""
+    # Recreate config
+    config = GameConfig(
+        starting_cash=data["config"]["starting_cash"],
+        num_days=data["config"]["num_days"],
+        customers_per_day=data["config"]["customers_per_day"],
+    )
+
+    # Recreate items
+    items = [
+        Item(name=item_data["name"], base_cost=item_data["base_cost"], base_price=item_data["base_price"])
+        for item_data in data["items"]
+    ]
+
+    # Recreate vendors
+    vendors = [
+        Vendor(
+            name=vendor_data["name"],
+            pricing_multiplier=vendor_data["pricing_multiplier"],
+            selection_type=vendor_data["selection_type"],
+            selection_params=vendor_data["selection_params"],
+            items=vendor_data["items"],
+        )
+        for vendor_data in data["vendors"]
+    ]
+
+    # Recreate available upgrades
+    available_upgrades = [
+        Upgrade(
+            name=upgrade_data["name"],
+            cost=upgrade_data["cost"],
+            effect_type=upgrade_data["effect_type"],
+            effect_value=upgrade_data["effect_value"],
+            vendor_name=upgrade_data.get("vendor_name", ""),
+        )
+        for upgrade_data in data["available_upgrades"]
+    ]
+
+    # Recreate players
+    players = []
+    for player_data in data["players"]:
+        # Recreate purchased upgrades
+        purchased_upgrades = [
+            Upgrade(
+                name=upgrade_data["name"],
+                cost=upgrade_data["cost"],
+                effect_type=upgrade_data["effect_type"],
+                effect_value=upgrade_data["effect_value"],
+                vendor_name=upgrade_data.get("vendor_name", ""),
+            )
+            for upgrade_data in player_data["purchased_upgrades"]
+        ]
+
+        # Convert buy_orders back to tuples
+        buy_orders = {k: tuple(v) for k, v in player_data["buy_orders"].items()}
+
+        player = Player(
+            name=player_data["name"],
+            cash=player_data["cash"],
+            inventory=player_data["inventory"],
+            prices=player_data["prices"],
+            buy_orders=buy_orders,
+            cashiers=player_data["cashiers"],
+            restockers=player_data["restockers"],
+            store_level=player_data["store_level"],
+            experience=player_data["experience"],
+            item_costs=player_data["item_costs"],
+            purchased_upgrades=purchased_upgrades,
+            is_human=player_data["is_human"],
+        )
+        players.append(player)
+
+    # Separate human and AI players
+    human_players = [p for p in players if p.is_human]
+
+    # Create GameState
+    game_state = GameState(
+        day=data["day"],
+        players=players,
+        customers=[],  # Customers are generated dynamically
+        items=items,
+        vendors=vendors,
+        market_prices=data["market_prices"],
+        config=config,
+        human_players=human_players,
+        available_upgrades=available_upgrades,
+        current_player_index=data["current_player_index"],
+        unlocked_product_indices=data.get("unlocked_product_indices", []),
+    )
+
+    return game_state
+
+
+def save_game(game_state: GameState, filename: str = SAVE_FILE) -> bool:
+    """
+    Save the current game state to a JSON file.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        data = serialize_game_state(game_state)
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"\n✗ Error saving game: {e}")
+        return False
+
+
+def load_game(filename: str = SAVE_FILE) -> Optional[GameState]:
+    """
+    Load game state from a JSON file.
+    Returns GameState if successful, None otherwise.
+    """
+    try:
+        if not os.path.exists(filename):
+            return None
+
+        with open(filename, 'r') as f:
+            data = json.load(f)
+
+        game_state = deserialize_game_state(data)
+        return game_state
+    except Exception as e:
+        print(f"\n✗ Error loading game: {e}")
+        return None
+
+
+# Global variable to store game state for signal handler
+_current_game_state: Optional[GameState] = None
+
+
+def signal_handler(sig, frame):
+    """Handle Ctrl+C by auto-saving the game."""
+    global _current_game_state
+    print("\n\n🛑 Ctrl+C detected! Auto-saving game...")
+
+    if _current_game_state is not None:
+        if save_game(_current_game_state):
+            print(f"✓ Game saved successfully to {SAVE_FILE}")
+        else:
+            print("✗ Failed to save game")
+    else:
+        print("No game state to save")
+
+    print("\nExiting game. Thanks for playing!")
+    sys.exit(0)
+
+
+# -------------------------------------------------------------------
 # Main simulation loop
 # -------------------------------------------------------------------
 
@@ -1413,10 +1972,10 @@ def run_game() -> None:
     """
     Top-level function to run the interactive economy simulation game.
     """
+    global _current_game_state
 
-    # Create game configuration
-    config = GameConfig()
-    config.num_days = 365  # Run for a full year
+    # Set up signal handler for Ctrl+C
+    signal.signal(signal.SIGINT, signal_handler)
 
     print("\n" + "=" * 60)
     print("WELCOME TO ECONOMY SIMULATION")
@@ -1426,91 +1985,126 @@ def run_game() -> None:
     print("The market prices fluctuate daily, so timing is everything!")
     print("\n" + "=" * 60)
 
-    # Get number of human players
-    while True:
-        try:
-            num_humans_str = input("\nHow many human players? (1-4): ").strip()
-            num_humans = int(num_humans_str)
-            if 1 <= num_humans <= 4:
-                break
+    # Check if save file exists
+    game_state = None
+    if os.path.exists(SAVE_FILE):
+        print(f"\n💾 Found existing save file: {SAVE_FILE}")
+        load_choice = input("Would you like to load it? (y/n): ").strip().lower()
+        if load_choice == 'y':
+            game_state = load_game()
+            if game_state:
+                print("✓ Game loaded successfully!")
+                _current_game_state = game_state
             else:
-                print("Please enter a number between 1 and 4")
-        except ValueError:
-            print("Invalid input. Please enter a number.")
+                print("✗ Failed to load game. Starting new game...")
+                game_state = None
 
-    # Get names for human players
-    human_players = []
-    for i in range(num_humans):
-        player_name = input(f"\nEnter name for Player {i+1}: ").strip()
-        if not player_name:
-            player_name = f"Player {i+1}"
-        human_player = Player(name=player_name, cash=config.starting_cash, is_human=True)
-        human_players.append(human_player)
+    # If no save loaded, start new game
+    if game_state is None:
+        # Create game configuration
+        config = GameConfig()
+        config.num_days = 365  # Run for a full year
 
-    print(f"\nStarting cash: ${config.starting_cash:.2f}")
-    print(f"Customers formula: (num_players × 10) + day_number")
+        # Get number of human players
+        while True:
+            try:
+                num_humans_str = input("\nHow many human players? (1-4): ").strip()
+                num_humans = int(num_humans_str)
+                if 1 <= num_humans <= 4:
+                    break
+                else:
+                    print("Please enter a number between 1 and 4")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
 
-    # Initialize items, vendors
-    items = create_default_items()
-    vendors = create_vendors()
-    market_prices = initialize_market_prices(items)
+        # Get names for human players
+        human_players = []
+        for i in range(num_humans):
+            player_name = input(f"\nEnter name for Player {i+1}: ").strip()
+            if not player_name:
+                player_name = f"Player {i+1}"
+            human_player = Player(name=player_name, cash=config.starting_cash, is_human=True)
+            human_players.append(human_player)
 
-    # Initialize vendor inventory for day 1
-    refresh_vendor_inventory(vendors, items, market_prices)
+        print(f"\nStarting cash: ${config.starting_cash:.2f}")
+        print(f"Customers formula: (num_players × 10) + day_number")
 
-    # Create AI players
-    ai_players = create_players(["Alice Corp", "Bob Ltd"], config.starting_cash)
-    all_players = human_players + ai_players
+        # Initialize items, vendors
+        items = create_default_items()
+        vendors = create_vendors()
+        market_prices = initialize_market_prices(items)
 
-    # Create available upgrades
-    available_upgrades = create_default_upgrades(vendors)
+        # Initialize vendor inventory for day 1
+        refresh_vendor_inventory(vendors, items, market_prices)
 
-    # Create GameState (customers generated dynamically each day)
-    game_state = GameState(
-        day=1,
-        players=all_players,
-        customers=[],  # Customers generated dynamically in run_day()
-        items=items,
-        vendors=vendors,
-        market_prices=market_prices,
-        config=config,
-        human_players=human_players,
-        available_upgrades=available_upgrades,
-        current_player_index=0,
-    )
+        # Create AI players
+        ai_players = create_players(["Alice Corp", "Bob Ltd"], config.starting_cash)
+        all_players = human_players + ai_players
 
-    # Show initial setup
-    print("\n" + "=" * 60)
-    print("GAME SETUP COMPLETE")
-    print("=" * 60)
-    print(f"\nHuman Players:")
-    for player in human_players:
-        print(f"  - {player.name}")
+        # Create available upgrades
+        available_upgrades = create_default_upgrades(vendors)
 
-    print(f"\nAI Competitors:")
-    for player in ai_players:
-        print(f"  - {player.name}")
+        # Create GameState (customers generated dynamically each day)
+        game_state = GameState(
+            day=1,
+            players=all_players,
+            customers=[],  # Customers generated dynamically in run_day()
+            items=items,
+            vendors=vendors,
+            market_prices=market_prices,
+            config=config,
+            human_players=human_players,
+            available_upgrades=available_upgrades,
+            current_player_index=0,
+            unlocked_product_indices=[0, 1, 2],  # Start with first 3 products unlocked
+        )
 
-    print(f"\nAvailable Items:")
-    for item in items:
-        print(f"  - {item.name} (Base: ${item.base_cost:.2f})")
+        # Set global game state for signal handler
+        _current_game_state = game_state
 
-    print(f"\nVendors:")
-    for vendor in vendors:
-        print(f"  - {vendor.name}")
+        # Show initial setup
+        print("\n" + "=" * 60)
+        print("GAME SETUP COMPLETE")
+        print("=" * 60)
+        print(f"\nHuman Players:")
+        for player in human_players:
+            print(f"  - {player.name}")
 
-    input("\nPress Enter to start the game...")
+        print(f"\nAI Competitors:")
+        for player in ai_players:
+            print(f"  - {player.name}")
+
+        print(f"\nAvailable Items:")
+        for item in items:
+            print(f"  - {item.name} (Base: ${item.base_cost:.2f})")
+
+        print(f"\nVendors:")
+        for vendor in vendors:
+            print(f"  - {vendor.name}")
+
+        input("\nPress Enter to start the game...")
+    else:
+        # Game loaded from save, show current status
+        print("\n" + "=" * 60)
+        print("LOADED GAME STATUS")
+        print("=" * 60)
+        print(f"\nCurrent Day: {game_state.day}")
+        print(f"\nPlayers:")
+        for player in game_state.players:
+            status = " (YOU)" if player.is_human else " (AI)"
+            print(f"  - {player.name}{status}: ${player.cash:.2f}")
+        input("\nPress Enter to continue...")
 
     # Main game loop
     game_running = True
-    while game_running and game_state.day <= config.num_days:
+    while game_running and game_state.day <= game_state.config.num_days:
         # Let each human player take their turn
-        for i, player in enumerate(human_players):
+        for i, player in enumerate(game_state.human_players):
             game_state.current_player_index = i
             if not game_running:
                 break
 
-            if len(human_players) > 1:
+            if len(game_state.human_players) > 1:
                 print(f"\n{'='*60}")
                 print(f"  {player.name}'s Turn")
                 print(f"{'='*60}")
