@@ -901,8 +901,14 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
                 # Get the price from this vendor (might be None if item not available)
                 price = vendor.get_price(item_name)
 
+                # Debug output for troubleshooting
+                if price is None and vendor.selection_type == "random_daily":
+                    print(f"  🔍 {player.name}: Ordered {item_name} from {vendor.name}, but they don't have it!")
+                    print(f"      {vendor.name} current stock: {list(vendor.items.keys())}")
+
                 # For random vendors, check if item is available, fallback if not
                 if vendor.selection_type == "random_daily" and price is None:
+                    original_vendor_name = vendor.name
                     # Find cheapest vendor that has this item
                     cheapest_vendor = None
                     cheapest_price = float('inf')
@@ -914,6 +920,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
                             cheapest_vendor = v
 
                     if cheapest_vendor:
+                        print(f"  ⚠️  {player.name}: {item_name} not available at {original_vendor_name}, using {cheapest_vendor.name} (${cheapest_price:.2f})")
                         vendor = cheapest_vendor
                         price = cheapest_price
 
@@ -958,12 +965,13 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
 # Player strategies
 # -------------------------------------------------------------------
 
-def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendor]) -> None:
+def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendor], market_prices: Dict[str, float]) -> None:
     """
     Automatically set up buy orders for AI players.
 
     AI players will buy to maintain inventory of at least 10 units per item,
     always choosing the cheapest available vendor.
+    Only buys items available at or below market price to avoid overpaying.
     """
     for item in items:
         current_inventory = player.inventory.get(item.name, 0)
@@ -982,8 +990,10 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
                 cheapest_price = vendor_price
                 cheapest_vendor = vendor
 
-        # Set buy order
-        if cheapest_vendor and quantity_to_buy > 0:
+        # Only buy if available at a good price (≤ 100% of market price)
+        # This prevents AI from buying from expensive "Universal Supply" vendor
+        market_price = market_prices.get(item.name, item.base_price)
+        if cheapest_vendor and quantity_to_buy > 0 and cheapest_price <= market_price:
             player.set_buy_order(item.name, quantity_to_buy, cheapest_vendor.name)
         else:
             player.set_buy_order(item.name, 0, "")
@@ -994,11 +1004,14 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float]) -> No
     Automatically set prices for AI players based on current market prices.
 
     Uses market price with a small random variation to simulate competition.
+    Rounds to nearest $0.25 for natural-looking prices.
     """
     for item_name, market_price in market_prices.items():
         # Set price to market_price with a random variation of +/- 5%
         variation = random.uniform(0.95, 1.05)
         price = market_price * variation
+        # Round to nearest $0.25 for more natural prices
+        price = round(price * 4) / 4
         player.set_price(item_name, price)
 
 
@@ -1146,12 +1159,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     Steps:
     1. Apply daily price fluctuations and special events
-    2. Refresh vendor inventory based on new market prices
+    2. Let AI players adjust buy orders and prices
     3. Execute buy orders for all players (from cheapest to most expensive)
-    4. Let AI players adjust prices
-    5. For each customer, generate needs and make purchases (limited by cashier capacity)
-    6. Pay employee wages
-    7. Track statistics
+    4. For each customer, generate needs and make purchases (limited by cashier capacity)
+    5. Pay employee wages
+    6. Track statistics
+    7. Refresh vendor inventory for next day (at END of day)
     8. Advance the day counter
 
     Returns dictionary of daily sales per player.
@@ -1204,33 +1217,33 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if uncapped_customer_count > 0:
             print(f"💎 Uncapped customers today: {uncapped_customer_count} (looking for expensive items ≥$100)")
 
-    # Step 2: Refresh vendor inventory based on new market prices
-    refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
-
-    # Step 3: Execute buy orders for ALL players
-    if show_details:
-        print("\nExecuting buy orders...")
-
-    for player in game_state.players:
-        purchases = execute_buy_orders(player, game_state)
-        if show_details and purchases:
-            total_spent = sum(
-                game_state.get_vendor(player.get_buy_order(item)[1]).get_price(item) * qty
-                if game_state.get_vendor(player.get_buy_order(item)[1])
-                else 0
-                for item, qty in purchases.items()
-            )
-            print(f"  {player.name}: Purchased {sum(purchases.values())} items")
-
-    # Step 4: AI player decisions (pricing, buying, and upgrades)
+    # Step 2: AI player decisions (pricing, buying, and upgrades)
+    # Done BEFORE buy orders so they can purchase inventory on Day 1
     for player in game_state.players:
         if not player.is_human:  # Only automate AI players
-            # Set up AI buy orders if not already set
-            if not player.buy_orders:
-                auto_setup_buy_orders(player, game_state.items, game_state.vendors)
+            # Update AI buy orders every day based on current inventory
+            auto_setup_buy_orders(player, game_state.items, game_state.vendors, game_state.market_prices)
             auto_pricing_strategy(player, game_state.market_prices)
             # AI players can now purchase upgrades strategically
             auto_purchase_upgrades(player, game_state)
+
+    # Step 4: Execute buy orders for ALL players
+    if show_details:
+        print("\nExecuting buy orders...")
+
+    # Track daily spending per player for accurate profit calculation
+    daily_spending = {player.name: 0.0 for player in game_state.players}
+
+    for player in game_state.players:
+        # Track actual cash spent (accounts for vendor fallbacks, discounts, etc.)
+        cash_before = player.cash
+        purchases = execute_buy_orders(player, game_state)
+        cash_after = player.cash
+        actual_spent = cash_before - cash_after
+
+        daily_spending[player.name] = actual_spent
+        if show_details and purchases:
+            print(f"  {player.name}: Purchased {sum(purchases.values())} items (spent ${actual_spent:.2f})")
 
     # Track daily statistics
     daily_sales = {player.name: 0.0 for player in game_state.players}
@@ -1296,7 +1309,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     # Track unmet uncapped demand
                     unmet_uncapped_demand += need.quantity
 
-    # Step 5.5: Award XP based on profit (before wages)
+    # Step 5.5: Calculate actual profits (Sales - Daily Spending, before wages)
+    for player in game_state.players:
+        daily_profits[player.name] = daily_sales[player.name] - daily_spending[player.name]
+
+    # Step 5.6: Award XP based on profit (before wages)
     level_ups = {}
     for player in game_state.players:
         profit = daily_profits[player.name]
@@ -1340,7 +1357,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if unmet_uncapped_demand > 0:
             print(f"Unmet uncapped demand: {unmet_uncapped_demand} items")
 
-    # Step 8: Advance day counter
+    # Step 8: Refresh vendor inventory for next day
+    # Done at END of day so buy orders are set for current vendor inventory
+    refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
+
+    # Step 9: Advance day counter
     game_state.day += 1
 
     return daily_sales
