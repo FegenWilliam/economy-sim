@@ -1837,21 +1837,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"\n🎁 NEW PRODUCT UNLOCKED: {new_product.name} (${new_product.base_price:.2f})")
             print(f"   Total products available: {len(game_state.items)}")
 
-    # Step 0.5: Update item demand daily
-    updated_items = update_item_demand(game_state)
-    if show_details and updated_items:
-        print(f"\n📊 DEMAND UPDATE: {len(updated_items)} items had demand changes")
-        # Show top 3 demand changes if there are any
-        demand_changes = [(item_name, game_state.item_demand[item_name]) for item_name in updated_items[:3]]
-        for item_name, demand in demand_changes:
-            if demand >= 1.5:
-                emoji = "📈"
-            elif demand <= 0.5:
-                emoji = "📉"
-            else:
-                emoji = "➡️"
-            print(f"   {emoji} {item_name}: {demand:.2f}x demand")
-
     # Step 1: Reset any event price changes from previous day
     if game_state.event_price_changes:
         for item_name, original_price in game_state.event_price_changes.items():
@@ -2252,6 +2237,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             sorted_demand = sorted(daily_demand_per_item.items(), key=lambda x: (-x[1], x[0]))
             for item_name, quantity in sorted_demand:
                 print(f"  {item_name}: {quantity} units")
+
+    # Update item demand for next day (after everything has sold)
+    updated_items = update_item_demand(game_state)
+    if show_details and updated_items:
+        print(f"\n📊 DEMAND UPDATE: {len(updated_items)} items had demand changes")
+        # Show top 3 demand changes if there are any
+        demand_changes = [(item_name, game_state.item_demand[item_name]) for item_name in updated_items[:3]]
+        for item_name, demand in demand_changes:
+            if demand >= 1.5:
+                emoji = "📈"
+            elif demand <= 0.5:
+                emoji = "📉"
+            else:
+                emoji = "➡️"
+            print(f"   {emoji} {item_name}: {demand:.2f}x demand")
 
     # Step 7.5: Store per-item sales data for AI pricing strategy
     for player in game_state.players:
