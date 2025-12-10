@@ -217,6 +217,174 @@ PRODUCT_CATALOG = [
     Item("Camping Tent", 100.0, 200.0),
     Item("Sleeping Bag", 50.0, 100.0),
     Item("Hiking Boots", 80.0, 160.0),
+
+    # More Groceries & Food
+    Item("Peanut Butter", 4.0, 8.0),
+    Item("Jelly", 3.0, 6.0),
+    Item("Honey", 5.0, 10.0),
+    Item("Maple Syrup", 6.0, 12.0),
+    Item("Crackers", 3.0, 6.0),
+    Item("Chips", 2.5, 5.0),
+    Item("Pretzels", 2.5, 5.0),
+    Item("Popcorn", 2.0, 4.0),
+    Item("Cookies", 3.5, 7.0),
+    Item("Cake Mix", 3.0, 6.0),
+    Item("Brownie Mix", 3.0, 6.0),
+    Item("Chocolate Bar", 1.5, 3.0),
+    Item("Candy", 1.0, 2.5),
+    Item("Gum", 1.0, 2.5),
+    Item("Mints", 1.5, 3.0),
+    Item("Granola Bars", 4.0, 8.0),
+    Item("Energy Bars", 5.0, 10.0),
+    Item("Protein Powder", 25.0, 50.0),
+    Item("Vitamins", 12.0, 24.0),
+    Item("Fish Oil", 15.0, 30.0),
+    Item("Canned Tuna", 1.5, 3.5),
+    Item("Canned Beans", 1.5, 3.5),
+    Item("Canned Corn", 1.5, 3.5),
+    Item("Canned Tomatoes", 2.0, 4.0),
+    Item("Tomato Sauce", 2.0, 4.5),
+    Item("Spaghetti Sauce", 3.0, 6.5),
+    Item("Hot Sauce", 2.5, 5.5),
+    Item("Soy Sauce", 3.0, 6.0),
+    Item("Vinegar", 2.0, 4.5),
+    Item("Olive Oil", 8.0, 16.0),
+    Item("Coconut Oil", 9.0, 18.0),
+    Item("Protein Shake", 4.0, 8.0),
+    Item("Sports Drink", 2.0, 4.5),
+    Item("Energy Drink", 3.0, 6.0),
+    Item("Bottled Water", 1.0, 2.5),
+    Item("Sparkling Water", 1.5, 3.5),
+    Item("Iced Tea", 2.0, 4.5),
+    Item("Lemonade", 2.5, 5.5),
+
+    # Pet Supplies
+    Item("Dog Food", 15.0, 30.0),
+    Item("Cat Food", 12.0, 24.0),
+    Item("Dog Treats", 5.0, 10.0),
+    Item("Cat Treats", 4.0, 8.0),
+    Item("Dog Toy", 6.0, 12.0),
+    Item("Cat Toy", 4.0, 8.0),
+    Item("Pet Bowl", 8.0, 16.0),
+    Item("Pet Collar", 10.0, 20.0),
+    Item("Pet Leash", 12.0, 24.0),
+    Item("Cat Litter", 10.0, 20.0),
+    Item("Fish Tank", 40.0, 80.0),
+    Item("Fish Food", 4.0, 8.0),
+    Item("Bird Cage", 50.0, 100.0),
+    Item("Bird Seed", 6.0, 12.0),
+
+    # Baby Products
+    Item("Diapers", 20.0, 40.0),
+    Item("Baby Wipes", 5.0, 10.0),
+    Item("Baby Formula", 25.0, 50.0),
+    Item("Baby Bottle", 8.0, 16.0),
+    Item("Pacifier", 4.0, 8.0),
+    Item("Baby Lotion", 6.0, 12.0),
+    Item("Baby Shampoo", 5.0, 10.0),
+    Item("Baby Powder", 4.0, 8.0),
+    Item("Diaper Bag", 30.0, 60.0),
+    Item("Baby Blanket", 15.0, 30.0),
+    Item("Teething Ring", 5.0, 10.0),
+
+    # Pharmacy & Health
+    Item("Pain Reliever", 8.0, 16.0),
+    Item("Cold Medicine", 10.0, 20.0),
+    Item("Allergy Medicine", 12.0, 24.0),
+    Item("Band-Aids", 4.0, 8.0),
+    Item("First Aid Kit", 20.0, 40.0),
+    Item("Thermometer", 15.0, 30.0),
+    Item("Cough Drops", 3.0, 6.0),
+    Item("Antacid", 6.0, 12.0),
+    Item("Eye Drops", 8.0, 16.0),
+    Item("Lip Balm", 2.0, 4.5),
+    Item("Sunscreen", 10.0, 20.0),
+    Item("Bug Spray", 7.0, 14.0),
+
+    # Kitchen & Dining
+    Item("Plates Set", 20.0, 40.0),
+    Item("Bowls Set", 15.0, 30.0),
+    Item("Cups Set", 12.0, 24.0),
+    Item("Silverware Set", 25.0, 50.0),
+    Item("Cooking Pot", 30.0, 60.0),
+    Item("Frying Pan", 25.0, 50.0),
+    Item("Baking Sheet", 12.0, 24.0),
+    Item("Mixing Bowl", 10.0, 20.0),
+    Item("Cutting Board", 15.0, 30.0),
+    Item("Kitchen Knife", 20.0, 40.0),
+    Item("Can Opener", 8.0, 16.0),
+    Item("Bottle Opener", 5.0, 10.0),
+    Item("Measuring Cups", 10.0, 20.0),
+    Item("Measuring Spoons", 8.0, 16.0),
+    Item("Spatula", 7.0, 14.0),
+    Item("Whisk", 6.0, 12.0),
+    Item("Tongs", 8.0, 16.0),
+    Item("Ladle", 7.0, 14.0),
+    Item("Colander", 12.0, 24.0),
+    Item("Grater", 10.0, 20.0),
+
+    # Home Decor
+    Item("Picture Frame", 12.0, 24.0),
+    Item("Wall Art", 25.0, 50.0),
+    Item("Throw Pillow", 15.0, 30.0),
+    Item("Blanket", 25.0, 50.0),
+    Item("Curtains", 30.0, 60.0),
+    Item("Area Rug", 60.0, 120.0),
+    Item("Table Lamp", 35.0, 70.0),
+    Item("Floor Lamp", 50.0, 100.0),
+    Item("Wall Clock", 20.0, 40.0),
+    Item("Vase", 18.0, 36.0),
+    Item("Candle Holder", 12.0, 24.0),
+    Item("Plant Pot", 10.0, 20.0),
+    Item("Fake Plant", 15.0, 30.0),
+    Item("Mirror", 40.0, 80.0),
+
+    # Garden & Outdoor
+    Item("Garden Hose", 25.0, 50.0),
+    Item("Sprinkler", 20.0, 40.0),
+    Item("Garden Gloves", 8.0, 16.0),
+    Item("Plant Seeds", 3.0, 6.0),
+    Item("Fertilizer", 12.0, 24.0),
+    Item("Potting Soil", 10.0, 20.0),
+    Item("Weed Killer", 15.0, 30.0),
+    Item("Lawn Mower", 200.0, 400.0),
+    Item("Rake", 18.0, 36.0),
+    Item("Shovel", 22.0, 44.0),
+    Item("Garden Shears", 15.0, 30.0),
+    Item("Watering Can", 12.0, 24.0),
+    Item("BBQ Grill", 150.0, 300.0),
+    Item("Charcoal", 10.0, 20.0),
+    Item("Lighter Fluid", 6.0, 12.0),
+    Item("Patio Furniture", 250.0, 500.0),
+
+    # Toys & Games
+    Item("Board Game", 20.0, 40.0),
+    Item("Puzzle", 15.0, 30.0),
+    Item("Playing Cards", 5.0, 10.0),
+    Item("Action Figure", 12.0, 24.0),
+    Item("Doll", 18.0, 36.0),
+    Item("Stuffed Animal", 15.0, 30.0),
+    Item("Building Blocks", 25.0, 50.0),
+    Item("Art Supplies", 20.0, 40.0),
+    Item("Crayons", 4.0, 8.0),
+    Item("Coloring Book", 5.0, 10.0),
+    Item("Play-Doh", 8.0, 16.0),
+    Item("Remote Control Car", 40.0, 80.0),
+    Item("Nerf Gun", 25.0, 50.0),
+    Item("Water Gun", 10.0, 20.0),
+    Item("Frisbee", 8.0, 16.0),
+    Item("Soccer Ball", 18.0, 36.0),
+    Item("Football", 20.0, 40.0),
+    Item("Baseball Glove", 35.0, 70.0),
+    Item("Baseball Bat", 30.0, 60.0),
+
+    # Car Accessories
+    Item("Car Phone Mount", 15.0, 30.0),
+    Item("Car Charger", 12.0, 24.0),
+    Item("Jumper Cables", 25.0, 50.0),
+    Item("Car Air Freshener", 3.0, 6.0),
+    Item("Windshield Wiper", 18.0, 36.0),
+    Item("Motor Oil", 20.0, 40.0),
 ]
 
 
@@ -516,7 +684,7 @@ class CustomerNeed:
 class Customer:
     """Represents a customer with daily needs for items."""
     name: str
-    customer_type: str = "medium"  # "low", "medium", "high", or "uncapped"
+    customer_type: str = "medium"  # "low", "medium", "high", "uncapped", "hoarder", "rich_guy", "poor_man", "kid"
     budget: float = 0.0
 
     def __post_init__(self):
@@ -530,12 +698,24 @@ class Customer:
                 self.budget = 100.0
             elif self.customer_type == "uncapped":
                 self.budget = 10000.0  # Effectively unlimited for 1 expensive item
+            elif self.customer_type == "hoarder":
+                self.budget = 40.0
+            elif self.customer_type == "rich_guy":
+                self.budget = 400.0
+            elif self.customer_type == "poor_man":
+                self.budget = 10.0
+            elif self.customer_type == "kid":
+                self.budget = 10.0
 
-    def generate_daily_needs(self, available_items: List[Item]) -> List[CustomerNeed]:
+    def generate_daily_needs(self, available_items: List[Item], market_prices: Dict[str, float] = None) -> List[CustomerNeed]:
         """
         Generate a random set of item needs for the day based on budget.
 
         For uncapped customers: only buy 1 expensive item (base_price >= 100).
+        For hoarder: buys 3-10 of 1 item only (budget $40).
+        For rich_guy: buys only items >$50, normal quantity (budget $400).
+        For poor_man: buys exactly 1 item <$10 (budget $10).
+        For kid: buys exactly 2 items <$5 (budget $10).
         For other customers: randomly selects items and quantities.
         """
         if not available_items:
@@ -549,6 +729,70 @@ class Customer:
             if expensive_items:
                 selected_item = random.choice(expensive_items)
                 needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+            return needs
+
+        # Hoarder: buys 3-10 of 1 item only
+        if self.customer_type == "hoarder":
+            # Filter items that fit within budget for at least 3 units
+            affordable_items = [item for item in available_items if item.base_price * 3 <= self.budget]
+            if affordable_items:
+                selected_item = random.choice(affordable_items)
+                max_qty = min(10, int(self.budget / selected_item.base_price))
+                quantity = random.randint(3, max_qty)
+                needs.append(CustomerNeed(item_name=selected_item.name, quantity=quantity))
+            return needs
+
+        # Rich Guy: buys only items that cost >$50 (uses market prices if available, else base price)
+        if self.customer_type == "rich_guy":
+            if market_prices:
+                expensive_items = [item for item in available_items
+                                 if market_prices.get(item.name, item.base_price) > 50.0]
+            else:
+                expensive_items = [item for item in available_items if item.base_price > 50.0]
+
+            if expensive_items:
+                remaining_budget = self.budget
+                # Buy 1-3 different expensive items
+                num_item_types = random.randint(1, min(3, len(expensive_items)))
+                selected_items = random.sample(expensive_items, num_item_types)
+
+                for item in selected_items:
+                    price = market_prices.get(item.name, item.base_price) if market_prices else item.base_price
+                    max_affordable = int(remaining_budget / price)
+                    if max_affordable > 0:
+                        quantity = random.randint(1, min(2, max_affordable))
+                        needs.append(CustomerNeed(item_name=item.name, quantity=quantity))
+                        remaining_budget -= quantity * price
+            return needs
+
+        # Poor Man: buys exactly 1 item that costs <$10
+        if self.customer_type == "poor_man":
+            if market_prices:
+                cheap_items = [item for item in available_items
+                             if market_prices.get(item.name, item.base_price) < 10.0]
+            else:
+                cheap_items = [item for item in available_items if item.base_price < 10.0]
+
+            if cheap_items:
+                selected_item = random.choice(cheap_items)
+                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+            return needs
+
+        # A Kid: buys exactly 2 items that cost <$5
+        if self.customer_type == "kid":
+            if market_prices:
+                kid_items = [item for item in available_items
+                           if market_prices.get(item.name, item.base_price) < 5.0]
+            else:
+                kid_items = [item for item in available_items if item.base_price < 5.0]
+
+            if len(kid_items) >= 2:
+                selected_items = random.sample(kid_items, 2)
+                for item in selected_items:
+                    needs.append(CustomerNeed(item_name=item.name, quantity=1))
+            elif len(kid_items) == 1:
+                # If only one item available, buy 2 of the same
+                needs.append(CustomerNeed(item_name=kid_items[0].name, quantity=2))
             return needs
 
         # Regular customers (low, medium, high)
@@ -1465,6 +1709,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     unmet_demand = 0
     unmet_uncapped_demand = 0
 
+    # Track customer types for daily summary
+    customer_type_stats = {
+        'spawned': {'low': 0, 'medium': 0, 'high': 0, 'hoarder': 0, 'rich_guy': 0, 'poor_man': 0, 'kid': 0},
+        'bought_something': {'low': 0, 'medium': 0, 'high': 0, 'hoarder': 0, 'rich_guy': 0, 'poor_man': 0, 'kid': 0},
+        'found_nothing': {'low': 0, 'medium': 0, 'high': 0, 'hoarder': 0, 'rich_guy': 0, 'poor_man': 0, 'kid': 0}
+    }
+
     # Track per-item sales data for pricing strategy
     # player_name -> item_name -> {units_sold, revenue, starting_inventory}
     per_item_sales = {player.name: {} for player in game_state.players}
@@ -1487,13 +1738,54 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         customer_type = random.choice(["low", "medium", "high"])
         customer = Customer(name=f"Customer_{i+1}", customer_type=customer_type)
         all_customers.append(customer)
+        customer_type_stats['spawned'][customer_type] += 1
+
+    # Generate special customer types (they count towards cashier limit)
+    # Only spawn if suitable items exist based on market prices
+    special_customer_counter = 0
+
+    # Check for Hoarder-suitable items (can afford 3+ units)
+    hoarder_items = [item for item in game_state.items if item.base_price * 3 <= 40.0]
+    if hoarder_items and random.random() < 0.3:  # 30% chance to spawn
+        special_customer_counter += 1
+        customer = Customer(name=f"Hoarder_{special_customer_counter}", customer_type="hoarder")
+        all_customers.append(customer)
+        customer_type_stats['spawned']['hoarder'] += 1
+
+    # Check for Rich Guy-suitable items (>$50)
+    rich_items = [item for item in game_state.items
+                 if game_state.market_prices.get(item.name, item.base_price) > 50.0]
+    if rich_items and random.random() < 0.3:  # 30% chance to spawn
+        special_customer_counter += 1
+        customer = Customer(name=f"RichGuy_{special_customer_counter}", customer_type="rich_guy")
+        all_customers.append(customer)
+        customer_type_stats['spawned']['rich_guy'] += 1
+
+    # Check for Poor Man-suitable items (<$10)
+    poor_items = [item for item in game_state.items
+                 if game_state.market_prices.get(item.name, item.base_price) < 10.0]
+    if poor_items and random.random() < 0.3:  # 30% chance to spawn
+        special_customer_counter += 1
+        customer = Customer(name=f"PoorMan_{special_customer_counter}", customer_type="poor_man")
+        all_customers.append(customer)
+        customer_type_stats['spawned']['poor_man'] += 1
+
+    # Check for Kid-suitable items (<$5)
+    kid_items = [item for item in game_state.items
+                if game_state.market_prices.get(item.name, item.base_price) < 5.0]
+    if kid_items and random.random() < 0.3:  # 30% chance to spawn
+        special_customer_counter += 1
+        customer = Customer(name=f"Kid_{special_customer_counter}", customer_type="kid")
+        all_customers.append(customer)
+        customer_type_stats['spawned']['kid'] += 1
 
     # Process each regular customer (with cashier limits)
     for customer in all_customers:
-        needs = customer.generate_daily_needs(game_state.items)
+        needs = customer.generate_daily_needs(game_state.items, game_state.market_prices)
 
         # Track which stores this customer has been counted at (to count each customer only once per store)
         customer_counted_at_store = {}
+        customer_bought_anything = False
 
         for need in needs:
             # Get all valid suppliers sorted by price (cheapest first)
@@ -1526,12 +1818,24 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                         per_item_sales[supplier.name][need.item_name]['revenue'] += revenue
 
                         purchase_made = True
+                        customer_bought_anything = True
                         break  # Successfully purchased, move to next need
 
             # If no supplier could fulfill the need (all at capacity or no stock)
             if not purchase_made:
                 unmet_demand += need.quantity
                 unmet_demand_per_item[need.item_name] = unmet_demand_per_item.get(need.item_name, 0) + need.quantity
+
+        # Track customer type statistics
+        if customer.customer_type in customer_type_stats['bought_something']:
+            if customer_bought_anything or not needs:
+                # If customer bought something OR had no needs (couldn't find matching items)
+                if not needs:
+                    customer_type_stats['found_nothing'][customer.customer_type] += 1
+                else:
+                    customer_type_stats['bought_something'][customer.customer_type] += 1
+            else:
+                customer_type_stats['found_nothing'][customer.customer_type] += 1
 
     # Step 5.5: Process uncapped customers (no cashier limits)
     if uncapped_customer_count > 0:
@@ -1541,7 +1845,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             uncapped_customers.append(customer)
 
         for customer in uncapped_customers:
-            needs = customer.generate_daily_needs(game_state.items)
+            needs = customer.generate_daily_needs(game_state.items, game_state.market_prices)
 
             for need in needs:
                 supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity, game_state.market_prices)
@@ -1646,6 +1950,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if unmet_uncapped_demand > 0:
             print(f"Unmet uncapped demand: {unmet_uncapped_demand} items")
 
+        # Display customer type statistics
+        print(f"\nCustomer Types Today:")
+        for ctype in ['low', 'medium', 'high', 'hoarder', 'rich_guy', 'poor_man', 'kid']:
+            spawned = customer_type_stats['spawned'][ctype]
+            if spawned > 0:
+                bought = customer_type_stats['bought_something'][ctype]
+                found_nothing = customer_type_stats['found_nothing'][ctype]
+                print(f"  {ctype.replace('_', ' ').title()}: {spawned} spawned | {bought} bought | {found_nothing} found nothing")
+
     # Step 7.5: Store per-item sales data for AI pricing strategy
     for player in game_state.players:
         player.daily_sales_data = {}
@@ -1660,6 +1973,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 'sold_out': sold_out,
                 'unmet_demand': unmet_demand_per_item.get(item_name, 0)
             }
+
+        # Store customer type statistics for AI competitors
+        if not hasattr(player, 'customer_type_stats'):
+            player.customer_type_stats = customer_type_stats
+        else:
+            player.customer_type_stats = customer_type_stats
 
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
