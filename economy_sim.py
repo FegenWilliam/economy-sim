@@ -252,8 +252,8 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (quantity, vendor_name)
-    cashiers: int = 1  # Each cashier handles 10 customers per day
-    restockers: int = 1  # Each restocker handles 20 items per day
+    cashiers: int = 0  # Each cashier handles 10 customers per day
+    restockers: int = 0  # Each restocker handles 20 items per day
     store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
     experience: float = 0.0  # XP gained from profits
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
@@ -261,6 +261,7 @@ class Player:
     is_human: bool = False  # Whether this is a human-controlled player
     # Sales tracking for AI pricing strategy (yesterday's results)
     daily_sales_data: Dict[str, Dict[str, any]] = field(default_factory=dict)  # item_name -> {units_sold, revenue, sold_out}
+    last_wage_payment_day: int = 0  # Track when wages were last paid (for 30-day wage cycle)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -284,13 +285,13 @@ class Player:
 
     def get_max_customers(self) -> int:
         """Get max number of customers that can be served per day."""
-        base = self.cashiers * 10
+        base = 10 + (self.cashiers * 10)  # Base 10 customers + 10 per cashier
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_customers")
         return int(base + bonus)
 
     def get_max_items_per_day(self) -> int:
         """Get max number of items that can be restocked per day."""
-        base = self.restockers * 20
+        base = 20 + (self.restockers * 20)  # Base 20 items + 20 per restocker
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
         return int(base + bonus)
 
@@ -371,20 +372,31 @@ class Player:
 
         return True
 
-    def pay_daily_wages(self) -> float:
+    def pay_monthly_wages(self, current_day: int) -> float:
         """
-        Pay daily wages for all employees ($20 per employee, reduced by wage_reduction upgrades).
-        Returns total wages paid.
+        Pay monthly wages for all employees ($500 per employee every 30 days).
+        Only pays if 30 days have passed since last payment.
+        Returns total wages paid (0 if not a payment day).
         """
-        total_employees = self.cashiers + self.restockers
-        base_wage = 20.0
+        # Check if it's time to pay wages (every 30 days)
+        if current_day - self.last_wage_payment_day < 30:
+            return 0.0
 
-        # Apply wage reduction upgrades
+        total_employees = self.cashiers + self.restockers
+
+        # No wages if no employees
+        if total_employees == 0:
+            return 0.0
+
+        monthly_wage_per_employee = 500.0
+
+        # Apply wage reduction upgrades (still applies to monthly wage)
         wage_reduction = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "wage_reduction")
-        actual_wage = max(0, base_wage - wage_reduction)
+        actual_wage = max(0, monthly_wage_per_employee - wage_reduction)
 
         wages = total_employees * actual_wage
         self.cash -= wages
+        self.last_wage_payment_day = current_day
         return wages
 
     def set_price(self, item_name: str, price: float) -> None:
@@ -703,8 +715,11 @@ def create_default_items() -> List[Item]:
 def unlock_new_product(game_state: GameState) -> Optional[Item]:
     """
     Unlock a new product from the catalog.
-    Before day 50: only unlock items with base_price <= 100
-    After day 50: can unlock any item
+    Price limits by day:
+    - Before day 15: only items with base_price <= 10
+    - Day 15-29: only items with base_price <= 20
+    - Day 30-49: only items with base_price <= 100
+    - Day 50+: can unlock any item
 
     Returns the unlocked Item or None if no valid items available.
     """
@@ -717,11 +732,20 @@ def unlock_new_product(game_state: GameState) -> Optional[Item]:
     if not available_indices:
         return None  # All products unlocked
 
-    # Filter by price threshold before day 50
-    if game_state.day < 50:
+    # Filter by price threshold based on game day
+    if game_state.day < 15:
+        max_price = 10
+    elif game_state.day < 30:
+        max_price = 20
+    elif game_state.day < 50:
+        max_price = 100
+    else:
+        max_price = float('inf')  # No limit
+
+    if max_price != float('inf'):
         available_indices = [
             i for i in available_indices
-            if PRODUCT_CATALOG[i].base_price <= 100
+            if PRODUCT_CATALOG[i].base_price <= max_price
         ]
 
     if not available_indices:
@@ -1501,14 +1525,17 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             if leveled_up:
                 level_ups[player.name] = player.store_level
 
-    # Step 6: Pay employee wages
+    # Step 6: Pay employee wages (monthly - every 30 days)
     if show_details:
         print(f"\nPaying employee wages...")
 
     for player in game_state.players:
-        wages = player.pay_daily_wages()
-        if show_details:
-            print(f"  {player.name}: ${wages:.2f} ({player.cashiers} cashiers + {player.restockers} restockers)")
+        wages = player.pay_monthly_wages(game_state.day)
+        if show_details and wages > 0:
+            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({player.cashiers} cashiers + {player.restockers} restockers)")
+        elif show_details and (player.cashiers > 0 or player.restockers > 0):
+            days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
+            print(f"  {player.name}: No payment today ({days_until_payment} days until next wage)")
 
     # Step 7: Print daily summary
     if show_details:
@@ -2311,6 +2338,7 @@ def serialize_game_state(game_state: GameState) -> dict:
                     for upgrade in player.purchased_upgrades
                 ],
                 "is_human": player.is_human,
+                "last_wage_payment_day": player.last_wage_payment_day,
             }
             for player in game_state.players
         ],
@@ -2397,6 +2425,7 @@ def deserialize_game_state(data: dict) -> GameState:
             item_costs=player_data["item_costs"],
             purchased_upgrades=purchased_upgrades,
             is_human=player_data["is_human"],
+            last_wage_payment_day=player_data.get("last_wage_payment_day", 0),
         )
         players.append(player)
 
