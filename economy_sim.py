@@ -1779,9 +1779,16 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         all_customers.append(customer)
         customer_type_stats['spawned']['kid'] += 1
 
+    # Track total demand per item (what customers want to buy today)
+    daily_demand_per_item = {}  # item_name -> total quantity wanted
+
     # Process each regular customer (with cashier limits)
     for customer in all_customers:
         needs = customer.generate_daily_needs(game_state.items, game_state.market_prices)
+
+        # Track demand for each item the customer wants
+        for need in needs:
+            daily_demand_per_item[need.item_name] = daily_demand_per_item.get(need.item_name, 0) + need.quantity
 
         # Track which stores this customer has been counted at (to count each customer only once per store)
         customer_counted_at_store = {}
@@ -1846,6 +1853,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         for customer in uncapped_customers:
             needs = customer.generate_daily_needs(game_state.items, game_state.market_prices)
+
+            # Track demand for each item the uncapped customer wants
+            for need in needs:
+                daily_demand_per_item[need.item_name] = daily_demand_per_item.get(need.item_name, 0) + need.quantity
 
             for need in needs:
                 supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity, game_state.market_prices)
@@ -1959,6 +1970,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 found_nothing = customer_type_stats['found_nothing'][ctype]
                 print(f"  {ctype.replace('_', ' ').title()}: {spawned} spawned | {bought} bought | {found_nothing} found nothing")
 
+        # Display demand per item (what customers wanted today)
+        if daily_demand_per_item:
+            print(f"\nItem Demand Today (Total Quantity Wanted):")
+            # Sort by demand (highest first), then by item name
+            sorted_demand = sorted(daily_demand_per_item.items(), key=lambda x: (-x[1], x[0]))
+            for item_name, quantity in sorted_demand:
+                print(f"  {item_name}: {quantity} units")
+
     # Step 7.5: Store per-item sales data for AI pricing strategy
     for player in game_state.players:
         player.daily_sales_data = {}
@@ -1979,6 +1998,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             player.customer_type_stats = customer_type_stats
         else:
             player.customer_type_stats = customer_type_stats
+
+        # Store daily demand per item for AI competitors (most valuable data!)
+        if not hasattr(player, 'daily_demand_per_item'):
+            player.daily_demand_per_item = daily_demand_per_item
+        else:
+            player.daily_demand_per_item = daily_demand_per_item
 
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
