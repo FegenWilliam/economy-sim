@@ -12,6 +12,10 @@ This file is mostly TODOs to be filled in by an AI code assistant.
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 import random
+import json
+import signal
+import sys
+import os
 
 
 # -------------------------------------------------------------------
@@ -1354,10 +1358,21 @@ def main_menu(game_state: GameState) -> bool:
         print("  7. View Your Store Status")
         print("  8. View Competitor Status")
         print("  9. Store Upgrades")
+        print("  s. Save Game")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-9): ")
+            choice = input("\nSelect option (0-9, s): ").strip().lower()
+
+            # Handle save command
+            if choice == 's':
+                if save_game(game_state):
+                    print(f"\n✓ Game saved successfully to {SAVE_FILE}")
+                else:
+                    print("\n✗ Failed to save game")
+                input("\nPress Enter to continue...")
+                continue
+
             choice_num = int(choice)
 
             if choice_num == 0:
@@ -1406,6 +1421,224 @@ def main_menu(game_state: GameState) -> bool:
 
 
 # -------------------------------------------------------------------
+# Save/Load System
+# -------------------------------------------------------------------
+
+SAVE_FILE = "economy_sim_save.json"
+
+def serialize_game_state(game_state: GameState) -> dict:
+    """Convert GameState to a JSON-serializable dictionary."""
+    return {
+        "day": game_state.day,
+        "current_player_index": game_state.current_player_index,
+        "config": {
+            "starting_cash": game_state.config.starting_cash,
+            "num_days": game_state.config.num_days,
+            "customers_per_day": game_state.config.customers_per_day,
+        },
+        "items": [
+            {"name": item.name, "base_cost": item.base_cost, "base_price": item.base_price}
+            for item in game_state.items
+        ],
+        "market_prices": game_state.market_prices,
+        "vendors": [
+            {
+                "name": vendor.name,
+                "pricing_multiplier": vendor.pricing_multiplier,
+                "selection_type": vendor.selection_type,
+                "selection_params": vendor.selection_params,
+                "items": vendor.items,
+            }
+            for vendor in game_state.vendors
+        ],
+        "players": [
+            {
+                "name": player.name,
+                "cash": player.cash,
+                "inventory": player.inventory,
+                "prices": player.prices,
+                "buy_orders": {k: list(v) for k, v in player.buy_orders.items()},
+                "cashiers": player.cashiers,
+                "restockers": player.restockers,
+                "store_level": player.store_level,
+                "experience": player.experience,
+                "item_costs": player.item_costs,
+                "purchased_upgrades": [
+                    {
+                        "name": upgrade.name,
+                        "cost": upgrade.cost,
+                        "effect_type": upgrade.effect_type,
+                        "effect_value": upgrade.effect_value,
+                        "vendor_name": upgrade.vendor_name,
+                    }
+                    for upgrade in player.purchased_upgrades
+                ],
+                "is_human": player.is_human,
+            }
+            for player in game_state.players
+        ],
+        "available_upgrades": [
+            {
+                "name": upgrade.name,
+                "cost": upgrade.cost,
+                "effect_type": upgrade.effect_type,
+                "effect_value": upgrade.effect_value,
+                "vendor_name": upgrade.vendor_name,
+            }
+            for upgrade in game_state.available_upgrades
+        ],
+    }
+
+
+def deserialize_game_state(data: dict) -> GameState:
+    """Load GameState from a JSON dictionary."""
+    # Recreate config
+    config = GameConfig(
+        starting_cash=data["config"]["starting_cash"],
+        num_days=data["config"]["num_days"],
+        customers_per_day=data["config"]["customers_per_day"],
+    )
+
+    # Recreate items
+    items = [
+        Item(name=item_data["name"], base_cost=item_data["base_cost"], base_price=item_data["base_price"])
+        for item_data in data["items"]
+    ]
+
+    # Recreate vendors
+    vendors = [
+        Vendor(
+            name=vendor_data["name"],
+            pricing_multiplier=vendor_data["pricing_multiplier"],
+            selection_type=vendor_data["selection_type"],
+            selection_params=vendor_data["selection_params"],
+            items=vendor_data["items"],
+        )
+        for vendor_data in data["vendors"]
+    ]
+
+    # Recreate available upgrades
+    available_upgrades = [
+        Upgrade(
+            name=upgrade_data["name"],
+            cost=upgrade_data["cost"],
+            effect_type=upgrade_data["effect_type"],
+            effect_value=upgrade_data["effect_value"],
+            vendor_name=upgrade_data.get("vendor_name", ""),
+        )
+        for upgrade_data in data["available_upgrades"]
+    ]
+
+    # Recreate players
+    players = []
+    for player_data in data["players"]:
+        # Recreate purchased upgrades
+        purchased_upgrades = [
+            Upgrade(
+                name=upgrade_data["name"],
+                cost=upgrade_data["cost"],
+                effect_type=upgrade_data["effect_type"],
+                effect_value=upgrade_data["effect_value"],
+                vendor_name=upgrade_data.get("vendor_name", ""),
+            )
+            for upgrade_data in player_data["purchased_upgrades"]
+        ]
+
+        # Convert buy_orders back to tuples
+        buy_orders = {k: tuple(v) for k, v in player_data["buy_orders"].items()}
+
+        player = Player(
+            name=player_data["name"],
+            cash=player_data["cash"],
+            inventory=player_data["inventory"],
+            prices=player_data["prices"],
+            buy_orders=buy_orders,
+            cashiers=player_data["cashiers"],
+            restockers=player_data["restockers"],
+            store_level=player_data["store_level"],
+            experience=player_data["experience"],
+            item_costs=player_data["item_costs"],
+            purchased_upgrades=purchased_upgrades,
+            is_human=player_data["is_human"],
+        )
+        players.append(player)
+
+    # Separate human and AI players
+    human_players = [p for p in players if p.is_human]
+
+    # Create GameState
+    game_state = GameState(
+        day=data["day"],
+        players=players,
+        customers=[],  # Customers are generated dynamically
+        items=items,
+        vendors=vendors,
+        market_prices=data["market_prices"],
+        config=config,
+        human_players=human_players,
+        available_upgrades=available_upgrades,
+        current_player_index=data["current_player_index"],
+    )
+
+    return game_state
+
+
+def save_game(game_state: GameState, filename: str = SAVE_FILE) -> bool:
+    """
+    Save the current game state to a JSON file.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        data = serialize_game_state(game_state)
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"\n✗ Error saving game: {e}")
+        return False
+
+
+def load_game(filename: str = SAVE_FILE) -> Optional[GameState]:
+    """
+    Load game state from a JSON file.
+    Returns GameState if successful, None otherwise.
+    """
+    try:
+        if not os.path.exists(filename):
+            return None
+
+        with open(filename, 'r') as f:
+            data = json.load(f)
+
+        game_state = deserialize_game_state(data)
+        return game_state
+    except Exception as e:
+        print(f"\n✗ Error loading game: {e}")
+        return None
+
+
+# Global variable to store game state for signal handler
+_current_game_state: Optional[GameState] = None
+
+
+def signal_handler(sig, frame):
+    """Handle Ctrl+C by auto-saving the game."""
+    global _current_game_state
+    print("\n\n🛑 Ctrl+C detected! Auto-saving game...")
+
+    if _current_game_state is not None:
+        if save_game(_current_game_state):
+            print(f"✓ Game saved successfully to {SAVE_FILE}")
+        else:
+            print("✗ Failed to save game")
+    else:
+        print("No game state to save")
+
+    print("\nExiting game. Thanks for playing!")
+    sys.exit(0)
+
+
+# -------------------------------------------------------------------
 # Main simulation loop
 # -------------------------------------------------------------------
 
@@ -1413,10 +1646,10 @@ def run_game() -> None:
     """
     Top-level function to run the interactive economy simulation game.
     """
+    global _current_game_state
 
-    # Create game configuration
-    config = GameConfig()
-    config.num_days = 365  # Run for a full year
+    # Set up signal handler for Ctrl+C
+    signal.signal(signal.SIGINT, signal_handler)
 
     print("\n" + "=" * 60)
     print("WELCOME TO ECONOMY SIMULATION")
@@ -1426,91 +1659,125 @@ def run_game() -> None:
     print("The market prices fluctuate daily, so timing is everything!")
     print("\n" + "=" * 60)
 
-    # Get number of human players
-    while True:
-        try:
-            num_humans_str = input("\nHow many human players? (1-4): ").strip()
-            num_humans = int(num_humans_str)
-            if 1 <= num_humans <= 4:
-                break
+    # Check if save file exists
+    game_state = None
+    if os.path.exists(SAVE_FILE):
+        print(f"\n💾 Found existing save file: {SAVE_FILE}")
+        load_choice = input("Would you like to load it? (y/n): ").strip().lower()
+        if load_choice == 'y':
+            game_state = load_game()
+            if game_state:
+                print("✓ Game loaded successfully!")
+                _current_game_state = game_state
             else:
-                print("Please enter a number between 1 and 4")
-        except ValueError:
-            print("Invalid input. Please enter a number.")
+                print("✗ Failed to load game. Starting new game...")
+                game_state = None
 
-    # Get names for human players
-    human_players = []
-    for i in range(num_humans):
-        player_name = input(f"\nEnter name for Player {i+1}: ").strip()
-        if not player_name:
-            player_name = f"Player {i+1}"
-        human_player = Player(name=player_name, cash=config.starting_cash, is_human=True)
-        human_players.append(human_player)
+    # If no save loaded, start new game
+    if game_state is None:
+        # Create game configuration
+        config = GameConfig()
+        config.num_days = 365  # Run for a full year
 
-    print(f"\nStarting cash: ${config.starting_cash:.2f}")
-    print(f"Customers formula: (num_players × 10) + day_number")
+        # Get number of human players
+        while True:
+            try:
+                num_humans_str = input("\nHow many human players? (1-4): ").strip()
+                num_humans = int(num_humans_str)
+                if 1 <= num_humans <= 4:
+                    break
+                else:
+                    print("Please enter a number between 1 and 4")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
 
-    # Initialize items, vendors
-    items = create_default_items()
-    vendors = create_vendors()
-    market_prices = initialize_market_prices(items)
+        # Get names for human players
+        human_players = []
+        for i in range(num_humans):
+            player_name = input(f"\nEnter name for Player {i+1}: ").strip()
+            if not player_name:
+                player_name = f"Player {i+1}"
+            human_player = Player(name=player_name, cash=config.starting_cash, is_human=True)
+            human_players.append(human_player)
 
-    # Initialize vendor inventory for day 1
-    refresh_vendor_inventory(vendors, items, market_prices)
+        print(f"\nStarting cash: ${config.starting_cash:.2f}")
+        print(f"Customers formula: (num_players × 10) + day_number")
 
-    # Create AI players
-    ai_players = create_players(["Alice Corp", "Bob Ltd"], config.starting_cash)
-    all_players = human_players + ai_players
+        # Initialize items, vendors
+        items = create_default_items()
+        vendors = create_vendors()
+        market_prices = initialize_market_prices(items)
 
-    # Create available upgrades
-    available_upgrades = create_default_upgrades(vendors)
+        # Initialize vendor inventory for day 1
+        refresh_vendor_inventory(vendors, items, market_prices)
 
-    # Create GameState (customers generated dynamically each day)
-    game_state = GameState(
-        day=1,
-        players=all_players,
-        customers=[],  # Customers generated dynamically in run_day()
-        items=items,
-        vendors=vendors,
-        market_prices=market_prices,
-        config=config,
-        human_players=human_players,
-        available_upgrades=available_upgrades,
-        current_player_index=0,
-    )
+        # Create AI players
+        ai_players = create_players(["Alice Corp", "Bob Ltd"], config.starting_cash)
+        all_players = human_players + ai_players
 
-    # Show initial setup
-    print("\n" + "=" * 60)
-    print("GAME SETUP COMPLETE")
-    print("=" * 60)
-    print(f"\nHuman Players:")
-    for player in human_players:
-        print(f"  - {player.name}")
+        # Create available upgrades
+        available_upgrades = create_default_upgrades(vendors)
 
-    print(f"\nAI Competitors:")
-    for player in ai_players:
-        print(f"  - {player.name}")
+        # Create GameState (customers generated dynamically each day)
+        game_state = GameState(
+            day=1,
+            players=all_players,
+            customers=[],  # Customers generated dynamically in run_day()
+            items=items,
+            vendors=vendors,
+            market_prices=market_prices,
+            config=config,
+            human_players=human_players,
+            available_upgrades=available_upgrades,
+            current_player_index=0,
+        )
 
-    print(f"\nAvailable Items:")
-    for item in items:
-        print(f"  - {item.name} (Base: ${item.base_cost:.2f})")
+        # Set global game state for signal handler
+        _current_game_state = game_state
 
-    print(f"\nVendors:")
-    for vendor in vendors:
-        print(f"  - {vendor.name}")
+        # Show initial setup
+        print("\n" + "=" * 60)
+        print("GAME SETUP COMPLETE")
+        print("=" * 60)
+        print(f"\nHuman Players:")
+        for player in human_players:
+            print(f"  - {player.name}")
 
-    input("\nPress Enter to start the game...")
+        print(f"\nAI Competitors:")
+        for player in ai_players:
+            print(f"  - {player.name}")
+
+        print(f"\nAvailable Items:")
+        for item in items:
+            print(f"  - {item.name} (Base: ${item.base_cost:.2f})")
+
+        print(f"\nVendors:")
+        for vendor in vendors:
+            print(f"  - {vendor.name}")
+
+        input("\nPress Enter to start the game...")
+    else:
+        # Game loaded from save, show current status
+        print("\n" + "=" * 60)
+        print("LOADED GAME STATUS")
+        print("=" * 60)
+        print(f"\nCurrent Day: {game_state.day}")
+        print(f"\nPlayers:")
+        for player in game_state.players:
+            status = " (YOU)" if player.is_human else " (AI)"
+            print(f"  - {player.name}{status}: ${player.cash:.2f}")
+        input("\nPress Enter to continue...")
 
     # Main game loop
     game_running = True
-    while game_running and game_state.day <= config.num_days:
+    while game_running and game_state.day <= game_state.config.num_days:
         # Let each human player take their turn
-        for i, player in enumerate(human_players):
+        for i, player in enumerate(game_state.human_players):
             game_state.current_player_index = i
             if not game_running:
                 break
 
-            if len(human_players) > 1:
+            if len(game_state.human_players) > 1:
                 print(f"\n{'='*60}")
                 print(f"  {player.name}'s Turn")
                 print(f"{'='*60}")
