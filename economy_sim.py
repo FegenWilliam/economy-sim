@@ -427,7 +427,7 @@ class Player:
     def sell_to_customer(self, item_name: str, quantity: int, unit_price: float) -> tuple:
         """
         Attempt to sell 'quantity' units of 'item_name' at 'unit_price'.
-        Returns (revenue, profit) tuple.
+        Returns (revenue, profit, units_sold) tuple.
         Profit = revenue - cost
         """
         available = self.inventory.get(item_name, 0)
@@ -442,9 +442,9 @@ class Player:
             cost_per_unit = self.item_costs.get(item_name, 0)
             profit = revenue - (cost_per_unit * units_sold)
 
-            return (revenue, profit)
+            return (revenue, profit, units_sold)
 
-        return (0.0, 0.0)
+        return (0.0, 0.0, 0)
 
     def purchase_from_vendor(self, vendor: 'Vendor', item_name: str, quantity: int, market_price: float = 0) -> bool:
         """
@@ -598,6 +598,43 @@ class Customer:
 
         # Return random player from best options
         return random.choice(best_players)
+
+    def get_all_suppliers_sorted(
+        self,
+        players: List[Player],
+        item_name: str,
+        quantity: int,
+        market_prices: Dict[str, float]
+    ) -> List[Player]:
+        """
+        Get all valid suppliers for an item, sorted by price (lowest first).
+
+        Returns a list of players who have stock and acceptable prices,
+        sorted from cheapest to most expensive.
+        """
+        candidates = []
+        market_price = market_prices.get(item_name, float('inf'))
+        max_acceptable_price = market_price * 1.15  # 15% above market price
+
+        for player in players:
+            # Check if player has this item in stock
+            if player.inventory.get(item_name, 0) > 0:
+                # Check if player has set a price
+                if item_name in player.prices:
+                    price = player.prices[item_name]
+                    # Only consider if price is within 15% of market price
+                    if price <= max_acceptable_price:
+                        candidates.append((player, price))
+
+        if not candidates:
+            return []
+
+        # Sort by price (lowest first), with random tiebreaking
+        random.shuffle(candidates)  # Shuffle first for random tiebreaking
+        candidates.sort(key=lambda x: x[1])
+
+        # Return just the players
+        return [player for player, price in candidates]
 
 
 # -------------------------------------------------------------------
@@ -1374,18 +1411,28 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     for customer in all_customers:
         needs = customer.generate_daily_needs(game_state.items)
 
-        for need in needs:
-            supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity, game_state.market_prices)
+        # Track which stores this customer has been counted at (to count each customer only once per store)
+        customer_counted_at_store = {}
 
-            if supplier:
+        for need in needs:
+            # Get all valid suppliers sorted by price (cheapest first)
+            sorted_suppliers = customer.get_all_suppliers_sorted(game_state.players, need.item_name, need.quantity, game_state.market_prices)
+
+            # Try each supplier in order until we find one with capacity
+            purchase_made = False
+            for supplier in sorted_suppliers:
                 # Check if supplier can serve this customer (cashier limit)
                 if customers_served[supplier.name] < supplier.get_max_customers():
                     price = supplier.prices.get(need.item_name, 0)
-                    revenue, profit = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                    revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price)
                     if revenue > 0:
                         daily_sales[supplier.name] += revenue
                         daily_profits[supplier.name] += profit
-                        customers_served[supplier.name] += 1
+
+                        # Only count each customer once per store (not once per item)
+                        if supplier.name not in customer_counted_at_store:
+                            customers_served[supplier.name] += 1
+                            customer_counted_at_store[supplier.name] = True
 
                         # Track per-item sales
                         if need.item_name not in per_item_sales[supplier.name]:
@@ -1394,14 +1441,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                                 'revenue': 0.0,
                                 'starting_inventory': 0
                             }
-                        per_item_sales[supplier.name][need.item_name]['units_sold'] += need.quantity
+                        per_item_sales[supplier.name][need.item_name]['units_sold'] += actual_units_sold
                         per_item_sales[supplier.name][need.item_name]['revenue'] += revenue
-                else:
-                    # Supplier at cashier capacity, track unmet demand
-                    unmet_demand += need.quantity
-                    unmet_demand_per_item[need.item_name] = unmet_demand_per_item.get(need.item_name, 0) + need.quantity
-            else:
-                # Track unmet demand
+
+                        purchase_made = True
+                        break  # Successfully purchased, move to next need
+
+            # If no supplier could fulfill the need (all at capacity or no stock)
+            if not purchase_made:
                 unmet_demand += need.quantity
                 unmet_demand_per_item[need.item_name] = unmet_demand_per_item.get(need.item_name, 0) + need.quantity
 
@@ -1421,7 +1468,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 if supplier:
                     # Uncapped customers bypass cashier limits
                     price = supplier.prices.get(need.item_name, 0)
-                    revenue, profit = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                    revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price)
                     if revenue > 0:
                         daily_sales[supplier.name] += revenue
                         daily_profits[supplier.name] += profit
@@ -1434,7 +1481,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                                 'revenue': 0.0,
                                 'starting_inventory': 0
                             }
-                        per_item_sales[supplier.name][need.item_name]['units_sold'] += need.quantity
+                        per_item_sales[supplier.name][need.item_name]['units_sold'] += actual_units_sold
                         per_item_sales[supplier.name][need.item_name]['revenue'] += revenue
                 else:
                     # Track unmet uncapped demand
