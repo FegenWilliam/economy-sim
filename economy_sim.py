@@ -1393,7 +1393,7 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
         Upgrade(name="MBA Program", cost=5000, effect_type="xp_gain", effect_value=25),
 
         # Wage reduction upgrade
-        Upgrade(name="Employee Benefits Package", cost=10000, effect_type="wage_reduction", effect_value=5),
+        Upgrade(name="Employee Benefits Package", cost=20000, effect_type="wage_reduction", effect_value=100),
     ]
 
     # Add vendor discount upgrades for each vendor (30-day duration, tier-based pricing)
