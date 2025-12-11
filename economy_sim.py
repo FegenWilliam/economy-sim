@@ -2807,7 +2807,7 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
 def employee_menu(game_state: GameState, player: Player) -> None:
     """Menu for hiring employees."""
     HIRING_COST = 500.0
-    BASE_WAGE = 20.0
+    BASE_MONTHLY_WAGE = 500.0
 
     while True:
         print("\n" + "=" * 60)
@@ -2821,14 +2821,20 @@ def employee_menu(game_state: GameState, player: Player) -> None:
 
         # Calculate actual wage with upgrades
         wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
-        actual_wage = max(0, BASE_WAGE - wage_reduction)
-        print(f"  Total daily wages: ${total_employees * actual_wage:.2f}")
+        actual_wage = max(0, BASE_MONTHLY_WAGE - wage_reduction)
+        print(f"  Total monthly wages: ${total_employees * actual_wage:.2f}")
 
         print(f"\nHiring Cost: ${HIRING_COST:.2f} per employee")
         if wage_reduction > 0:
-            print(f"Daily Wage: ${actual_wage:.2f} per employee (reduced from ${BASE_WAGE:.2f})")
+            print(f"Monthly Wage: ${actual_wage:.2f} per employee (reduced from ${BASE_MONTHLY_WAGE:.2f})")
         else:
-            print(f"Daily Wage: ${actual_wage:.2f} per employee")
+            print(f"Monthly Wage: ${actual_wage:.2f} per employee")
+
+        # Show days until next wage payment
+        days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
+        if total_employees > 0:
+            print(f"Next wage payment: Day {player.last_wage_payment_day + 30} ({days_until_payment} days)")
+        print(f"Note: Wages paid every 30 days for ALL employees (including newly hired)")
 
         print("\nOptions:")
         print("  1. Hire Cashier (+10 customers/day capacity)")
