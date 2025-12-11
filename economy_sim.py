@@ -2452,7 +2452,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                         pricing_items.append(f"{item_name}: ${player.prices[item_name]:.2f}")
                 if pricing_items:
                     pricing_str = ", ".join(pricing_items)
-                    print(f"    Pricing (sold): {pricing_str}")
+                    print(f"    Pricing: {pricing_str}")
 
         if unmet_demand > 0:
             print(f"\nUnmet regular demand: {unmet_demand} items")
