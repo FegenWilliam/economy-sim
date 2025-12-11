@@ -10,7 +10,7 @@ This file is mostly TODOs to be filled in by an AI code assistant.
 
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 import random
 import json
 import signal
@@ -977,6 +977,7 @@ class GameState:
     event_price_changes: Dict[str, float] = field(default_factory=dict)  # Tracks items with temporary event prices and their original prices
     item_demand: Dict[str, float] = field(default_factory=dict)  # item_name -> demand multiplier (0.1 to 2.0)
     vendor_daily_purchases: Dict[str, Dict[str, Dict[str, int]]] = field(default_factory=dict)  # player_name -> vendor_name -> item_name -> quantity_today
+    players_passed: Set[int] = field(default_factory=set)  # Set of player indices who have passed their turn
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -1435,6 +1436,9 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     For vendors with random daily selection (vendors 1 & 2), fallback to cheapest
     available vendor if the selected vendor doesn't have the item.
 
+    For vendors with minimum purchase requirements, fallback to Budget Goods Ltd.
+    (vendor 3) if the minimum cannot be met.
+
     Respects restocker limits (restockers * 20 items per day) and store level
     (max different products).
 
@@ -1476,6 +1480,17 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
                     if cheapest_vendor:
                         vendor = cheapest_vendor
                         price = cheapest_price
+
+                # For vendors with minimum purchase, check if quantity meets minimum
+                # If not, fallback to Budget Goods Ltd. (index 2, no minimum)
+                if vendor.min_purchase is not None and quantity < vendor.min_purchase and price is not None:
+                    # Try to use Budget Goods Ltd. (vendor 3, index 2)
+                    if len(game_state.vendors) > 2:
+                        fallback_vendor = game_state.vendors[2]  # Budget Goods Ltd.
+                        fallback_price = fallback_vendor.get_price(item_name)
+                        if fallback_price is not None:
+                            vendor = fallback_vendor
+                            price = fallback_price
 
                 if price is not None:
                     active_orders.append((item_name, quantity, vendor, price))
@@ -2662,12 +2677,14 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                 available_vendors = []
                 for i, vendor in enumerate(game_state.vendors, 1):
                     price = vendor.get_price(item.name)
+                    # Show minimum purchase requirement if it exists
+                    min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                     if price:
-                        print(f"  {i}. {vendor.name} - ${price:.2f}")
+                        print(f"  {i}. {vendor.name}{min_text} - ${price:.2f}")
                         available_vendors.append((i, vendor))
                     else:
                         status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                        print(f"  {i}. {vendor.name} - {status}")
+                        print(f"  {i}. {vendor.name}{min_text} - {status}")
                         available_vendors.append((i, vendor))
 
                 vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}): ")
@@ -2680,6 +2697,12 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                     quantity = int(quantity_str)
 
                     if quantity >= 0:
+                        # Check minimum purchase requirement
+                        if quantity > 0 and selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
+                            print(f"\n✗ {selected_vendor.name} requires a minimum purchase of {selected_vendor.min_purchase} units.")
+                            print(f"   You tried to order {quantity} units. Please order at least {selected_vendor.min_purchase} or choose a different vendor.")
+                            continue
+
                         # Check product limit BEFORE setting buy order
                         if quantity > 0:
                             # Count how many different products will have quantity > 0
@@ -3113,10 +3136,29 @@ def main_menu(game_state: GameState) -> bool:
                 print("\nThanks for playing!")
                 return False
             elif choice_num == 1:
-                # Pass day
-                run_day(game_state, show_details=True)
-                input("\nPress Enter to continue...")
-                return True
+                # Pass day - handle multiplayer turn system
+                if len(game_state.human_players) > 1:
+                    # Mark this player as having passed
+                    game_state.players_passed.add(game_state.current_player_index)
+
+                    # Check if all players have passed
+                    if len(game_state.players_passed) == len(game_state.human_players):
+                        # All players passed - actually pass the day
+                        run_day(game_state, show_details=True)
+                        # Reset the passed set for next day
+                        game_state.players_passed.clear()
+                        input("\nPress Enter to continue...")
+                        return True
+                    else:
+                        # Not all players passed yet - continue to next player
+                        print(f"\n✓ {player.name} has passed. Waiting for other players...")
+                        input("\nPress Enter to continue...")
+                        return True
+                else:
+                    # Single player - pass day immediately
+                    run_day(game_state, show_details=True)
+                    input("\nPress Enter to continue...")
+                    return True
             elif choice_num == 2:
                 display_market_table(game_state)
                 input("\nPress Enter to continue...")
@@ -3228,6 +3270,7 @@ def serialize_game_state(game_state: GameState) -> dict:
             for upgrade in game_state.available_upgrades
         ],
         "vendor_daily_purchases": game_state.vendor_daily_purchases,
+        "players_passed": list(game_state.players_passed),
     }
 
 
@@ -3326,6 +3369,7 @@ def deserialize_game_state(data: dict) -> GameState:
         current_player_index=data["current_player_index"],
         unlocked_product_indices=data.get("unlocked_product_indices", []),
         vendor_daily_purchases=data.get("vendor_daily_purchases", {}),
+        players_passed=set(data.get("players_passed", [])),
     )
 
     return game_state
