@@ -414,6 +414,7 @@ class Upgrade:
     effect_type: str  # "max_customers", "max_items", "max_products", "xp_gain", "vendor_discount"
     effect_value: float  # Amount of the effect
     vendor_name: str = ""  # Only used for vendor_discount type
+    duration_days: int = 0  # Duration in days (0 = permanent, >0 = temporary)
 
 
 @dataclass
@@ -434,6 +435,7 @@ class Player:
     # Sales tracking for AI pricing strategy (yesterday's results)
     daily_sales_data: Dict[str, Dict[str, any]] = field(default_factory=dict)  # item_name -> {units_sold, revenue, sold_out}
     last_wage_payment_day: int = 0  # Track when wages were last paid (for 30-day wage cycle)
+    vendor_partnership_expiration: Dict[str, int] = field(default_factory=dict)  # upgrade_name -> expiration_day (for temporary vendor partnerships)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -472,10 +474,17 @@ class Player:
         bonus_percent = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "xp_gain")
         return 1.0 + (bonus_percent / 100.0)
 
-    def get_vendor_discount(self, vendor_name: str) -> float:
-        """Get discount percentage for a specific vendor."""
-        discount = sum(u.effect_value for u in self.purchased_upgrades
-                      if u.effect_type == "vendor_discount" and u.vendor_name == vendor_name)
+    def get_vendor_discount(self, vendor_name: str, current_day: int = 0) -> float:
+        """Get discount percentage for a specific vendor, checking expiration for temporary upgrades."""
+        discount = 0
+        for u in self.purchased_upgrades:
+            if u.effect_type == "vendor_discount" and u.vendor_name == vendor_name:
+                # Check if upgrade has expired
+                if u.duration_days > 0:  # Temporary upgrade
+                    expiration_day = self.vendor_partnership_expiration.get(u.name, 0)
+                    if current_day > 0 and current_day >= expiration_day:
+                        continue  # Expired, skip this upgrade
+                discount += u.effect_value
         return discount / 100.0  # Convert percentage to decimal
 
     def has_production_line(self, item_name: str) -> bool:
@@ -489,16 +498,22 @@ class Player:
             return market_price * 0.5
         return None
 
-    def purchase_upgrade(self, upgrade: 'Upgrade') -> bool:
+    def purchase_upgrade(self, upgrade: 'Upgrade', current_day: int = 0) -> bool:
         """
         Purchase an upgrade if player has enough cash.
         Returns True if successful, False otherwise.
-        Prevents purchasing the same upgrade twice.
+        For vendor partnerships, allows re-purchasing to extend duration.
+        For other upgrades, prevents purchasing the same upgrade twice.
         """
         # Check if already purchased (by name for standard upgrades, or by production line item)
         if upgrade.effect_type == "production_line":
             # For production lines, check if we already have one for this vendor
             if self.has_production_line(upgrade.vendor_name):
+                return False
+        elif upgrade.effect_type == "vendor_discount":
+            # For vendor partnerships, allow re-purchasing but check stacking limit (max 15%)
+            existing_discount = self.get_vendor_discount(upgrade.vendor_name, current_day)
+            if existing_discount >= 0.15:  # Max 15% discount
                 return False
         else:
             # For other upgrades, check by name
@@ -511,6 +526,11 @@ class Player:
 
         self.cash -= upgrade.cost
         self.purchased_upgrades.append(upgrade)
+
+        # Set expiration date for temporary upgrades
+        if upgrade.duration_days > 0 and current_day > 0:
+            self.vendor_partnership_expiration[upgrade.name] = current_day + upgrade.duration_days
+
         return True
 
     def get_xp_for_next_level(self) -> float:
@@ -689,7 +709,8 @@ class Player:
                 return False
 
             # Apply vendor discount
-            discount = self.get_vendor_discount(vendor.name)
+            current_day = game_state.day if game_state else 0
+            discount = self.get_vendor_discount(vendor.name, current_day)
             final_price = vendor_price * (1.0 - discount)
 
         total_cost = final_price * quantity
@@ -1356,16 +1377,16 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
     """
     upgrades = [
         # Customer capacity upgrades
-        Upgrade(name="Extra Cashier Station", cost=1000, effect_type="max_customers", effect_value=10),
-        Upgrade(name="Express Checkout Lane", cost=1500, effect_type="max_customers", effect_value=15),
+        Upgrade(name="Extra Cashier Station", cost=2000, effect_type="max_customers", effect_value=10),
+        Upgrade(name="Express Checkout Lane", cost=3500, effect_type="max_customers", effect_value=15),
 
         # Buyout capacity upgrades
-        Upgrade(name="Warehouse Extension", cost=1200, effect_type="max_items", effect_value=20),
-        Upgrade(name="Loading Dock", cost=1800, effect_type="max_items", effect_value=30),
+        Upgrade(name="Warehouse Extension", cost=2500, effect_type="max_items", effect_value=20),
+        Upgrade(name="Loading Dock", cost=4000, effect_type="max_items", effect_value=30),
 
         # Max different items upgrades
-        Upgrade(name="Additional Shelving", cost=800, effect_type="max_products", effect_value=2),
-        Upgrade(name="Display Cases", cost=1500, effect_type="max_products", effect_value=3),
+        Upgrade(name="Additional Shelving", cost=2000, effect_type="max_products", effect_value=2),
+        Upgrade(name="Display Cases", cost=3500, effect_type="max_products", effect_value=3),
 
         # XP gain upgrades
         Upgrade(name="Business Course", cost=2000, effect_type="xp_gain", effect_value=10),
@@ -1375,21 +1396,38 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
         Upgrade(name="Employee Benefits Package", cost=10000, effect_type="wage_reduction", effect_value=5),
     ]
 
-    # Add vendor discount upgrades for each vendor
+    # Add vendor discount upgrades for each vendor (30-day duration, tier-based pricing)
+    # Pricing tiers based on vendor value:
+    vendor_pricing = {
+        "Lucky Deal Trader": (5000, 10000),  # Limited (1 random item)
+        "Discount Wholesale Co.": (6000, 13000),  # Moderate (5 random items)
+        "Budget Goods Ltd.": (6000, 13000),  # Moderate (cheap items only)
+        "Premium Select Inc.": (8000, 16000),  # High (wide selection, okay pricing)
+        "Universal Supply Corp.": (15000, 30000),  # Highest (everything, guaranteed)
+        "Bulk Goods Co.": (7000, 14000),  # Moderate-high (good pricing, high minimum)
+        "Cheap Goods Co.": (5000, 12000),  # Low (very limited range, very high minimum)
+        "VIP Goods Co.": (10000, 20000),  # High (expensive items, late game)
+    }
+
     for vendor in vendors:
+        # Get pricing for this vendor (default to 5k/10k if not specified)
+        basic_cost, premium_cost = vendor_pricing.get(vendor.name, (5000, 10000))
+
         upgrades.append(Upgrade(
             name=f"Partnership with {vendor.name}",
-            cost=2500,
+            cost=basic_cost,
             effect_type="vendor_discount",
             effect_value=5,
-            vendor_name=vendor.name
+            vendor_name=vendor.name,
+            duration_days=30
         ))
         upgrades.append(Upgrade(
             name=f"Premium Contract with {vendor.name}",
-            cost=5000,
+            cost=premium_cost,
             effect_type="vendor_discount",
             effect_value=10,
-            vendor_name=vendor.name
+            vendor_name=vendor.name,
+            duration_days=30
         ))
 
     return upgrades
@@ -1914,7 +1952,7 @@ def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
 
         # Only purchase if score is reasonable (above 40)
         if best_score >= 40:
-            success = player.purchase_upgrade(best_upgrade)
+            success = player.purchase_upgrade(best_upgrade, game_state.day)
             if success:
                 # AI purchases are silent (no print statements)
                 pass
@@ -2487,6 +2525,24 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 9: Advance day counter
     game_state.day += 1
 
+    # Step 9.5: Clean up expired vendor partnerships
+    for player in game_state.players:
+        expired_upgrades = []
+        for upgrade in player.purchased_upgrades:
+            if upgrade.duration_days > 0:  # Temporary upgrade
+                expiration_day = player.vendor_partnership_expiration.get(upgrade.name, 0)
+                if game_state.day >= expiration_day:
+                    expired_upgrades.append(upgrade)
+                    # Remove from expiration tracker
+                    if upgrade.name in player.vendor_partnership_expiration:
+                        del player.vendor_partnership_expiration[upgrade.name]
+
+        # Remove expired upgrades
+        for upgrade in expired_upgrades:
+            player.purchased_upgrades.remove(upgrade)
+            if player.is_human and show_details:
+                print(f"\n⚠️  {player.name}: '{upgrade.name}' has expired!")
+
     # Step 10: Reset daily vendor purchase tracking
     game_state.vendor_daily_purchases.clear()
 
@@ -2890,7 +2946,7 @@ def production_line_menu(game_state: GameState, player: Player) -> None:
                         vendor_name=selected_item.name  # Store item name in vendor_name field
                     )
 
-                    success = player.purchase_upgrade(production_upgrade)
+                    success = player.purchase_upgrade(production_upgrade, game_state.day)
                     if success:
                         market_price = game_state.market_prices.get(selected_item.name, selected_item.base_price)
                         own_price = market_price * 0.5
@@ -2906,6 +2962,87 @@ def production_line_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def vendor_partnerships_menu(game_state: GameState, player: Player) -> None:
+    """Menu for purchasing vendor partnerships (temporary, 30-day duration, max 15% discount)."""
+    while True:
+        print("\n" + "=" * 70)
+        print("VENDOR PARTNERSHIPS MENU")
+        print("=" * 70)
+        print(f"\nYour Cash: ${player.cash:.2f}")
+        print(f"Current Day: {game_state.day}")
+        print("\n⚠️  Partnerships last 30 days and DO NOT stack (max 15% total discount per vendor)")
+
+        # Show active partnerships with expiration
+        active_partnerships = [u for u in player.purchased_upgrades if u.effect_type == "vendor_discount"]
+        if active_partnerships:
+            print("\n📋 Active Partnerships:")
+            for upgrade in active_partnerships:
+                expiration_day = player.vendor_partnership_expiration.get(upgrade.name, 0)
+                days_left = expiration_day - game_state.day
+                discount = player.get_vendor_discount(upgrade.vendor_name, game_state.day)
+                print(f"  ✓ {upgrade.name} - {upgrade.effect_value}% discount")
+                print(f"      Expires: Day {expiration_day} ({days_left} days left)")
+                print(f"      Total discount for {upgrade.vendor_name}: {discount * 100:.0f}%")
+        else:
+            print("\n📋 No active partnerships")
+
+        # Show available partnerships (including those that can be re-purchased)
+        print("\n🛒 Available Partnerships:")
+        available = []
+        vendor_partnerships = [u for u in game_state.available_upgrades if u.effect_type == "vendor_discount"]
+
+        for i, upgrade in enumerate(vendor_partnerships, 1):
+            current_discount = player.get_vendor_discount(upgrade.vendor_name, game_state.day)
+            can_purchase = current_discount < 0.15  # Max 15%
+
+            if can_purchase:
+                status = ""
+                if current_discount > 0:
+                    status = f" (Current: {current_discount * 100:.0f}%, New total: {(current_discount + upgrade.effect_value / 100) * 100:.0f}%)"
+                print(f"  {i}. {upgrade.name} - ${upgrade.cost:,.2f}")
+                print(f"      Effect: +{upgrade.effect_value}% discount for 30 days{status}")
+                available.append((i, upgrade))
+
+        if not available:
+            print("  (All partnerships at maximum discount!)")
+
+        print("\n  0. Back to Upgrades Menu")
+
+        try:
+            choice = input(f"\nSelect partnership to purchase (0-{len(vendor_partnerships)}): ").strip()
+            choice_num = int(choice)
+
+            if choice_num == 0:
+                break
+
+            # Find selected upgrade
+            selected_upgrade = None
+            for idx, upgrade in available:
+                if idx == choice_num:
+                    selected_upgrade = upgrade
+                    break
+
+            if selected_upgrade:
+                if player.cash < selected_upgrade.cost:
+                    print(f"\n✗ Not enough cash! Need ${selected_upgrade.cost:,.2f}, have ${player.cash:.2f}")
+                else:
+                    success = player.purchase_upgrade(selected_upgrade, game_state.day)
+                    if success:
+                        expiration_day = game_state.day + selected_upgrade.duration_days
+                        print(f"\n✓ Purchased {selected_upgrade.name} for ${selected_upgrade.cost:,.2f}!")
+                        print(f"  Effect: +{selected_upgrade.effect_value}% discount on {selected_upgrade.vendor_name}")
+                        print(f"  Duration: 30 days (expires on day {expiration_day})")
+                        new_discount = player.get_vendor_discount(selected_upgrade.vendor_name, game_state.day)
+                        print(f"  Total discount for {selected_upgrade.vendor_name}: {new_discount * 100:.0f}%")
+                    else:
+                        print("\n✗ Failed to purchase partnership (at maximum discount)")
+            else:
+                print("\n✗ Invalid partnership selection!")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+
+
 def upgrades_menu(game_state: GameState, player: Player) -> None:
     """Menu for purchasing store upgrades."""
     while True:
@@ -2914,35 +3051,46 @@ def upgrades_menu(game_state: GameState, player: Player) -> None:
         print("=" * 70)
         print(f"\nYour Cash: ${player.cash:.2f}")
 
-        # Show purchased upgrades
-        if player.purchased_upgrades:
-            print("\n📦 Your Upgrades:")
-            for upgrade in player.purchased_upgrades:
+        # Show purchased permanent upgrades (exclude vendor partnerships)
+        permanent_upgrades = [u for u in player.purchased_upgrades if u.effect_type != "vendor_discount"]
+        if permanent_upgrades:
+            print("\n📦 Your Permanent Upgrades:")
+            for upgrade in permanent_upgrades:
                 effect_desc = _get_upgrade_effect_description(upgrade)
                 print(f"  ✓ {upgrade.name} - {effect_desc}")
         else:
-            print("\n📦 No upgrades purchased yet")
+            print("\n📦 No permanent upgrades purchased yet")
 
-        # Show available upgrades (not yet purchased)
-        print("\n🛒 Available Upgrades:")
+        # Show available permanent upgrades (not yet purchased, exclude vendor partnerships)
+        print("\n🛒 Available Permanent Upgrades:")
         available = []
         for i, upgrade in enumerate(game_state.available_upgrades, 1):
+            # Skip vendor partnerships (shown in separate submenu)
+            if upgrade.effect_type == "vendor_discount":
+                continue
+
             # Check if already purchased
             already_purchased = any(u.name == upgrade.name for u in player.purchased_upgrades)
             if not already_purchased:
                 effect_desc = _get_upgrade_effect_description(upgrade)
-                print(f"  {i}. {upgrade.name} - ${upgrade.cost:.2f}")
+                print(f"  {i}. {upgrade.name} - ${upgrade.cost:,.2f}")
                 print(f"      Effect: {effect_desc}")
                 available.append((i, upgrade))
 
         if not available:
-            print("  (All upgrades purchased!)")
+            print("  (All permanent upgrades purchased!)")
 
-        print("\n  p. Production Line Upgrades (Late Game)")
+        print("\n  v. Vendor Partnerships (30-day duration, max 15% discount)")
+        print("  p. Production Line Upgrades (Late Game)")
         print("  0. Back to Main Menu")
 
         try:
-            choice = input(f"\nSelect upgrade to purchase (0-{len(game_state.available_upgrades)}, p): ").strip().lower()
+            choice = input(f"\nSelect upgrade to purchase (0-{len(game_state.available_upgrades)}, v, p): ").strip().lower()
+
+            # Handle vendor partnerships submenu
+            if choice == 'v':
+                vendor_partnerships_menu(game_state, player)
+                continue
 
             # Handle production line submenu
             if choice == 'p':
@@ -2969,13 +3117,13 @@ def upgrades_menu(game_state: GameState, player: Player) -> None:
                 if player.cash < selected_upgrade.cost:
                     print(f"\n✗ Not enough cash! Need ${selected_upgrade.cost:.2f}, have ${player.cash:.2f}")
                 else:
-                    success = player.purchase_upgrade(selected_upgrade)
+                    success = player.purchase_upgrade(selected_upgrade, game_state.day)
                     if success:
                         effect_desc = _get_upgrade_effect_description(selected_upgrade)
                         print(f"\n✓ Purchased {selected_upgrade.name} for ${selected_upgrade.cost:.2f}!")
                         print(f"  Effect: {effect_desc}")
                     else:
-                        print("\n✗ Failed to purchase upgrade")
+                        print("\n✗ Failed to purchase upgrade (already owned)")
             else:
                 print("\n✗ Invalid upgrade selection!")
 
