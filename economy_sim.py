@@ -2112,13 +2112,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Calculate base customer count: num_players * 15 + (day * 2)
     base_customer_count = len(game_state.players) * 15 + (game_state.day * 2)
 
-    # Check for 14-day event
-    if game_state.day % 14 == 0:
-        occurrence_count = game_state.day // 14
-        bonus_customers = 20 * occurrence_count
-        base_customer_count += bonus_customers
-        if show_details:
-            print(f"🎊 14-DAY EVENT! +{bonus_customers} customers today!")
+    # Add permanent customer increase for every 14-day period that has passed
+    fourteen_day_periods = game_state.day // 14
+    if fourteen_day_periods > 0:
+        permanent_bonus = 20 * fourteen_day_periods
+        base_customer_count += permanent_bonus
+
+        # Show event message only on the actual milestone days
+        if game_state.day % 14 == 0 and show_details:
+            print(f"🎊 14-DAY EVENT! +20 permanent customers! (Total permanent bonus: +{permanent_bonus})")
 
     # Calculate uncapped customers (starts at day 50, +1 every 10 days)
     uncapped_customer_count = 0
