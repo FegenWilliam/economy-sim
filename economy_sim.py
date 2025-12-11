@@ -425,8 +425,8 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (quantity, vendor_name)
-    cashiers: int = 0  # Each cashier handles 10 customers per day
-    restockers: int = 0  # Each restocker handles 20 items per day
+    cashiers: int = 0  # Each cashier adds 30 customers per day capacity
+    restockers: int = 0  # Each restocker adds 200 items per day capacity
     store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
     experience: float = 0.0  # XP gained from profits
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
@@ -459,13 +459,13 @@ class Player:
 
     def get_max_customers(self) -> int:
         """Get max number of customers that can be served per day."""
-        base = 10 + (self.cashiers * 10)  # Base 10 customers + 10 per cashier
+        base = 20 + (self.cashiers * 30)  # Base 20 customers + 30 per cashier
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_customers")
         return int(base + bonus)
 
     def get_max_items_per_day(self) -> int:
         """Get max number of items that can be restocked per day."""
-        base = 20 + (self.restockers * 20)  # Base 20 items + 20 per restocker
+        base = 100 + (self.restockers * 200)  # Base 100 items + 200 per restocker
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
         return int(base + bonus)
 
@@ -2097,8 +2097,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: num_players * 10 + day
-    base_customer_count = len(game_state.players) * 10 + game_state.day
+    # Calculate base customer count: num_players * 15 + day
+    base_customer_count = len(game_state.players) * 15 + game_state.day
 
     # Check for 14-day event
     if game_state.day % 14 == 0:
@@ -3663,7 +3663,7 @@ def run_game() -> None:
             human_players.append(human_player)
 
         print(f"\nStarting cash: ${config.starting_cash:.2f}")
-        print(f"Customers formula: (num_players × 10) + day_number")
+        print(f"Customers formula: (num_players × 15) + day_number")
 
         # Initialize items, vendors
         items = create_default_items()
