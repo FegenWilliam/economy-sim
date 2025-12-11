@@ -2741,6 +2741,7 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
 
                 # Show vendor options
                 print(f"\n=== Configuring Buy Order for {item.name} ===")
+                print("\n  0. Clear buy order")
                 print("\nAvailable Vendors:")
                 available_vendors = []
                 for i, vendor in enumerate(game_state.vendors, 1):
@@ -2755,10 +2756,14 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                         print(f"  {i}. {vendor.name}{min_text} - {status}")
                         available_vendors.append((i, vendor))
 
-                vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}): ")
+                vendor_choice = input(f"\nSelect vendor (0 to clear, 1-{len(game_state.vendors)}): ")
                 vendor_num = int(vendor_choice)
 
-                if 1 <= vendor_num <= len(game_state.vendors):
+                if vendor_num == 0:
+                    # Clear the buy order
+                    player.set_buy_order(item.name, 0, "")
+                    print(f"\n✓ Buy order cleared for {item.name}")
+                elif 1 <= vendor_num <= len(game_state.vendors):
                     selected_vendor = game_state.vendors[vendor_num - 1]
 
                     quantity_str = input(f"Enter quantity to buy (0 to skip): ")
