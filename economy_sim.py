@@ -2900,7 +2900,7 @@ def production_line_menu(game_state: GameState, player: Player) -> None:
             already_owned = player.has_production_line(item.name)
             if not already_owned:
                 # Calculate cost: 10,000 times the base cost
-                upgrade_cost = item.base_cost * 10000
+                upgrade_cost = item.base_cost * 20000
                 market_price = game_state.market_prices.get(item.name, item.base_price)
                 own_price = market_price * 0.5
 
