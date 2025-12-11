@@ -1599,8 +1599,11 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
     """
     Automatically set up buy orders for AI players.
 
-    AI players will buy to maintain inventory that scales with customer growth,
-    always choosing the cheapest available vendor.
+    AI players will buy to maintain inventory that scales with:
+    - Game progression (day and level)
+    - Item demand (0.1x to 2.0x multiplier based on market trends)
+    - Actual customer demand (yesterday's purchase patterns)
+    Always choosing the cheapest available vendor.
     Only buys items available at or below market price to avoid overpaying.
     """
     for item in items:
@@ -1608,15 +1611,27 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
 
         # Scale target inventory with game progression and customer count
         # Base: 20 units, +2 per day, +10 per store level
-        # This ensures AI keeps up with growing customer demand
         base_target = 20
         if game_state:
             day_scaling = game_state.day * 2
             level_scaling = player.store_level * 10
             target_inventory = base_target + day_scaling + level_scaling
+
+            # Apply demand multiplier (0.1x to 2.0x based on market trends)
+            demand_multiplier = game_state.item_demand.get(item.name, 1.0)
+            target_inventory *= demand_multiplier
+
+            # Also consider yesterday's actual customer demand if available
+            # This helps AI react to real purchase patterns, not just market trends
+            if hasattr(player, 'daily_demand_per_item') and player.daily_demand_per_item:
+                yesterday_demand = player.daily_demand_per_item.get(item.name, 0)
+                # Use the higher of: trend-based target OR yesterday's demand * 1.5 (buffer)
+                demand_based_target = yesterday_demand * 1.5
+                target_inventory = max(target_inventory, demand_based_target)
         else:
             target_inventory = 20  # Fallback if no game state
 
+        target_inventory = int(target_inventory)  # Ensure integer
         quantity_to_buy = max(0, target_inventory - current_inventory)
 
         # Find cheapest vendor for this item
