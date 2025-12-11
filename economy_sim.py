@@ -873,20 +873,32 @@ class Customer:
         # Regular customers (low, medium, high)
         remaining_budget = self.budget
 
-        # Decide how many different item types to buy (1 to 3)
-        num_item_types = random.randint(1, min(3, len(available_items)))
-        selected_items = weighted_random_sample(available_items, item_demand, num_item_types)
+        # Set guaranteed item count based on customer type (hard cap)
+        if self.customer_type == "low":
+            max_items = 5
+        elif self.customer_type == "medium":
+            max_items = 10
+        elif self.customer_type == "high":
+            max_items = 15
+        else:
+            max_items = 5  # Default fallback
 
-        for item in selected_items:
-            # Calculate max quantity we can afford
-            if item.base_price <= 0:
-                continue  # Skip items with invalid pricing
-            max_affordable = int(remaining_budget / item.base_price)
-            if max_affordable > 0:
-                # Buy between 1 and min(2, max_affordable) units - most customers buy 1-2 of each item
-                quantity = random.randint(1, min(2, max_affordable))
-                needs.append(CustomerNeed(item_name=item.name, quantity=quantity))
-                remaining_budget -= quantity * item.base_price
+        # Keep buying items until we hit the item limit or run out of budget
+        total_items = 0
+        while total_items < max_items and remaining_budget > 0 and available_items:
+            # Select one item based on demand
+            selected_item = weighted_random_sample(available_items, item_demand, 1)[0]
+
+            # Skip items with invalid pricing
+            if selected_item.base_price <= 0:
+                continue
+
+            # Check if we can afford at least one unit
+            if selected_item.base_price <= remaining_budget:
+                # Buy 1 unit of this item
+                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+                remaining_budget -= selected_item.base_price
+                total_items += 1
 
         return needs
 
@@ -2097,8 +2109,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: num_players * 15 + day
-    base_customer_count = len(game_state.players) * 15 + game_state.day
+    # Calculate base customer count: num_players * 15 + (day * 2)
+    base_customer_count = len(game_state.players) * 15 + (game_state.day * 2)
 
     # Check for 14-day event
     if game_state.day % 14 == 0:
