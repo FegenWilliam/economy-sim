@@ -489,7 +489,19 @@ class Player:
         """
         Purchase an upgrade if player has enough cash.
         Returns True if successful, False otherwise.
+        Prevents purchasing the same upgrade twice.
         """
+        # Check if already purchased (by name for standard upgrades, or by production line item)
+        if upgrade.effect_type == "production_line":
+            # For production lines, check if we already have one for this vendor
+            if self.has_production_line(upgrade.vendor_name):
+                return False
+        else:
+            # For other upgrades, check by name
+            already_purchased = any(u.name == upgrade.name for u in self.purchased_upgrades)
+            if already_purchased:
+                return False
+
         if self.cash < upgrade.cost:
             return False
 
@@ -1806,6 +1818,90 @@ def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
                 pass
 
 
+def auto_hire_employees(player: Player, game_state: GameState) -> None:
+    """
+    Automatically hire employees for AI players based on strategic decision-making.
+
+    Strategy:
+    1. Maintain a cash reserve (at least $2000 + $1000 per store level)
+    2. Consider ongoing wage costs ($500/month per employee)
+    3. Hire cashiers when customer capacity is limiting sales
+    4. Hire restockers when inventory capacity is limiting operations
+    5. Balance hiring with long-term profitability
+    """
+    HIRING_COST = 500.0
+    MONTHLY_WAGE = 500.0
+
+    # Calculate minimum cash reserve (same as upgrades)
+    min_reserve = 2000 + (1000 * player.store_level)
+
+    # For hiring decisions, we want a larger buffer since employees have ongoing costs
+    # Reserve enough for at least 3 months of wages for current + potential new employee
+    total_employees = player.cashiers + player.restockers
+    wage_buffer = (total_employees + 1) * MONTHLY_WAGE * 3 / 30  # 3 months of daily wages
+
+    available_cash = player.cash - min_reserve - wage_buffer
+
+    if available_cash < HIRING_COST:
+        return  # Not enough cash to safely hire
+
+    # Analyze current constraints
+    current_inventory_count = sum(len(inv.items) for inv in player.inventory.values())
+    max_items = player.get_max_items_per_day()
+    max_customers = player.get_max_customers()
+
+    # Calculate utilization rates (how close we are to hitting limits)
+    # Higher utilization = more need for that employee type
+    inventory_utilization = current_inventory_count / max(max_items, 1)
+
+    # Estimate customer demand based on current inventory and pricing
+    # This is a rough estimate - AI assumes they could sell to capacity if they had stock
+    num_products = len(player.inventory)
+    estimated_customer_demand = min(num_products * 5, max_customers * 1.2)  # Rough estimate
+    customer_utilization = estimated_customer_demand / max(max_customers, 1)
+
+    # Calculate ROI for each employee type
+    # Cashiers: increase customer capacity by 10 customers/day
+    # Restockers: increase inventory capacity by 20 items/day
+    # Assume average profit per customer is $5, and inventory turnover matters
+
+    cashier_value = 0.0
+    restocker_value = 0.0
+
+    # Score cashiers higher if we're hitting customer capacity limits
+    if customer_utilization > 0.8:  # Over 80% capacity
+        # Expected additional revenue from 10 more customers per day
+        cashier_value = 10 * 5 * 30  # 10 customers * $5 profit * 30 days = $1500/month
+        cashier_value -= MONTHLY_WAGE  # Subtract monthly cost
+        cashier_value *= (customer_utilization - 0.7)  # Scale by how constrained we are
+
+    # Score restockers higher if we're hitting inventory capacity limits
+    if inventory_utilization > 0.7:  # Over 70% capacity
+        # Expected additional revenue from being able to stock more
+        restocker_value = 20 * 2 * 30  # 20 items * $2 profit/item * 30 days = $1200/month
+        restocker_value -= MONTHLY_WAGE  # Subtract monthly cost
+        restocker_value *= (inventory_utilization - 0.6)  # Scale by how constrained we are
+
+    # Only hire if the expected monthly value is positive and significant
+    # Early game: be more aggressive (lower threshold)
+    # Late game: be more conservative (higher threshold)
+    min_monthly_value = 200 + (player.store_level * 100)
+
+    # Decide what to hire
+    hire_type = None
+    if cashier_value > max(restocker_value, min_monthly_value):
+        hire_type = "cashier"
+    elif restocker_value > min_monthly_value:
+        hire_type = "restocker"
+
+    # Attempt to hire
+    if hire_type:
+        success = player.hire_employee(hire_type)
+        if success:
+            # AI hiring is silent (no print statements)
+            pass
+
+
 # -------------------------------------------------------------------
 # Daily simulation logic
 # -------------------------------------------------------------------
@@ -1882,7 +1978,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if uncapped_customer_count > 0:
             print(f"💎 Uncapped customers today: {uncapped_customer_count} (looking for expensive items ≥$100)")
 
-    # Step 2: AI player decisions (pricing, buying, and upgrades)
+    # Step 2: AI player decisions (pricing, buying, upgrades, and hiring)
     # Done BEFORE buy orders so they can purchase inventory on Day 1
     for player in game_state.players:
         if not player.is_human:  # Only automate AI players
@@ -1892,6 +1988,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                                 game_state.players, game_state.vendors)
             # AI players can now purchase upgrades strategically
             auto_purchase_upgrades(player, game_state)
+            # AI players can now hire employees strategically
+            auto_hire_employees(player, game_state)
 
     # Step 4: Execute buy orders for ALL players
     if show_details:
