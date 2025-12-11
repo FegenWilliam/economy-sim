@@ -3144,7 +3144,7 @@ def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
     elif upgrade.effect_type == "vendor_discount":
         return f"+{int(upgrade.effect_value)}% discount at {upgrade.vendor_name}"
     elif upgrade.effect_type == "wage_reduction":
-        return f"-${int(upgrade.effect_value)} daily wage per employee (from $20 to $15)"
+        return f"-${int(upgrade.effect_value)} daily wage per employee (from $500 to $400)"
     elif upgrade.effect_type == "production_line":
         return f"Own production for {upgrade.vendor_name} (50% market price)"
     return "Unknown effect"
