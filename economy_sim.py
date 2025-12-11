@@ -3411,11 +3411,13 @@ def serialize_game_state(game_state: GameState) -> dict:
                         "effect_type": upgrade.effect_type,
                         "effect_value": upgrade.effect_value,
                         "vendor_name": upgrade.vendor_name,
+                        "duration_days": upgrade.duration_days,
                     }
                     for upgrade in player.purchased_upgrades
                 ],
                 "is_human": player.is_human,
                 "last_wage_payment_day": player.last_wage_payment_day,
+                "vendor_partnership_expiration": player.vendor_partnership_expiration,
             }
             for player in game_state.players
         ],
@@ -3465,17 +3467,8 @@ def deserialize_game_state(data: dict) -> GameState:
         for vendor_data in data["vendors"]
     ]
 
-    # Recreate available upgrades
-    available_upgrades = [
-        Upgrade(
-            name=upgrade_data["name"],
-            cost=upgrade_data["cost"],
-            effect_type=upgrade_data["effect_type"],
-            effect_value=upgrade_data["effect_value"],
-            vendor_name=upgrade_data.get("vendor_name", ""),
-        )
-        for upgrade_data in data["available_upgrades"]
-    ]
+    # Regenerate available upgrades (don't load from save to ensure balance changes are applied)
+    available_upgrades = create_default_upgrades(vendors)
 
     # Recreate players
     players = []
@@ -3488,6 +3481,7 @@ def deserialize_game_state(data: dict) -> GameState:
                 effect_type=upgrade_data["effect_type"],
                 effect_value=upgrade_data["effect_value"],
                 vendor_name=upgrade_data.get("vendor_name", ""),
+                duration_days=upgrade_data.get("duration_days", 0),
             )
             for upgrade_data in player_data["purchased_upgrades"]
         ]
@@ -3509,6 +3503,7 @@ def deserialize_game_state(data: dict) -> GameState:
             purchased_upgrades=purchased_upgrades,
             is_human=player_data["is_human"],
             last_wage_payment_day=player_data.get("last_wage_payment_day", 0),
+            vendor_partnership_expiration=player_data.get("vendor_partnership_expiration", {}),
         )
         players.append(player)
 
