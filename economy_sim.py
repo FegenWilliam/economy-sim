@@ -1492,11 +1492,6 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     active_orders = []
     for item_name, (quantity, vendor_name) in player.buy_orders.items():
         if quantity > 0:
-            # Check if player already has too many different products
-            current_products = len([item for item, qty in player.inventory.items() if qty > 0])
-            if player.inventory.get(item_name, 0) == 0 and current_products >= max_products:
-                continue  # Skip this item, store is full of different products
-
             # Find the vendor
             vendor = game_state.get_vendor(vendor_name)
             if vendor:
@@ -1552,6 +1547,11 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     for item_name, quantity, vendor, price in active_orders:
         if total_items_bought >= max_items:
             break  # Reached restocker limit
+
+        # Check if player already has too many different products
+        current_products = len([item for item, qty in player.inventory.items() if qty > 0])
+        if player.inventory.get(item_name, 0) == 0 and current_products >= max_products:
+            continue  # Skip this item, store is full of different products
 
         # Limit quantity by remaining items restockers can handle
         remaining_capacity = max_items - total_items_bought
