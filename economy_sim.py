@@ -1844,7 +1844,7 @@ def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
     production_line_upgrades = []
     for item in game_state.items:
         if not player.has_production_line(item.name):
-            upgrade_cost = item.base_cost * 10000
+            upgrade_cost = item.base_cost * 20000
             if upgrade_cost <= available_cash:  # Only consider affordable production lines
                 production_line_upgrades.append(Upgrade(
                     name=f"Production Line: {item.name}",
