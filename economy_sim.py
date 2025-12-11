@@ -1135,10 +1135,10 @@ def create_vendors() -> List[Vendor]:
         selection_params=50.0  # $50 threshold
     ))
 
-    # Vendor 5: 100% of market price, all items available
+    # Vendor 5: 102% of market price, all items available
     vendors.append(Vendor(
         name="Universal Supply Corp.",
-        pricing_multiplier=1.00,
+        pricing_multiplier=1.02,
         selection_type="all",
         selection_params=0  # No limit
     ))
@@ -1436,8 +1436,9 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     For vendors with random daily selection (vendors 1 & 2), fallback to cheapest
     available vendor if the selected vendor doesn't have the item.
 
-    For vendors with minimum purchase requirements, fallback to Budget Goods Ltd.
-    (vendor 3) if the minimum cannot be met.
+    For vendors with minimum purchase requirements:
+    - VIP Goods Co. (high-end items $200+) falls back to Universal Supply Corp.
+    - Other vendors fall back to Budget Goods Ltd.
 
     Respects restocker limits (restockers * 20 items per day) and store level
     (max different products).
@@ -1482,15 +1483,26 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
                         price = cheapest_price
 
                 # For vendors with minimum purchase, check if quantity meets minimum
-                # If not, fallback to Budget Goods Ltd. (index 2, no minimum)
+                # If not, fallback to appropriate vendor based on price range
                 if vendor.min_purchase is not None and quantity < vendor.min_purchase and price is not None:
-                    # Try to use Budget Goods Ltd. (vendor 3, index 2)
-                    if len(game_state.vendors) > 2:
-                        fallback_vendor = game_state.vendors[2]  # Budget Goods Ltd.
-                        fallback_price = fallback_vendor.get_price(item_name)
-                        if fallback_price is not None:
-                            vendor = fallback_vendor
-                            price = fallback_price
+                    # VIP Goods Co. (high-end items $200+) should fallback to Universal Supply Corp.
+                    # Other vendors fallback to Budget Goods Ltd.
+                    if vendor.price_min is not None and vendor.price_min >= 200.0:
+                        # VIP vendor - fallback to Universal Supply Corp. (index 4)
+                        if len(game_state.vendors) > 4:
+                            fallback_vendor = game_state.vendors[4]  # Universal Supply Corp.
+                            fallback_price = fallback_vendor.get_price(item_name)
+                            if fallback_price is not None:
+                                vendor = fallback_vendor
+                                price = fallback_price
+                    else:
+                        # Regular vendor - fallback to Budget Goods Ltd. (index 2)
+                        if len(game_state.vendors) > 2:
+                            fallback_vendor = game_state.vendors[2]  # Budget Goods Ltd.
+                            fallback_price = fallback_vendor.get_price(item_name)
+                            if fallback_price is not None:
+                                vendor = fallback_vendor
+                                price = fallback_price
 
                 if price is not None:
                     active_orders.append((item_name, quantity, vendor, price))
