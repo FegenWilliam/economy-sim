@@ -2585,6 +2585,10 @@ def display_vendor_table(game_state: GameState) -> None:
 
         print(f"   Pricing: {vendor.pricing_multiplier*100:.0f}% of market price")
 
+        # Display minimum purchase requirement if it exists
+        if vendor.min_purchase is not None:
+            print(f"   MINIMUM BUY: {vendor.min_purchase} units per purchase")
+
         # Display current inventory
         print(f"   Current stock ({len(vendor.items)} items):")
         if vendor.items:
