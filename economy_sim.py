@@ -3373,14 +3373,17 @@ def run_game() -> None:
         print(f"   Cash: ${player.cash:.2f}")
         print(f"   Inventory value: {sum(player.inventory.values())} units")
 
-    winner = sorted_players[0]
-    print("\n" + "=" * 60)
-    if winner.is_human:
-        print("🎉 CONGRATULATIONS! YOU WON! 🎉")
+    if sorted_players:
+        winner = sorted_players[0]
+        print("\n" + "=" * 60)
+        if winner.is_human:
+            print("🎉 CONGRATULATIONS! YOU WON! 🎉")
+        else:
+            print(f"Winner: {winner.name}")
+        print(f"Final cash: ${winner.cash:.2f}")
+        print("=" * 60)
     else:
-        print(f"Winner: {winner.name}")
-    print(f"Final cash: ${winner.cash:.2f}")
-    print("=" * 60)
+        print("\nNo players in game.")
 
 
 if __name__ == "__main__":
