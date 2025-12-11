@@ -393,9 +393,13 @@ class Vendor:
     """A vendor that sells items to players at wholesale prices."""
     name: str
     pricing_multiplier: float = 1.0  # Multiplier applied to market price (e.g., 0.7 = 70% of market)
-    selection_type: str = "all"  # "random_daily", "price_threshold", "all"
+    selection_type: str = "all"  # "random_daily", "price_threshold", "price_range", "all"
     selection_params: float = 0.0  # For random_daily: count of items. For price_threshold: max price
     items: Dict[str, float] = field(default_factory=dict)  # item_name -> wholesale_price (refreshed daily)
+    max_per_item_per_player: Optional[int] = None  # Max quantity per item per player per day (None = unlimited)
+    min_purchase: Optional[int] = None  # Minimum quantity per purchase (None = no minimum)
+    price_min: Optional[float] = None  # Minimum price threshold (None = no minimum)
+    price_max: Optional[float] = None  # Maximum price threshold (None = no maximum)
 
     def get_price(self, item_name: str) -> Optional[float]:
         """Get the wholesale price for an item from this vendor."""
@@ -641,15 +645,36 @@ class Player:
 
         return (0.0, 0.0, 0)
 
-    def purchase_from_vendor(self, vendor: 'Vendor', item_name: str, quantity: int, market_price: float = 0) -> bool:
+    def purchase_from_vendor(self, vendor: 'Vendor', item_name: str, quantity: int, market_price: float = 0,
+                            game_state: Optional['GameState'] = None) -> bool:
         """
         Purchase items from a vendor at their wholesale price.
         Returns True if successful, False if not enough cash.
         Also tracks the weighted average cost per item for profit calculation.
         Applies vendor discount upgrades and production line pricing.
+        Enforces vendor-specific purchase limits (min/max per player).
         """
         if quantity <= 0:
             return False
+
+        # Check minimum purchase requirement
+        if vendor.min_purchase is not None and quantity < vendor.min_purchase:
+            return False
+
+        # Check maximum per-item-per-player limit
+        if vendor.max_per_item_per_player is not None and game_state is not None:
+            # Initialize tracking if needed
+            if self.name not in game_state.vendor_daily_purchases:
+                game_state.vendor_daily_purchases[self.name] = {}
+            if vendor.name not in game_state.vendor_daily_purchases[self.name]:
+                game_state.vendor_daily_purchases[self.name][vendor.name] = {}
+
+            # Get current purchases for this item today
+            current_purchases = game_state.vendor_daily_purchases[self.name][vendor.name].get(item_name, 0)
+
+            # Check if this purchase would exceed the limit
+            if current_purchases + quantity > vendor.max_per_item_per_player:
+                return False
 
         # Check if player owns production line for this item (takes priority)
         production_price = self.get_production_line_price(item_name, market_price) if market_price > 0 else None
@@ -685,6 +710,12 @@ class Player:
             self.item_costs[item_name] = weighted_cost
 
         self.inventory[item_name] = new_total_qty
+
+        # Track purchase for max-per-player limits
+        if vendor.max_per_item_per_player is not None and game_state is not None:
+            game_state.vendor_daily_purchases[self.name][vendor.name][item_name] = \
+                game_state.vendor_daily_purchases[self.name][vendor.name].get(item_name, 0) + quantity
+
         return True
 
 
@@ -923,7 +954,7 @@ class Customer:
 @dataclass
 class GameConfig:
     """Configuration for the economic simulation."""
-    starting_cash: float = 1000.0
+    starting_cash: float = 2500.0
     num_days: int = 30
     customers_per_day: int = 10
     # TODO: add more config options if needed (e.g. random seed, max inventory, etc.)
@@ -945,6 +976,7 @@ class GameState:
     unlocked_product_indices: List[int] = field(default_factory=list)  # Indices of products from catalog that have been unlocked
     event_price_changes: Dict[str, float] = field(default_factory=dict)  # Tracks items with temporary event prices and their original prices
     item_demand: Dict[str, float] = field(default_factory=dict)  # item_name -> demand multiplier (0.1 to 2.0)
+    vendor_daily_purchases: Dict[str, Dict[str, Dict[str, int]]] = field(default_factory=dict)  # player_name -> vendor_name -> item_name -> quantity_today
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -1062,50 +1094,82 @@ def create_customers(num_customers: int) -> List[Customer]:
 
 def create_vendors() -> List[Vendor]:
     """
-    Create 5 vendors with different pricing and selection strategies.
+    Create 8 vendors with different pricing and selection strategies.
 
     Vendor inventory is refreshed daily based on their selection type.
     """
     vendors = []
 
-    # Vendor 1: 70% of market price, 1 random item per day
+    # Vendor 1: 50% of market price, 1 random item per day, max 100 per item per player
     vendors.append(Vendor(
         name="Lucky Deal Trader",
-        pricing_multiplier=0.70,
+        pricing_multiplier=0.50,
         selection_type="random_daily",
-        selection_params=1  # 1 item
+        selection_params=1,  # 1 item
+        max_per_item_per_player=100
     ))
 
-    # Vendor 2: 95% of market price, 5 random items per day
+    # Vendor 2: 80% of market price, 5 random items per day, max 100 per item per player
     vendors.append(Vendor(
         name="Discount Wholesale Co.",
-        pricing_multiplier=0.95,
+        pricing_multiplier=0.80,
         selection_type="random_daily",
-        selection_params=5  # 5 items
+        selection_params=5,  # 5 items
+        max_per_item_per_player=100
     ))
 
-    # Vendor 3: Market price, all items under $20 market price
+    # Vendor 3: 90% of market price, all items under $20 market price
     vendors.append(Vendor(
         name="Budget Goods Ltd.",
-        pricing_multiplier=1.0,
+        pricing_multiplier=0.90,
         selection_type="price_threshold",
         selection_params=20.0  # $20 threshold
     ))
 
-    # Vendor 4: 105% of market price, all items under $50 market price
+    # Vendor 4: 95% of market price, all items under $50 market price
     vendors.append(Vendor(
         name="Premium Select Inc.",
-        pricing_multiplier=1.05,
+        pricing_multiplier=0.95,
         selection_type="price_threshold",
         selection_params=50.0  # $50 threshold
     ))
 
-    # Vendor 5: 110% of market price, all items available
+    # Vendor 5: 100% of market price, all items available
     vendors.append(Vendor(
         name="Universal Supply Corp.",
-        pricing_multiplier=1.10,
+        pricing_multiplier=1.00,
         selection_type="all",
         selection_params=0  # No limit
+    ))
+
+    # Vendor 6: 85% of market price, min 100 per purchase, items $30 or less
+    vendors.append(Vendor(
+        name="Bulk Goods Co.",
+        pricing_multiplier=0.85,
+        selection_type="price_range",
+        selection_params=0,
+        min_purchase=100,
+        price_max=30.0
+    ))
+
+    # Vendor 7: 80% of market price, min 500 per purchase, items $10 or less
+    vendors.append(Vendor(
+        name="Cheap Goods Co.",
+        pricing_multiplier=0.80,
+        selection_type="price_range",
+        selection_params=0,
+        min_purchase=500,
+        price_max=10.0
+    ))
+
+    # Vendor 8: 95% of market price, min 10 per purchase, items $200 or more
+    vendors.append(Vendor(
+        name="VIP Goods Co.",
+        pricing_multiplier=0.95,
+        selection_type="price_range",
+        selection_params=0,
+        min_purchase=10,
+        price_min=200.0
     ))
 
     return vendors
@@ -1136,6 +1200,17 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
                 market_price = market_prices.get(item.name, item.base_price)
                 if market_price <= price_threshold:
                     vendor.items[item.name] = market_price * vendor.pricing_multiplier
+
+        elif vendor.selection_type == "price_range":
+            # Select items within a price range (min and/or max)
+            for item in items:
+                market_price = market_prices.get(item.name, item.base_price)
+                # Check if price is within range
+                if vendor.price_min is not None and market_price < vendor.price_min:
+                    continue
+                if vendor.price_max is not None and market_price > vendor.price_max:
+                    continue
+                vendor.items[item.name] = market_price * vendor.pricing_multiplier
 
         elif vendor.selection_type == "all":
             # Include all items
@@ -1420,7 +1495,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
         # Get market price for production line check
         market_price = game_state.market_prices.get(item_name, 0)
 
-        success = player.purchase_from_vendor(vendor, item_name, actual_quantity, market_price)
+        success = player.purchase_from_vendor(vendor, item_name, actual_quantity, market_price, game_state)
         if success:
             purchases[item_name] = actual_quantity
             total_items_bought += actual_quantity
@@ -1431,7 +1506,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
             max_affordable = int(player.cash / actual_price)
             if max_affordable > 0:
                 affordable_quantity = min(max_affordable, remaining_capacity)
-                partial_success = player.purchase_from_vendor(vendor, item_name, affordable_quantity, market_price)
+                partial_success = player.purchase_from_vendor(vendor, item_name, affordable_quantity, market_price, game_state)
                 if partial_success:
                     purchases[item_name] = affordable_quantity
                     total_items_bought += affordable_quantity
@@ -2385,6 +2460,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 9: Advance day counter
     game_state.day += 1
 
+    # Step 10: Reset daily vendor purchase tracking
+    game_state.vendor_daily_purchases.clear()
+
     return daily_sales
 
 
@@ -2529,7 +2607,7 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
 
                     if quantity > 0:
                         market_price = game_state.market_prices.get(selected_item_name, 0)
-                        success = player.purchase_from_vendor(vendor, selected_item_name, quantity, market_price)
+                        success = player.purchase_from_vendor(vendor, selected_item_name, quantity, market_price, game_state)
                         if success:
                             # Calculate actual cost (may be production line pricing)
                             actual_price = player.get_production_line_price(selected_item_name, market_price)
@@ -3105,6 +3183,10 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "selection_type": vendor.selection_type,
                 "selection_params": vendor.selection_params,
                 "items": vendor.items,
+                "max_per_item_per_player": vendor.max_per_item_per_player,
+                "min_purchase": vendor.min_purchase,
+                "price_min": vendor.price_min,
+                "price_max": vendor.price_max,
             }
             for vendor in game_state.vendors
         ],
@@ -3145,6 +3227,7 @@ def serialize_game_state(game_state: GameState) -> dict:
             }
             for upgrade in game_state.available_upgrades
         ],
+        "vendor_daily_purchases": game_state.vendor_daily_purchases,
     }
 
 
@@ -3171,6 +3254,10 @@ def deserialize_game_state(data: dict) -> GameState:
             selection_type=vendor_data["selection_type"],
             selection_params=vendor_data["selection_params"],
             items=vendor_data["items"],
+            max_per_item_per_player=vendor_data.get("max_per_item_per_player"),
+            min_purchase=vendor_data.get("min_purchase"),
+            price_min=vendor_data.get("price_min"),
+            price_max=vendor_data.get("price_max"),
         )
         for vendor_data in data["vendors"]
     ]
@@ -3238,6 +3325,7 @@ def deserialize_game_state(data: dict) -> GameState:
         available_upgrades=available_upgrades,
         current_player_index=data["current_player_index"],
         unlocked_product_indices=data.get("unlocked_product_indices", []),
+        vendor_daily_purchases=data.get("vendor_daily_purchases", {}),
     )
 
     return game_state
