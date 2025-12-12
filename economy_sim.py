@@ -873,20 +873,32 @@ class Customer:
         # Regular customers (low, medium, high)
         remaining_budget = self.budget
 
-        # Decide how many different item types to buy (1 to 3)
-        num_item_types = random.randint(1, min(3, len(available_items)))
-        selected_items = weighted_random_sample(available_items, item_demand, num_item_types)
+        # Set guaranteed item count based on customer type (hard cap)
+        if self.customer_type == "low":
+            max_items = 5
+        elif self.customer_type == "medium":
+            max_items = 10
+        elif self.customer_type == "high":
+            max_items = 15
+        else:
+            max_items = 5  # Default fallback
 
-        for item in selected_items:
-            # Calculate max quantity we can afford
-            if item.base_price <= 0:
-                continue  # Skip items with invalid pricing
-            max_affordable = int(remaining_budget / item.base_price)
-            if max_affordable > 0:
-                # Buy between 1 and min(2, max_affordable) units - most customers buy 1-2 of each item
-                quantity = random.randint(1, min(2, max_affordable))
-                needs.append(CustomerNeed(item_name=item.name, quantity=quantity))
-                remaining_budget -= quantity * item.base_price
+        # Keep buying items until we hit the item limit or run out of budget
+        total_items = 0
+        while total_items < max_items and remaining_budget > 0 and available_items:
+            # Select one item based on demand
+            selected_item = weighted_random_sample(available_items, item_demand, 1)[0]
+
+            # Skip items with invalid pricing
+            if selected_item.base_price <= 0:
+                continue
+
+            # Check if we can afford at least one unit
+            if selected_item.base_price <= remaining_budget:
+                # Buy 1 unit of this item
+                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+                remaining_budget -= selected_item.base_price
+                total_items += 1
 
         return needs
 
@@ -1583,19 +1595,43 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
 # Player strategies
 # -------------------------------------------------------------------
 
-def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendor], market_prices: Dict[str, float]) -> None:
+def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendor], market_prices: Dict[str, float], game_state: 'GameState' = None) -> None:
     """
     Automatically set up buy orders for AI players.
 
-    AI players will buy to maintain inventory of at least 10 units per item,
-    always choosing the cheapest available vendor.
+    AI players will buy to maintain inventory that scales with:
+    - Game progression (day and level)
+    - Item demand (0.1x to 2.0x multiplier based on market trends)
+    - Actual customer demand (yesterday's purchase patterns)
+    Always choosing the cheapest available vendor.
     Only buys items available at or below market price to avoid overpaying.
     """
     for item in items:
         current_inventory = player.inventory.get(item.name, 0)
 
-        # Try to maintain inventory of at least 10 units per item
-        target_inventory = 10
+        # Scale target inventory with game progression and customer count
+        # Base: 20 units, +2 per day, +10 per store level
+        base_target = 20
+        if game_state:
+            day_scaling = game_state.day * 2
+            level_scaling = player.store_level * 10
+            target_inventory = base_target + day_scaling + level_scaling
+
+            # Apply demand multiplier (0.1x to 2.0x based on market trends)
+            demand_multiplier = game_state.item_demand.get(item.name, 1.0)
+            target_inventory *= demand_multiplier
+
+            # Also consider yesterday's actual customer demand if available
+            # This helps AI react to real purchase patterns, not just market trends
+            if hasattr(player, 'daily_demand_per_item') and player.daily_demand_per_item:
+                yesterday_demand = player.daily_demand_per_item.get(item.name, 0)
+                # Use the higher of: trend-based target OR yesterday's demand * 1.5 (buffer)
+                demand_based_target = yesterday_demand * 1.5
+                target_inventory = max(target_inventory, demand_based_target)
+        else:
+            target_inventory = 20  # Fallback if no game state
+
+        target_inventory = int(target_inventory)  # Ensure integer
         quantity_to_buy = max(0, target_inventory - current_inventory)
 
         # Find cheapest vendor for this item
@@ -1825,13 +1861,13 @@ def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
     Automatically purchase upgrades for AI players based on strategic decision-making.
 
     Strategy:
-    1. Maintain a cash reserve (at least $2000 + $1000 per store level)
+    1. Maintain a modest cash reserve ($1000 + $500 per store level)
     2. Prioritize capacity upgrades when hitting limits
     3. Invest in efficiency upgrades (XP, vendor discounts) mid-game
     4. Purchase production lines for high-volume items late-game
     """
-    # Calculate minimum cash reserve (increases with store level)
-    min_reserve = 2000 + (1000 * player.store_level)
+    # Calculate minimum cash reserve (reduced for more aggressive scaling)
+    min_reserve = 1000 + (500 * player.store_level)
     available_cash = player.cash - min_reserve
 
     if available_cash <= 0:
@@ -1880,11 +1916,10 @@ def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
 
         score = 0
 
-        # Customer capacity upgrades - high priority if approaching limit
+        # Customer capacity upgrades - high priority with customer growth
         if upgrade.effect_type == "max_customers":
-            # Higher priority if we have good cash flow
-            if player.cash > 5000:
-                score = 80 + (upgrade.effect_value / upgrade.cost * 1000)
+            # High priority to keep up with growing customer base
+            score = 85 + (upgrade.effect_value / upgrade.cost * 1000)
 
         # Inventory capacity upgrades - medium-high priority
         elif upgrade.effect_type == "max_items":
@@ -1933,9 +1968,9 @@ def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
 
                 if daily_savings > 0:
                     payback_days = upgrade.cost / daily_savings
-                    # Only pursue if payback is reasonable (< 100 days)
-                    if payback_days < 100:
-                        score = max(40, 90 - (payback_days / 2))
+                    # Only pursue if payback is reasonable (< 200 days, relaxed from 100)
+                    if payback_days < 200:
+                        score = max(40, 90 - (payback_days / 4))
                     else:
                         score = 30  # Low priority for poor ROI
             else:
@@ -1963,22 +1998,22 @@ def auto_hire_employees(player: Player, game_state: GameState) -> None:
     Automatically hire employees for AI players based on strategic decision-making.
 
     Strategy:
-    1. Maintain a cash reserve (at least $2000 + $1000 per store level)
+    1. Maintain a modest cash reserve ($1000 + $500 per store level)
     2. Consider ongoing wage costs ($500/month per employee)
     3. Hire cashiers when customer capacity is limiting sales
     4. Hire restockers when inventory capacity is limiting operations
-    5. Balance hiring with long-term profitability
+    5. Scale more aggressively to keep up with customer growth
     """
     HIRING_COST = 500.0
     MONTHLY_WAGE = 500.0
 
-    # Calculate minimum cash reserve (same as upgrades)
-    min_reserve = 2000 + (1000 * player.store_level)
+    # Calculate minimum cash reserve (reduced for more aggressive scaling)
+    min_reserve = 1000 + (500 * player.store_level)
 
-    # For hiring decisions, we want a larger buffer since employees have ongoing costs
-    # Reserve enough for at least 3 months of wages for current + potential new employee
+    # Reserve enough for 1 month of wages for current + potential new employee
+    # (Reduced from 3 months to be more aggressive)
     total_employees = player.cashiers + player.restockers
-    wage_buffer = (total_employees + 1) * MONTHLY_WAGE * 3 / 30  # 3 months of daily wages
+    wage_buffer = (total_employees + 1) * MONTHLY_WAGE / 30  # 1 month of daily wages
 
     available_cash = player.cash - min_reserve - wage_buffer
 
@@ -2009,23 +2044,23 @@ def auto_hire_employees(player: Player, game_state: GameState) -> None:
     restocker_value = 0.0
 
     # Score cashiers higher if we're hitting customer capacity limits
-    if customer_utilization > 0.8:  # Over 80% capacity
+    if customer_utilization > 0.6:  # Over 60% capacity (reduced from 80%)
         # Expected additional revenue from 10 more customers per day
         cashier_value = 10 * 5 * 30  # 10 customers * $5 profit * 30 days = $1500/month
         cashier_value -= MONTHLY_WAGE  # Subtract monthly cost
-        cashier_value *= (customer_utilization - 0.7)  # Scale by how constrained we are
+        cashier_value *= (customer_utilization - 0.5)  # Scale by how constrained we are
 
     # Score restockers higher if we're hitting inventory capacity limits
-    if inventory_utilization > 0.7:  # Over 70% capacity
+    if inventory_utilization > 0.5:  # Over 50% capacity (reduced from 70%)
         # Expected additional revenue from being able to stock more
         restocker_value = 20 * 2 * 30  # 20 items * $2 profit/item * 30 days = $1200/month
         restocker_value -= MONTHLY_WAGE  # Subtract monthly cost
-        restocker_value *= (inventory_utilization - 0.6)  # Scale by how constrained we are
+        restocker_value *= (inventory_utilization - 0.4)  # Scale by how constrained we are
 
     # Only hire if the expected monthly value is positive and significant
-    # Early game: be more aggressive (lower threshold)
-    # Late game: be more conservative (higher threshold)
-    min_monthly_value = 200 + (player.store_level * 100)
+    # Late game: be MORE aggressive (lower threshold) to keep up with customer growth
+    # Early game: be more conservative (higher threshold) to preserve cash
+    min_monthly_value = 300 - (player.store_level * 50)  # Level 1: $250, Level 5: $50
 
     # Decide what to hire
     hire_type = None
@@ -2097,16 +2132,18 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: num_players * 15 + day
-    base_customer_count = len(game_state.players) * 15 + game_state.day
+    # Calculate base customer count: num_players * 15 + (day * 2)
+    base_customer_count = len(game_state.players) * 15 + (game_state.day * 2)
 
-    # Check for 14-day event
-    if game_state.day % 14 == 0:
-        occurrence_count = game_state.day // 14
-        bonus_customers = 20 * occurrence_count
-        base_customer_count += bonus_customers
-        if show_details:
-            print(f"🎊 14-DAY EVENT! +{bonus_customers} customers today!")
+    # Add permanent customer increase for every 14-day period that has passed
+    fourteen_day_periods = game_state.day // 14
+    if fourteen_day_periods > 0:
+        permanent_bonus = 20 * fourteen_day_periods
+        base_customer_count += permanent_bonus
+
+        # Show event message only on the actual milestone days
+        if game_state.day % 14 == 0 and show_details:
+            print(f"🎊 14-DAY EVENT! +20 permanent customers! (Total permanent bonus: +{permanent_bonus})")
 
     # Calculate uncapped customers (starts at day 50, +1 every 10 days)
     uncapped_customer_count = 0
@@ -2123,7 +2160,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     for player in game_state.players:
         if not player.is_human:  # Only automate AI players
             # Update AI buy orders every day based on current inventory
-            auto_setup_buy_orders(player, game_state.items, game_state.vendors, game_state.market_prices)
+            auto_setup_buy_orders(player, game_state.items, game_state.vendors, game_state.market_prices, game_state)
             auto_pricing_strategy(player, game_state.market_prices, game_state.items,
                                 game_state.players, game_state.vendors)
             # AI players can now purchase upgrades strategically
