@@ -806,12 +806,18 @@ class Customer:
 
         # Hoarder: buys 3-10 of 1 item only
         if self.customer_type == "hoarder":
-            # Filter items that fit within budget for at least 3 units
-            affordable_items = [item for item in available_items if item.base_price * 3 <= self.budget]
+            # Filter items that fit within budget for at least 3 units (use market prices)
+            affordable_items = []
+            for item in available_items:
+                price = market_prices.get(item.name, item.base_price) if market_prices else item.base_price
+                if price * 3 <= self.budget:
+                    affordable_items.append(item)
+
             if affordable_items:
                 selected_item = weighted_random_choice(affordable_items, item_demand)
                 if selected_item:
-                    max_qty = min(10, int(self.budget / selected_item.base_price))
+                    price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
+                    max_qty = min(10, int(self.budget / price))
                     quantity = random.randint(3, max_qty)
                     needs.append(CustomerNeed(item_name=selected_item.name, quantity=quantity))
             return needs
@@ -889,15 +895,18 @@ class Customer:
             # Select one item based on demand
             selected_item = weighted_random_sample(available_items, item_demand, 1)[0]
 
+            # Get current market price for this item
+            item_price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
+
             # Skip items with invalid pricing
-            if selected_item.base_price <= 0:
+            if item_price <= 0:
                 continue
 
             # Check if we can afford at least one unit
-            if selected_item.base_price <= remaining_budget:
+            if item_price <= remaining_budget:
                 # Buy 1 unit of this item
                 needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
-                remaining_budget -= selected_item.base_price
+                remaining_budget -= item_price
                 total_items += 1
 
         return needs
@@ -2233,8 +2242,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Only spawn if suitable items exist based on market prices
     special_customer_counter = 0
 
-    # Check for Hoarder-suitable items (can afford 3+ units)
-    hoarder_items = [item for item in game_state.items if item.base_price * 3 <= 40.0]
+    # Check for Hoarder-suitable items (can afford 3+ units using market prices)
+    hoarder_items = [item for item in game_state.items
+                     if game_state.market_prices.get(item.name, item.base_price) * 3 <= 40.0]
     if hoarder_items and random.random() < 0.3:  # 30% chance to spawn
         special_customer_counter += 1
         customer = Customer(name=f"Hoarder_{special_customer_counter}", customer_type="hoarder")
