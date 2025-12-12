@@ -3209,14 +3209,27 @@ def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
 def pricing_menu(game_state: GameState, player: Player) -> None:
     """Menu for setting prices."""
     while True:
-        # Filter items to only show those in player's inventory
-        inventory_items = [item for item in game_state.items if item.name in player.inventory and player.inventory[item.name] > 0]
+        # Get items from both inventory and buy orders
+        relevant_item_names = set()
 
-        if not inventory_items:
+        # Add items from inventory
+        for item_name, qty in player.inventory.items():
+            if qty > 0:
+                relevant_item_names.add(item_name)
+
+        # Add items from buy orders
+        for item_name, (qty, vendor) in player.buy_orders.items():
+            if qty > 0:
+                relevant_item_names.add(item_name)
+
+        # Filter game items to only those relevant
+        priceable_items = [item for item in game_state.items if item.name in relevant_item_names]
+
+        if not priceable_items:
             print("\n" + "=" * 50)
             print("PRICING MENU - Set Your Prices")
             print("=" * 50)
-            print("\nYou have no items in inventory to price.")
+            print("\nYou have no items in inventory or buy orders to price.")
             input("\nPress Enter to return to main menu...")
             break
 
@@ -3224,24 +3237,33 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
         print("PRICING MENU - Set Your Prices")
         print("=" * 50)
 
-        # Show current market prices and player's prices (only for inventory items)
+        # Show current market prices and player's prices
         print(f"\n{'Item':<15} {'Qty':>6} {'Market Price':>12} {'Your Price':>12}")
         print("-" * 60)
-        for item in inventory_items:
+        for item in priceable_items:
             market_price = game_state.market_prices.get(item.name, 0)
             your_price = player.prices.get(item.name, 0)
-            quantity = player.inventory.get(item.name, 0)
-            print(f"{item.name:<15} {quantity:>6} ${market_price:>11.2f} ${your_price:>11.2f}")
+
+            # Show inventory quantity, or "Ordered" if only in buy orders
+            inv_qty = player.inventory.get(item.name, 0)
+            if inv_qty > 0:
+                qty_str = str(inv_qty)
+            else:
+                # Item is only in buy orders
+                order_qty, _ = player.buy_orders.get(item.name, (0, ""))
+                qty_str = f"({order_qty})"
+
+            print(f"{item.name:<15} {qty_str:>6} ${market_price:>11.2f} ${your_price:>11.2f}")
 
         print("\nOptions:")
         print(f"  C. Change All (one by one)")
         print("\nSelect item to price:")
-        for i, item in enumerate(inventory_items, 1):
+        for i, item in enumerate(priceable_items, 1):
             print(f"  {i}. {item.name}")
         print(f"  0. Back to Main Menu")
 
         try:
-            choice = input(f"\nSelect option (0-{len(inventory_items)}, or C): ").strip()
+            choice = input(f"\nSelect option (0-{len(priceable_items)}, or C): ").strip()
 
             # Handle "Change All" option
             if choice.upper() == 'C':
@@ -3250,12 +3272,19 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
                 print("=" * 50)
                 print("Press Enter to skip an item without changing its price.\n")
 
-                for item in inventory_items:
+                for item in priceable_items:
                     market_price = game_state.market_prices.get(item.name, 0)
                     current_price = player.prices.get(item.name, 0)
-                    quantity = player.inventory.get(item.name, 0)
+                    inv_qty = player.inventory.get(item.name, 0)
 
-                    print(f"\n{item.name} (Qty: {quantity})")
+                    # Display quantity info
+                    if inv_qty > 0:
+                        qty_display = f"Qty: {inv_qty}"
+                    else:
+                        order_qty, _ = player.buy_orders.get(item.name, (0, ""))
+                        qty_display = f"Ordered: {order_qty}"
+
+                    print(f"\n{item.name} ({qty_display})")
                     print(f"Market price: ${market_price:.2f}")
                     print(f"Current price: ${current_price:.2f}")
 
@@ -3281,12 +3310,19 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
             if choice_num == 0:
                 break
 
-            if 1 <= choice_num <= len(inventory_items):
-                item = inventory_items[choice_num - 1]
+            if 1 <= choice_num <= len(priceable_items):
+                item = priceable_items[choice_num - 1]
                 market_price = game_state.market_prices.get(item.name, 0)
-                quantity = player.inventory.get(item.name, 0)
+                inv_qty = player.inventory.get(item.name, 0)
 
-                print(f"\nSetting price for {item.name} (Qty: {quantity})")
+                # Display quantity info
+                if inv_qty > 0:
+                    qty_display = f"Qty: {inv_qty}"
+                else:
+                    order_qty, _ = player.buy_orders.get(item.name, (0, ""))
+                    qty_display = f"Ordered: {order_qty}"
+
+                print(f"\nSetting price for {item.name} ({qty_display})")
                 print(f"Current market price: ${market_price:.2f}")
 
                 price_str = input(f"Enter your selling price: $")
