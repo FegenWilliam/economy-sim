@@ -2693,6 +2693,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 customer_info += f" | 💎 Uncapped: {uncapped_served}"
             print(f"    Customers: {customer_info} | Items Sold: {total_items_sold} | Cash: ${player.cash:.2f}")
 
+            # Show per-item sales breakdown
+            if per_item_sales[player.name]:
+                items_breakdown = []
+                for item_name, data in sorted(per_item_sales[player.name].items()):
+                    if data['units_sold'] > 0:
+                        items_breakdown.append(f"{item_name}: {data['units_sold']}")
+                if items_breakdown:
+                    print(f"    Items: {', '.join(items_breakdown)}")
+
             # Show level up if occurred
             if player.name in level_ups:
                 print(f"    🎉 LEVEL UP! Now level {level_ups[player.name]} (max {player.get_max_products()} products)")
