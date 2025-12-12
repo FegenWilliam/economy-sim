@@ -3209,35 +3209,84 @@ def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
 def pricing_menu(game_state: GameState, player: Player) -> None:
     """Menu for setting prices."""
     while True:
+        # Filter items to only show those in player's inventory
+        inventory_items = [item for item in game_state.items if item.name in player.inventory and player.inventory[item.name] > 0]
+
+        if not inventory_items:
+            print("\n" + "=" * 50)
+            print("PRICING MENU - Set Your Prices")
+            print("=" * 50)
+            print("\nYou have no items in inventory to price.")
+            input("\nPress Enter to return to main menu...")
+            break
+
         print("\n" + "=" * 50)
         print("PRICING MENU - Set Your Prices")
         print("=" * 50)
 
-        # Show current market prices and player's prices
-        print(f"\n{'Item':<15} {'Market Price':>12} {'Your Price':>12}")
-        print("-" * 50)
-        for item in game_state.items:
+        # Show current market prices and player's prices (only for inventory items)
+        print(f"\n{'Item':<15} {'Qty':>6} {'Market Price':>12} {'Your Price':>12}")
+        print("-" * 60)
+        for item in inventory_items:
             market_price = game_state.market_prices.get(item.name, 0)
             your_price = player.prices.get(item.name, 0)
-            print(f"{item.name:<15} ${market_price:>11.2f} ${your_price:>11.2f}")
+            quantity = player.inventory.get(item.name, 0)
+            print(f"{item.name:<15} {quantity:>6} ${market_price:>11.2f} ${your_price:>11.2f}")
 
+        print("\nOptions:")
+        print(f"  C. Change All (one by one)")
         print("\nSelect item to price:")
-        for i, item in enumerate(game_state.items, 1):
+        for i, item in enumerate(inventory_items, 1):
             print(f"  {i}. {item.name}")
         print(f"  0. Back to Main Menu")
 
         try:
-            choice = input(f"\nSelect item (0-{len(game_state.items)}): ")
+            choice = input(f"\nSelect option (0-{len(inventory_items)}, or C): ").strip()
+
+            # Handle "Change All" option
+            if choice.upper() == 'C':
+                print("\n" + "=" * 50)
+                print("CHANGE ALL PRICES")
+                print("=" * 50)
+                print("Press Enter to skip an item without changing its price.\n")
+
+                for item in inventory_items:
+                    market_price = game_state.market_prices.get(item.name, 0)
+                    current_price = player.prices.get(item.name, 0)
+                    quantity = player.inventory.get(item.name, 0)
+
+                    print(f"\n{item.name} (Qty: {quantity})")
+                    print(f"Market price: ${market_price:.2f}")
+                    print(f"Current price: ${current_price:.2f}")
+
+                    price_str = input(f"New price (or Enter to skip): $").strip()
+
+                    if price_str:  # Only update if user entered something
+                        try:
+                            price = float(price_str)
+                            if price >= 0:
+                                player.set_price(item.name, price)
+                                print(f"✓ Price set to ${price:.2f}")
+                            else:
+                                print("✗ Price must be positive! Skipping...")
+                        except ValueError:
+                            print("✗ Invalid price! Skipping...")
+
+                print("\n✓ Finished updating prices!")
+                input("\nPress Enter to continue...")
+                continue
+
             choice_num = int(choice)
 
             if choice_num == 0:
                 break
 
-            if 1 <= choice_num <= len(game_state.items):
-                item = game_state.items[choice_num - 1]
+            if 1 <= choice_num <= len(inventory_items):
+                item = inventory_items[choice_num - 1]
                 market_price = game_state.market_prices.get(item.name, 0)
+                quantity = player.inventory.get(item.name, 0)
 
-                print(f"\nSetting price for {item.name}")
+                print(f"\nSetting price for {item.name} (Qty: {quantity})")
                 print(f"Current market price: ${market_price:.2f}")
 
                 price_str = input(f"Enter your selling price: $")
