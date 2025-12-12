@@ -891,30 +891,29 @@ class Customer:
 
         # Keep buying items until we hit the item limit or run out of budget
         total_items = 0
-        failed_attempts = 0
-        max_failed_attempts = 100  # Prevent infinite loop if all items are invalid or too expensive
 
-        while total_items < max_items and remaining_budget > 0 and available_items and failed_attempts < max_failed_attempts:
-            # Select one item based on demand
-            selected_item = weighted_random_sample(available_items, item_demand, 1)[0]
+        while total_items < max_items and remaining_budget > 0 and available_items:
+            # Filter to only affordable items with valid pricing
+            affordable_items = [
+                item for item in available_items
+                if (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) > 0
+                and (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) <= remaining_budget
+            ]
+
+            # If no affordable items left, stop shopping
+            if not affordable_items:
+                break
+
+            # Select one affordable item based on demand
+            selected_item = weighted_random_sample(affordable_items, item_demand, 1)[0]
 
             # Get current market price for this item
             item_price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
 
-            # Skip items with invalid pricing
-            if item_price <= 0:
-                failed_attempts += 1
-                continue
-
-            # Check if we can afford at least one unit
-            if item_price <= remaining_budget:
-                # Buy 1 unit of this item
-                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
-                remaining_budget -= item_price
-                total_items += 1
-                failed_attempts = 0  # Reset on successful purchase
-            else:
-                failed_attempts += 1
+            # Buy 1 unit of this item
+            needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+            remaining_budget -= item_price
+            total_items += 1
 
         return needs
 
