@@ -806,12 +806,18 @@ class Customer:
 
         # Hoarder: buys 3-10 of 1 item only
         if self.customer_type == "hoarder":
-            # Filter items that fit within budget for at least 3 units
-            affordable_items = [item for item in available_items if item.base_price * 3 <= self.budget]
+            # Filter items that fit within budget for at least 3 units (use market prices)
+            affordable_items = []
+            for item in available_items:
+                price = market_prices.get(item.name, item.base_price) if market_prices else item.base_price
+                if price * 3 <= self.budget:
+                    affordable_items.append(item)
+
             if affordable_items:
                 selected_item = weighted_random_choice(affordable_items, item_demand)
                 if selected_item:
-                    max_qty = min(10, int(self.budget / selected_item.base_price))
+                    price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
+                    max_qty = min(10, int(self.budget / price))
                     quantity = random.randint(3, max_qty)
                     needs.append(CustomerNeed(item_name=selected_item.name, quantity=quantity))
             return needs
@@ -885,20 +891,29 @@ class Customer:
 
         # Keep buying items until we hit the item limit or run out of budget
         total_items = 0
+
         while total_items < max_items and remaining_budget > 0 and available_items:
-            # Select one item based on demand
-            selected_item = weighted_random_sample(available_items, item_demand, 1)[0]
+            # Filter to only affordable items with valid pricing
+            affordable_items = [
+                item for item in available_items
+                if (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) > 0
+                and (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) <= remaining_budget
+            ]
 
-            # Skip items with invalid pricing
-            if selected_item.base_price <= 0:
-                continue
+            # If no affordable items left, stop shopping
+            if not affordable_items:
+                break
 
-            # Check if we can afford at least one unit
-            if selected_item.base_price <= remaining_budget:
-                # Buy 1 unit of this item
-                needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
-                remaining_budget -= selected_item.base_price
-                total_items += 1
+            # Select one affordable item based on demand
+            selected_item = weighted_random_sample(affordable_items, item_demand, 1)[0]
+
+            # Get current market price for this item
+            item_price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
+
+            # Buy 1 unit of this item
+            needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+            remaining_budget -= item_price
+            total_items += 1
 
         return needs
 
@@ -2233,8 +2248,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Only spawn if suitable items exist based on market prices
     special_customer_counter = 0
 
-    # Check for Hoarder-suitable items (can afford 3+ units)
-    hoarder_items = [item for item in game_state.items if item.base_price * 3 <= 40.0]
+    # Check for Hoarder-suitable items (can afford 3+ units using market prices)
+    hoarder_items = [item for item in game_state.items
+                     if game_state.market_prices.get(item.name, item.base_price) * 3 <= 40.0]
     if hoarder_items and random.random() < 0.3:  # 30% chance to spawn
         special_customer_counter += 1
         customer = Customer(name=f"Hoarder_{special_customer_counter}", customer_type="hoarder")
@@ -2282,6 +2298,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Track which stores this customer has been counted at (to count each customer only once per store)
         customer_counted_at_store = {}
         customer_bought_anything = False
+        # Track customer spending against their budget
+        customer_spending = 0.0
+        customer_budget = customer.budget
 
         # NEW LOGIC: Sort needs by market price (most expensive first)
         # Customer finds cheapest store for most expensive item, then stays there
@@ -2299,7 +2318,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Track which suppliers we've tried for the current most expensive item
         tried_suppliers = set()
 
-        while remaining_needs:
+        while remaining_needs and customer_spending < customer_budget:
             # If no current supplier, find cheapest supplier for the most expensive remaining item
             if current_supplier is None:
                 most_expensive_need = remaining_needs[0]
@@ -2346,12 +2365,25 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     supplier_price = current_supplier.prices[need.item_name]
 
                     if supplier_price <= max_acceptable_price:
+                        remaining_budget = customer_budget - customer_spending
+
+                        # Check if customer can afford this item (at least 1 unit)
+                        if supplier_price > remaining_budget:
+                            # Can't afford even 1 unit, skip this item
+                            continue
+
+                        # Adjust quantity based on remaining budget
+                        affordable_quantity = min(need.quantity, int(remaining_budget / supplier_price))
+
                         # Purchase from current supplier
                         revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
-                            need.item_name, need.quantity, supplier_price
+                            need.item_name, affordable_quantity, supplier_price
                         )
 
                         if revenue > 0:
+                            # Track customer spending
+                            customer_spending += revenue
+
                             # Track sales
                             daily_sales[current_supplier.name] += revenue
                             daily_profits[current_supplier.name] += profit
@@ -2374,6 +2406,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                             customer_bought_anything = True
                             purchased_needs.append(need)
 
+                            # Check if customer has hit their budget limit
+                            if customer_spending >= customer_budget:
+                                break
+
             # Remove purchased items from remaining needs
             for need in purchased_needs:
                 remaining_needs.remove(need)
@@ -2388,12 +2424,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # Track customer type statistics
         if customer.customer_type in customer_type_stats['bought_something']:
-            if customer_bought_anything or not needs:
-                # If customer bought something OR had no needs (couldn't find matching items)
-                if not needs:
-                    customer_type_stats['found_nothing'][customer.customer_type] += 1
-                else:
-                    customer_type_stats['bought_something'][customer.customer_type] += 1
+            if not needs:
+                # Customer had no needs generated - don't count them
+                pass
+            elif customer_bought_anything:
+                customer_type_stats['bought_something'][customer.customer_type] += 1
             else:
                 customer_type_stats['found_nothing'][customer.customer_type] += 1
 
