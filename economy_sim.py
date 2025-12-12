@@ -1006,13 +1006,18 @@ class Customer:
         items_by_name: Dict[str, Item]
     ) -> Optional[Player]:
         """
-        Choose a supplier based on reputation and discount scores.
+        Choose a supplier based on reputation, discount scores, and availability.
 
         Formula:
         - reputation_multiplier = 10 ** (reputation / 100)
-        - For each item in needs, calculate discount % weighted by importance
+        - For each item in needs, calculate discount % weighted by importance (only for stocked items)
         - discount_score = sum((market_price - player_price) / market_price * 100 * importance)
-        - final_score = discount_score * reputation_multiplier
+        - availability_multiplier based on % of needs available:
+          * >= 100%: ×1.2
+          * >= 80%: ×1.1
+          * < 50%: ×0.8
+          * < 20%: ×0.5
+        - final_score = discount_score * reputation_multiplier * availability_multiplier
 
         Returns the player with the highest score who has capacity to serve customers.
         Only considers players with stock and acceptable prices.
@@ -1023,9 +1028,13 @@ class Customer:
         player_scores = []
         max_acceptable_price_multiplier = 1.15  # 15% above market price
 
+        # Calculate total needs quantity for availability calculation
+        total_needs_quantity = sum(need.quantity for need in needs)
+
         for player in players:
-            # Calculate discount score for this player
+            # Calculate discount score and availability for this player
             discount_score = 0.0
+            available_quantity = 0  # How many items customer wants that are available
             has_any_stock = False
 
             for need in needs:
@@ -1037,13 +1046,18 @@ class Customer:
                     continue
 
                 # Check if player has stock and price
-                if player.inventory.get(item_name, 0) > 0 and item_name in player.prices:
+                player_stock = player.inventory.get(item_name, 0)
+                if player_stock > 0 and item_name in player.prices:
                     player_price = player.prices[item_name]
                     max_acceptable_price = market_price * max_acceptable_price_multiplier
 
                     # Only consider if price is acceptable
                     if player_price <= max_acceptable_price:
                         has_any_stock = True
+
+                        # Track availability (how much of this need can be fulfilled)
+                        available_for_this_need = min(need.quantity, player_stock)
+                        available_quantity += available_for_this_need
 
                         # Calculate discount percentage
                         if player_price < market_price:
@@ -1062,12 +1076,27 @@ class Customer:
             if not has_any_stock:
                 continue
 
+            # Calculate availability percentage
+            availability_pct = (available_quantity / total_needs_quantity) * 100 if total_needs_quantity > 0 else 0
+
+            # Calculate availability multiplier
+            if availability_pct >= 100:
+                availability_multiplier = 1.2
+            elif availability_pct >= 80:
+                availability_multiplier = 1.1
+            elif availability_pct < 20:
+                availability_multiplier = 0.5
+            elif availability_pct < 50:
+                availability_multiplier = 0.8
+            else:
+                availability_multiplier = 1.0  # 50-79%
+
             # Calculate reputation multiplier
             reputation = player.reputation
             reputation_multiplier = 10 ** (reputation / 100)
 
             # Calculate final score
-            final_score = discount_score * reputation_multiplier
+            final_score = discount_score * reputation_multiplier * availability_multiplier
 
             player_scores.append((player, final_score))
 
@@ -2299,6 +2328,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     unmet_demand = 0
     unmet_uncapped_demand = 0
 
+    # Track reputation changes per player (to be applied at end of day with limits)
+    daily_reputation_changes = {player.name: 0 for player in game_state.players}
+
     # Track customer types for daily summary
     customer_type_stats = {
         'spawned': {'low': 0, 'medium': 0, 'high': 0, 'hoarder': 0, 'rich_guy': 0, 'poor_man': 0, 'kid': 0},
@@ -2524,25 +2556,24 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             if not remaining_needs or customer_spending >= customer_budget:
                 break
 
-        # Update reputation for all stores this customer visited
+        # Track reputation changes for all stores this customer visited
+        # (Will be applied at end of day with limits)
         if original_needs_count > 0:
             fulfillment_percentage = (fulfilled_needs_count / original_needs_count)
 
             for store_name in visited_stores:
-                store = next((p for p in game_state.players if p.name == store_name), None)
-                if store:
-                    # Apply reputation changes based on fulfillment
-                    if fulfillment_percentage <= 0.3:
-                        # 30% or less: -1 reputation
-                        store.reputation = max(-100, store.reputation - 1)
-                    elif fulfillment_percentage >= 0.8:
-                        # 80% or more: +1 reputation
-                        store.reputation = min(100, store.reputation + 1)
+                # Track reputation changes based on fulfillment
+                if fulfillment_percentage <= 0.3:
+                    # 30% or less: -1 reputation
+                    daily_reputation_changes[store_name] -= 1
+                elif fulfillment_percentage >= 0.8:
+                    # 80% or more: +1 reputation
+                    daily_reputation_changes[store_name] += 1
 
-                        # If 100% fulfilled at exactly one store, +2 total (so +1 additional)
-                        if fulfillment_percentage >= 0.999 and len(visited_stores) == 1:
-                            store.reputation = min(100, store.reputation + 1)
-                    # 50-79%: no change
+                    # If 100% fulfilled at exactly one store, +2 total (so +1 additional)
+                    if fulfillment_percentage >= 0.999 and len(visited_stores) == 1:
+                        daily_reputation_changes[store_name] += 1
+                # 50-79%: no change
 
         # Track customer type statistics
         if customer.customer_type in customer_type_stats['bought_something']:
@@ -2726,6 +2757,37 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             player.daily_demand_per_item = daily_demand_per_item
         else:
             player.daily_demand_per_item = daily_demand_per_item
+
+    # Step 7.8: Apply daily reputation changes with limits and decay
+    import math
+    for player in game_state.players:
+        # Apply daily reputation changes with max -5 loss limit
+        rep_change = daily_reputation_changes[player.name]
+
+        # Limit negative changes to -5 max per day
+        if rep_change < -5:
+            rep_change = -5
+        # Positive changes have no limit
+
+        # Apply the change
+        player.reputation += rep_change
+
+        # Apply 5% decay (rounded up) for positive reputation only
+        decay_amount = 0
+        if player.reputation > 0:
+            decay_amount = math.ceil(player.reputation * 0.05)
+            player.reputation -= decay_amount
+            # Ensure we don't go below 0 from decay
+            if player.reputation < 0:
+                player.reputation = 0
+
+        # Ensure reputation stays within bounds [-100, 100]
+        player.reputation = max(-100, min(100, player.reputation))
+
+        # Show reputation changes for human players
+        if player.is_human and show_details and (rep_change != 0 or decay_amount > 0):
+            decay_text = f" (decay: -{decay_amount})" if decay_amount > 0 else ""
+            print(f"\n📊 {player.name} Reputation: {player.reputation:.0f} (change: {rep_change:+d}{decay_text})")
 
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
