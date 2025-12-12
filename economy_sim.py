@@ -1404,12 +1404,12 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
     """
     upgrades = [
         # Customer capacity upgrades
-        Upgrade(name="Extra Cashier Station", cost=2000, effect_type="max_customers", effect_value=10),
-        Upgrade(name="Express Checkout Lane", cost=3500, effect_type="max_customers", effect_value=15),
+        Upgrade(name="Extra Cashier Station", cost=3000, effect_type="max_customers", effect_value=30),
+        Upgrade(name="Express Checkout Lane", cost=5000, effect_type="max_customers", effect_value=60),
 
         # Buyout capacity upgrades
-        Upgrade(name="Warehouse Extension", cost=2500, effect_type="max_items", effect_value=20),
-        Upgrade(name="Loading Dock", cost=4000, effect_type="max_items", effect_value=30),
+        Upgrade(name="Warehouse Extension", cost=5000, effect_type="max_items", effect_value=400),
+        Upgrade(name="Loading Dock", cost=10000, effect_type="max_items", effect_value=600),
 
         # Max different items upgrades
         Upgrade(name="Additional Shelving", cost=2000, effect_type="max_products", effect_value=2),
@@ -2933,8 +2933,8 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         print(f"Note: Wages paid every 30 days for ALL employees (including newly hired)")
 
         print("\nOptions:")
-        print("  1. Hire Cashier (+10 customers/day capacity)")
-        print("  2. Hire Restocker (+20 items/day capacity)")
+        print("  1. Hire Cashier (+30 customers/day capacity)")
+        print("  2. Hire Restocker (+200 items/day capacity)")
         print("  0. Back to Main Menu")
 
         try:
