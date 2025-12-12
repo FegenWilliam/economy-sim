@@ -2282,6 +2282,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Track which stores this customer has been counted at (to count each customer only once per store)
         customer_counted_at_store = {}
         customer_bought_anything = False
+        # Track customer spending against their budget
+        customer_spending = 0.0
+        customer_budget = customer.budget
 
         # NEW LOGIC: Sort needs by market price (most expensive first)
         # Customer finds cheapest store for most expensive item, then stays there
@@ -2299,7 +2302,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Track which suppliers we've tried for the current most expensive item
         tried_suppliers = set()
 
-        while remaining_needs:
+        while remaining_needs and customer_spending < customer_budget:
             # If no current supplier, find cheapest supplier for the most expensive remaining item
             if current_supplier is None:
                 most_expensive_need = remaining_needs[0]
@@ -2346,12 +2349,27 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     supplier_price = current_supplier.prices[need.item_name]
 
                     if supplier_price <= max_acceptable_price:
+                        # Calculate total cost for this item
+                        item_total_cost = supplier_price * need.quantity
+                        remaining_budget = customer_budget - customer_spending
+
+                        # Check if customer can afford this item (at least 1 unit)
+                        if supplier_price > remaining_budget:
+                            # Can't afford even 1 unit, skip this item
+                            continue
+
+                        # Adjust quantity based on remaining budget
+                        affordable_quantity = min(need.quantity, int(remaining_budget / supplier_price))
+
                         # Purchase from current supplier
                         revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
-                            need.item_name, need.quantity, supplier_price
+                            need.item_name, affordable_quantity, supplier_price
                         )
 
                         if revenue > 0:
+                            # Track customer spending
+                            customer_spending += revenue
+
                             # Track sales
                             daily_sales[current_supplier.name] += revenue
                             daily_profits[current_supplier.name] += profit
@@ -2373,6 +2391,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
                             customer_bought_anything = True
                             purchased_needs.append(need)
+
+                            # Check if customer has hit their budget limit
+                            if customer_spending >= customer_budget:
+                                break
 
             # Remove purchased items from remaining needs
             for need in purchased_needs:
