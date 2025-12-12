@@ -28,6 +28,7 @@ class Item:
     name: str
     base_cost: float  # cost to produce 1 unit
     base_price: float  # default selling price (can be overridden by players)
+    importance: int = 2  # importance level: 3=high (essentials), 2=medium, 1=low (luxury)
 
     def __post_init__(self):
         """Validate that base_price and base_cost have a reasonable ratio."""
@@ -42,349 +43,351 @@ class Item:
                 f"Item {self.name}: base_price ({self.base_price}) must be at least "
                 f"1.2x base_cost ({self.base_cost * 1.2:.2f}) to avoid pricing contradictions"
             )
+        if self.importance not in [1, 2, 3]:
+            raise ValueError(f"Item {self.name}: importance must be 1, 2, or 3, got {self.importance}")
 
 
 # Product catalog - items that can be unlocked over time
 PRODUCT_CATALOG = [
-    # Groceries & Food (cheap items)
-    Item("Bread", 2.0, 5.0),
-    Item("Milk", 3.0, 6.0),
-    Item("Eggs", 2.5, 5.5),
-    Item("Cheese", 4.0, 8.0),
-    Item("Butter", 3.5, 7.0),
-    Item("Yogurt", 2.0, 4.5),
-    Item("Cereal", 3.0, 6.5),
-    Item("Rice", 5.0, 10.0),
-    Item("Pasta", 2.0, 4.0),
-    Item("Canned Soup", 1.5, 3.5),
-    Item("Frozen Pizza", 4.0, 8.5),
-    Item("Ice Cream", 3.5, 7.5),
-    Item("Soda", 1.5, 3.0),
-    Item("Orange Juice", 3.0, 6.0),
-    Item("Coffee", 6.0, 12.0),
-    Item("Tea Bags", 3.0, 6.5),
-    Item("Sugar", 2.0, 4.5),
-    Item("Flour", 3.0, 6.0),
-    Item("Cooking Oil", 4.0, 8.0),
-    Item("Salt", 1.0, 2.5),
-    Item("Pepper", 2.0, 4.5),
-    Item("Ketchup", 2.5, 5.0),
-    Item("Mustard", 2.0, 4.5),
-    Item("Mayo", 3.0, 6.0),
-    Item("BBQ Sauce", 3.5, 7.0),
+    # Groceries & Food (cheap items) - HIGH IMPORTANCE (3)
+    Item("Bread", 2.0, 5.0, 3),
+    Item("Milk", 3.0, 6.0, 3),
+    Item("Eggs", 2.5, 5.5, 3),
+    Item("Cheese", 4.0, 8.0, 3),
+    Item("Butter", 3.5, 7.0, 3),
+    Item("Yogurt", 2.0, 4.5, 3),
+    Item("Cereal", 3.0, 6.5, 3),
+    Item("Rice", 5.0, 10.0, 3),
+    Item("Pasta", 2.0, 4.0, 3),
+    Item("Canned Soup", 1.5, 3.5, 3),
+    Item("Frozen Pizza", 4.0, 8.5, 2),
+    Item("Ice Cream", 3.5, 7.5, 2),
+    Item("Soda", 1.5, 3.0, 2),
+    Item("Orange Juice", 3.0, 6.0, 3),
+    Item("Coffee", 6.0, 12.0, 3),
+    Item("Tea Bags", 3.0, 6.5, 3),
+    Item("Sugar", 2.0, 4.5, 3),
+    Item("Flour", 3.0, 6.0, 3),
+    Item("Cooking Oil", 4.0, 8.0, 3),
+    Item("Salt", 1.0, 2.5, 3),
+    Item("Pepper", 2.0, 4.5, 3),
+    Item("Ketchup", 2.5, 5.0, 2),
+    Item("Mustard", 2.0, 4.5, 2),
+    Item("Mayo", 3.0, 6.0, 2),
+    Item("BBQ Sauce", 3.5, 7.0, 2),
 
-    # Fresh Produce
-    Item("Apples", 2.5, 5.5),
-    Item("Bananas", 1.5, 3.5),
-    Item("Oranges", 3.0, 6.0),
-    Item("Grapes", 4.0, 8.5),
-    Item("Strawberries", 4.5, 9.0),
-    Item("Tomatoes", 2.5, 5.5),
-    Item("Lettuce", 2.0, 4.5),
-    Item("Carrots", 1.5, 3.5),
-    Item("Potatoes", 2.0, 4.0),
-    Item("Onions", 1.5, 3.5),
+    # Fresh Produce - HIGH IMPORTANCE (3)
+    Item("Apples", 2.5, 5.5, 3),
+    Item("Bananas", 1.5, 3.5, 3),
+    Item("Oranges", 3.0, 6.0, 3),
+    Item("Grapes", 4.0, 8.5, 3),
+    Item("Strawberries", 4.5, 9.0, 3),
+    Item("Tomatoes", 2.5, 5.5, 3),
+    Item("Lettuce", 2.0, 4.5, 3),
+    Item("Carrots", 1.5, 3.5, 3),
+    Item("Potatoes", 2.0, 4.0, 3),
+    Item("Onions", 1.5, 3.5, 3),
 
-    # Household Items
-    Item("Paper Towels", 5.0, 10.0),
-    Item("Toilet Paper", 8.0, 15.0),
-    Item("Dish Soap", 3.0, 6.5),
-    Item("Laundry Detergent", 8.0, 16.0),
-    Item("Trash Bags", 5.0, 10.5),
-    Item("Sponges", 2.5, 5.5),
-    Item("Aluminum Foil", 4.0, 8.5),
-    Item("Plastic Wrap", 3.5, 7.5),
-    Item("Light Bulbs", 6.0, 12.0),
-    Item("Batteries", 5.0, 10.0),
-    Item("Candles", 4.0, 8.5),
-    Item("Air Freshener", 3.5, 7.5),
+    # Household Items - HIGH IMPORTANCE (3)
+    Item("Paper Towels", 5.0, 10.0, 3),
+    Item("Toilet Paper", 8.0, 15.0, 3),
+    Item("Dish Soap", 3.0, 6.5, 3),
+    Item("Laundry Detergent", 8.0, 16.0, 3),
+    Item("Trash Bags", 5.0, 10.5, 3),
+    Item("Sponges", 2.5, 5.5, 3),
+    Item("Aluminum Foil", 4.0, 8.5, 2),
+    Item("Plastic Wrap", 3.5, 7.5, 2),
+    Item("Light Bulbs", 6.0, 12.0, 2),
+    Item("Batteries", 5.0, 10.0, 2),
+    Item("Candles", 4.0, 8.5, 1),
+    Item("Air Freshener", 3.5, 7.5, 2),
 
-    # Personal Care
-    Item("Shampoo", 5.0, 10.0),
-    Item("Conditioner", 5.0, 10.0),
-    Item("Body Wash", 4.5, 9.0),
-    Item("Toothpaste", 3.0, 6.5),
-    Item("Toothbrush", 2.5, 5.5),
-    Item("Deodorant", 4.0, 8.5),
-    Item("Razor Blades", 8.0, 16.0),
-    Item("Shaving Cream", 4.5, 9.0),
-    Item("Hand Soap", 3.0, 6.5),
-    Item("Hand Sanitizer", 3.5, 7.5),
-    Item("Tissues", 2.5, 5.5),
-    Item("Cotton Swabs", 2.0, 4.5),
+    # Personal Care - HIGH IMPORTANCE (3)
+    Item("Shampoo", 5.0, 10.0, 3),
+    Item("Conditioner", 5.0, 10.0, 3),
+    Item("Body Wash", 4.5, 9.0, 3),
+    Item("Toothpaste", 3.0, 6.5, 3),
+    Item("Toothbrush", 2.5, 5.5, 3),
+    Item("Deodorant", 4.0, 8.5, 3),
+    Item("Razor Blades", 8.0, 16.0, 2),
+    Item("Shaving Cream", 4.5, 9.0, 2),
+    Item("Hand Soap", 3.0, 6.5, 3),
+    Item("Hand Sanitizer", 3.5, 7.5, 3),
+    Item("Tissues", 2.5, 5.5, 3),
+    Item("Cotton Swabs", 2.0, 4.5, 2),
 
-    # Electronics (cheap to mid-range)
-    Item("Phone Charger", 8.0, 16.0),
-    Item("USB Cable", 5.0, 10.0),
-    Item("Earbuds", 12.0, 25.0),
-    Item("Phone Case", 10.0, 20.0),
-    Item("Screen Protector", 6.0, 12.0),
-    Item("Mouse Pad", 7.0, 15.0),
-    Item("Keyboard", 25.0, 50.0),
-    Item("Computer Mouse", 15.0, 30.0),
-    Item("Webcam", 35.0, 70.0),
-    Item("Microphone", 40.0, 80.0),
-    Item("USB Flash Drive", 10.0, 20.0),
-    Item("SD Card", 12.0, 25.0),
-    Item("HDMI Cable", 8.0, 16.0),
-    Item("Power Strip", 15.0, 30.0),
-    Item("Desk Lamp", 20.0, 40.0),
-    Item("Alarm Clock", 12.0, 25.0),
-    Item("Calculator", 10.0, 20.0),
-    Item("Portable Speaker", 30.0, 60.0),
-    Item("Bluetooth Headphones", 45.0, 90.0),
+    # Electronics (cheap to mid-range) - MEDIUM IMPORTANCE (2)
+    Item("Phone Charger", 8.0, 16.0, 2),
+    Item("USB Cable", 5.0, 10.0, 2),
+    Item("Earbuds", 12.0, 25.0, 2),
+    Item("Phone Case", 10.0, 20.0, 2),
+    Item("Screen Protector", 6.0, 12.0, 2),
+    Item("Mouse Pad", 7.0, 15.0, 2),
+    Item("Keyboard", 25.0, 50.0, 2),
+    Item("Computer Mouse", 15.0, 30.0, 2),
+    Item("Webcam", 35.0, 70.0, 2),
+    Item("Microphone", 40.0, 80.0, 1),
+    Item("USB Flash Drive", 10.0, 20.0, 2),
+    Item("SD Card", 12.0, 25.0, 2),
+    Item("HDMI Cable", 8.0, 16.0, 2),
+    Item("Power Strip", 15.0, 30.0, 2),
+    Item("Desk Lamp", 20.0, 40.0, 2),
+    Item("Alarm Clock", 12.0, 25.0, 2),
+    Item("Calculator", 10.0, 20.0, 2),
+    Item("Portable Speaker", 30.0, 60.0, 2),
+    Item("Bluetooth Headphones", 45.0, 90.0, 2),
 
-    # Office Supplies
-    Item("Pens", 3.0, 6.5),
-    Item("Pencils", 2.5, 5.5),
-    Item("Notebooks", 4.0, 8.5),
-    Item("Sticky Notes", 3.5, 7.5),
-    Item("Stapler", 8.0, 16.0),
-    Item("Tape Dispenser", 6.0, 12.0),
-    Item("Scissors", 5.0, 10.0),
-    Item("Ruler", 2.0, 4.5),
-    Item("Binder", 4.5, 9.0),
-    Item("File Folders", 6.0, 12.5),
-    Item("Printer Paper", 15.0, 30.0),
+    # Office Supplies - MEDIUM IMPORTANCE (2)
+    Item("Pens", 3.0, 6.5, 2),
+    Item("Pencils", 2.5, 5.5, 2),
+    Item("Notebooks", 4.0, 8.5, 2),
+    Item("Sticky Notes", 3.5, 7.5, 2),
+    Item("Stapler", 8.0, 16.0, 2),
+    Item("Tape Dispenser", 6.0, 12.0, 2),
+    Item("Scissors", 5.0, 10.0, 2),
+    Item("Ruler", 2.0, 4.5, 2),
+    Item("Binder", 4.5, 9.0, 2),
+    Item("File Folders", 6.0, 12.5, 2),
+    Item("Printer Paper", 15.0, 30.0, 2),
 
-    # Mid-range Electronics
-    Item("Tablet", 150.0, 300.0),
-    Item("E-Reader", 80.0, 160.0),
-    Item("Smart Watch", 120.0, 240.0),
-    Item("Fitness Tracker", 60.0, 120.0),
-    Item("Wireless Earbuds", 70.0, 140.0),
-    Item("Gaming Mouse", 45.0, 90.0),
-    Item("Gaming Keyboard", 60.0, 120.0),
-    Item("Monitor", 150.0, 300.0),
-    Item("External Hard Drive", 55.0, 110.0),
-    Item("Wireless Router", 50.0, 100.0),
-    Item("Smart Plug", 15.0, 30.0),
-    Item("Security Camera", 40.0, 80.0),
-    Item("Video Doorbell", 80.0, 160.0),
+    # Mid-range Electronics - LOW IMPORTANCE (1)
+    Item("Tablet", 150.0, 300.0, 1),
+    Item("E-Reader", 80.0, 160.0, 1),
+    Item("Smart Watch", 120.0, 240.0, 1),
+    Item("Fitness Tracker", 60.0, 120.0, 2),
+    Item("Wireless Earbuds", 70.0, 140.0, 1),
+    Item("Gaming Mouse", 45.0, 90.0, 1),
+    Item("Gaming Keyboard", 60.0, 120.0, 1),
+    Item("Monitor", 150.0, 300.0, 1),
+    Item("External Hard Drive", 55.0, 110.0, 2),
+    Item("Wireless Router", 50.0, 100.0, 2),
+    Item("Smart Plug", 15.0, 30.0, 2),
+    Item("Security Camera", 40.0, 80.0, 2),
+    Item("Video Doorbell", 80.0, 160.0, 2),
 
-    # Appliances & Home Electronics (higher priced)
-    Item("Coffee Maker", 40.0, 80.0),
-    Item("Toaster", 25.0, 50.0),
-    Item("Blender", 35.0, 70.0),
-    Item("Microwave", 80.0, 160.0),
-    Item("Air Fryer", 70.0, 140.0),
-    Item("Slow Cooker", 35.0, 70.0),
-    Item("Electric Kettle", 30.0, 60.0),
-    Item("Hair Dryer", 25.0, 50.0),
-    Item("Iron", 20.0, 40.0),
-    Item("Vacuum Cleaner", 120.0, 240.0),
-    Item("Fan", 35.0, 70.0),
-    Item("Space Heater", 45.0, 90.0),
-    Item("Humidifier", 40.0, 80.0),
-    Item("Air Purifier", 90.0, 180.0),
+    # Appliances & Home Electronics - MEDIUM IMPORTANCE (2)
+    Item("Coffee Maker", 40.0, 80.0, 2),
+    Item("Toaster", 25.0, 50.0, 2),
+    Item("Blender", 35.0, 70.0, 2),
+    Item("Microwave", 80.0, 160.0, 2),
+    Item("Air Fryer", 70.0, 140.0, 2),
+    Item("Slow Cooker", 35.0, 70.0, 2),
+    Item("Electric Kettle", 30.0, 60.0, 2),
+    Item("Hair Dryer", 25.0, 50.0, 2),
+    Item("Iron", 20.0, 40.0, 2),
+    Item("Vacuum Cleaner", 120.0, 240.0, 2),
+    Item("Fan", 35.0, 70.0, 2),
+    Item("Space Heater", 45.0, 90.0, 2),
+    Item("Humidifier", 40.0, 80.0, 2),
+    Item("Air Purifier", 90.0, 180.0, 2),
 
-    # Expensive Electronics
-    Item("Laptop", 400.0, 800.0),
-    Item("Gaming Console", 300.0, 600.0),
-    Item("4K TV", 350.0, 700.0),
-    Item("Soundbar", 150.0, 300.0),
-    Item("Noise-Cancelling Headphones", 180.0, 360.0),
-    Item("Drone", 250.0, 500.0),
-    Item("VR Headset", 300.0, 600.0),
-    Item("Digital Camera", 400.0, 800.0),
-    Item("Projector", 300.0, 600.0),
-    Item("Smart Thermostat", 120.0, 240.0),
-    Item("Robot Vacuum", 200.0, 400.0),
-    Item("Electric Scooter", 350.0, 700.0),
+    # Expensive Electronics - LOW IMPORTANCE (1)
+    Item("Laptop", 400.0, 800.0, 1),
+    Item("Gaming Console", 300.0, 600.0, 1),
+    Item("4K TV", 350.0, 700.0, 1),
+    Item("Soundbar", 150.0, 300.0, 1),
+    Item("Noise-Cancelling Headphones", 180.0, 360.0, 1),
+    Item("Drone", 250.0, 500.0, 1),
+    Item("VR Headset", 300.0, 600.0, 1),
+    Item("Digital Camera", 400.0, 800.0, 1),
+    Item("Projector", 300.0, 600.0, 1),
+    Item("Smart Thermostat", 120.0, 240.0, 2),
+    Item("Robot Vacuum", 200.0, 400.0, 1),
+    Item("Electric Scooter", 350.0, 700.0, 1),
 
-    # Luxury Items (expensive)
-    Item("Designer Handbag", 600.0, 1200.0),
-    Item("Leather Wallet", 100.0, 200.0),
-    Item("Sunglasses", 150.0, 300.0),
-    Item("Perfume", 80.0, 160.0),
-    Item("Cologne", 70.0, 140.0),
-    Item("Watch", 200.0, 400.0),
-    Item("Jewelry Box", 60.0, 120.0),
-    Item("Gold Necklace", 500.0, 1000.0),
-    Item("Silver Bracelet", 150.0, 300.0),
-    Item("Diamond Earrings", 800.0, 1600.0),
-    Item("Designer Shoes", 300.0, 600.0),
-    Item("Leather Jacket", 250.0, 500.0),
-    Item("Cashmere Sweater", 180.0, 360.0),
-    Item("Silk Scarf", 80.0, 160.0),
-    Item("Designer Jeans", 120.0, 240.0),
+    # Luxury Items (expensive) - LOW IMPORTANCE (1)
+    Item("Designer Handbag", 600.0, 1200.0, 1),
+    Item("Leather Wallet", 100.0, 200.0, 1),
+    Item("Sunglasses", 150.0, 300.0, 1),
+    Item("Perfume", 80.0, 160.0, 1),
+    Item("Cologne", 70.0, 140.0, 1),
+    Item("Watch", 200.0, 400.0, 1),
+    Item("Jewelry Box", 60.0, 120.0, 1),
+    Item("Gold Necklace", 500.0, 1000.0, 1),
+    Item("Silver Bracelet", 150.0, 300.0, 1),
+    Item("Diamond Earrings", 800.0, 1600.0, 1),
+    Item("Designer Shoes", 300.0, 600.0, 1),
+    Item("Leather Jacket", 250.0, 500.0, 1),
+    Item("Cashmere Sweater", 180.0, 360.0, 1),
+    Item("Silk Scarf", 80.0, 160.0, 1),
+    Item("Designer Jeans", 120.0, 240.0, 1),
 
-    # Additional Items (Sports & Outdoor)
-    Item("Yoga Mat", 20.0, 40.0),
-    Item("Dumbbells", 30.0, 60.0),
-    Item("Tennis Racket", 60.0, 120.0),
-    Item("Basketball", 15.0, 30.0),
-    Item("Camping Tent", 100.0, 200.0),
-    Item("Sleeping Bag", 50.0, 100.0),
-    Item("Hiking Boots", 80.0, 160.0),
+    # Additional Items (Sports & Outdoor) - MEDIUM IMPORTANCE (2)
+    Item("Yoga Mat", 20.0, 40.0, 2),
+    Item("Dumbbells", 30.0, 60.0, 2),
+    Item("Tennis Racket", 60.0, 120.0, 1),
+    Item("Basketball", 15.0, 30.0, 2),
+    Item("Camping Tent", 100.0, 200.0, 1),
+    Item("Sleeping Bag", 50.0, 100.0, 2),
+    Item("Hiking Boots", 80.0, 160.0, 2),
 
-    # More Groceries & Food
-    Item("Peanut Butter", 4.0, 8.0),
-    Item("Jelly", 3.0, 6.0),
-    Item("Honey", 5.0, 10.0),
-    Item("Maple Syrup", 6.0, 12.0),
-    Item("Crackers", 3.0, 6.0),
-    Item("Chips", 2.5, 5.0),
-    Item("Pretzels", 2.5, 5.0),
-    Item("Popcorn", 2.0, 4.0),
-    Item("Cookies", 3.5, 7.0),
-    Item("Cake Mix", 3.0, 6.0),
-    Item("Brownie Mix", 3.0, 6.0),
-    Item("Chocolate Bar", 1.5, 3.0),
-    Item("Candy", 1.0, 2.5),
-    Item("Gum", 1.0, 2.5),
-    Item("Mints", 1.5, 3.0),
-    Item("Granola Bars", 4.0, 8.0),
-    Item("Energy Bars", 5.0, 10.0),
-    Item("Protein Powder", 25.0, 50.0),
-    Item("Vitamins", 12.0, 24.0),
-    Item("Fish Oil", 15.0, 30.0),
-    Item("Canned Tuna", 1.5, 3.5),
-    Item("Canned Beans", 1.5, 3.5),
-    Item("Canned Corn", 1.5, 3.5),
-    Item("Canned Tomatoes", 2.0, 4.0),
-    Item("Tomato Sauce", 2.0, 4.5),
-    Item("Spaghetti Sauce", 3.0, 6.5),
-    Item("Hot Sauce", 2.5, 5.5),
-    Item("Soy Sauce", 3.0, 6.0),
-    Item("Vinegar", 2.0, 4.5),
-    Item("Olive Oil", 8.0, 16.0),
-    Item("Coconut Oil", 9.0, 18.0),
-    Item("Protein Shake", 4.0, 8.0),
-    Item("Sports Drink", 2.0, 4.5),
-    Item("Energy Drink", 3.0, 6.0),
-    Item("Bottled Water", 1.0, 2.5),
-    Item("Sparkling Water", 1.5, 3.5),
-    Item("Iced Tea", 2.0, 4.5),
-    Item("Lemonade", 2.5, 5.5),
+    # More Groceries & Food - HIGH IMPORTANCE (3)
+    Item("Peanut Butter", 4.0, 8.0, 3),
+    Item("Jelly", 3.0, 6.0, 3),
+    Item("Honey", 5.0, 10.0, 3),
+    Item("Maple Syrup", 6.0, 12.0, 2),
+    Item("Crackers", 3.0, 6.0, 3),
+    Item("Chips", 2.5, 5.0, 2),
+    Item("Pretzels", 2.5, 5.0, 2),
+    Item("Popcorn", 2.0, 4.0, 2),
+    Item("Cookies", 3.5, 7.0, 2),
+    Item("Cake Mix", 3.0, 6.0, 2),
+    Item("Brownie Mix", 3.0, 6.0, 2),
+    Item("Chocolate Bar", 1.5, 3.0, 2),
+    Item("Candy", 1.0, 2.5, 2),
+    Item("Gum", 1.0, 2.5, 1),
+    Item("Mints", 1.5, 3.0, 1),
+    Item("Granola Bars", 4.0, 8.0, 3),
+    Item("Energy Bars", 5.0, 10.0, 2),
+    Item("Protein Powder", 25.0, 50.0, 2),
+    Item("Vitamins", 12.0, 24.0, 2),
+    Item("Fish Oil", 15.0, 30.0, 2),
+    Item("Canned Tuna", 1.5, 3.5, 3),
+    Item("Canned Beans", 1.5, 3.5, 3),
+    Item("Canned Corn", 1.5, 3.5, 3),
+    Item("Canned Tomatoes", 2.0, 4.0, 3),
+    Item("Tomato Sauce", 2.0, 4.5, 3),
+    Item("Spaghetti Sauce", 3.0, 6.5, 3),
+    Item("Hot Sauce", 2.5, 5.5, 2),
+    Item("Soy Sauce", 3.0, 6.0, 3),
+    Item("Vinegar", 2.0, 4.5, 3),
+    Item("Olive Oil", 8.0, 16.0, 3),
+    Item("Coconut Oil", 9.0, 18.0, 2),
+    Item("Protein Shake", 4.0, 8.0, 2),
+    Item("Sports Drink", 2.0, 4.5, 2),
+    Item("Energy Drink", 3.0, 6.0, 2),
+    Item("Bottled Water", 1.0, 2.5, 3),
+    Item("Sparkling Water", 1.5, 3.5, 2),
+    Item("Iced Tea", 2.0, 4.5, 2),
+    Item("Lemonade", 2.5, 5.5, 2),
 
-    # Pet Supplies
-    Item("Dog Food", 15.0, 30.0),
-    Item("Cat Food", 12.0, 24.0),
-    Item("Dog Treats", 5.0, 10.0),
-    Item("Cat Treats", 4.0, 8.0),
-    Item("Dog Toy", 6.0, 12.0),
-    Item("Cat Toy", 4.0, 8.0),
-    Item("Pet Bowl", 8.0, 16.0),
-    Item("Pet Collar", 10.0, 20.0),
-    Item("Pet Leash", 12.0, 24.0),
-    Item("Cat Litter", 10.0, 20.0),
-    Item("Fish Tank", 40.0, 80.0),
-    Item("Fish Food", 4.0, 8.0),
-    Item("Bird Cage", 50.0, 100.0),
-    Item("Bird Seed", 6.0, 12.0),
+    # Pet Supplies - MEDIUM IMPORTANCE (2)
+    Item("Dog Food", 15.0, 30.0, 2),
+    Item("Cat Food", 12.0, 24.0, 2),
+    Item("Dog Treats", 5.0, 10.0, 2),
+    Item("Cat Treats", 4.0, 8.0, 2),
+    Item("Dog Toy", 6.0, 12.0, 1),
+    Item("Cat Toy", 4.0, 8.0, 1),
+    Item("Pet Bowl", 8.0, 16.0, 2),
+    Item("Pet Collar", 10.0, 20.0, 2),
+    Item("Pet Leash", 12.0, 24.0, 2),
+    Item("Cat Litter", 10.0, 20.0, 2),
+    Item("Fish Tank", 40.0, 80.0, 1),
+    Item("Fish Food", 4.0, 8.0, 2),
+    Item("Bird Cage", 50.0, 100.0, 1),
+    Item("Bird Seed", 6.0, 12.0, 2),
 
-    # Baby Products
-    Item("Diapers", 20.0, 40.0),
-    Item("Baby Wipes", 5.0, 10.0),
-    Item("Baby Formula", 25.0, 50.0),
-    Item("Baby Bottle", 8.0, 16.0),
-    Item("Pacifier", 4.0, 8.0),
-    Item("Baby Lotion", 6.0, 12.0),
-    Item("Baby Shampoo", 5.0, 10.0),
-    Item("Baby Powder", 4.0, 8.0),
-    Item("Diaper Bag", 30.0, 60.0),
-    Item("Baby Blanket", 15.0, 30.0),
-    Item("Teething Ring", 5.0, 10.0),
+    # Baby Products - HIGH IMPORTANCE (3)
+    Item("Diapers", 20.0, 40.0, 3),
+    Item("Baby Wipes", 5.0, 10.0, 3),
+    Item("Baby Formula", 25.0, 50.0, 3),
+    Item("Baby Bottle", 8.0, 16.0, 3),
+    Item("Pacifier", 4.0, 8.0, 3),
+    Item("Baby Lotion", 6.0, 12.0, 3),
+    Item("Baby Shampoo", 5.0, 10.0, 3),
+    Item("Baby Powder", 4.0, 8.0, 3),
+    Item("Diaper Bag", 30.0, 60.0, 2),
+    Item("Baby Blanket", 15.0, 30.0, 2),
+    Item("Teething Ring", 5.0, 10.0, 2),
 
-    # Pharmacy & Health
-    Item("Pain Reliever", 8.0, 16.0),
-    Item("Cold Medicine", 10.0, 20.0),
-    Item("Allergy Medicine", 12.0, 24.0),
-    Item("Band-Aids", 4.0, 8.0),
-    Item("First Aid Kit", 20.0, 40.0),
-    Item("Thermometer", 15.0, 30.0),
-    Item("Cough Drops", 3.0, 6.0),
-    Item("Antacid", 6.0, 12.0),
-    Item("Eye Drops", 8.0, 16.0),
-    Item("Lip Balm", 2.0, 4.5),
-    Item("Sunscreen", 10.0, 20.0),
-    Item("Bug Spray", 7.0, 14.0),
+    # Pharmacy & Health - HIGH IMPORTANCE (3)
+    Item("Pain Reliever", 8.0, 16.0, 3),
+    Item("Cold Medicine", 10.0, 20.0, 3),
+    Item("Allergy Medicine", 12.0, 24.0, 3),
+    Item("Band-Aids", 4.0, 8.0, 3),
+    Item("First Aid Kit", 20.0, 40.0, 3),
+    Item("Thermometer", 15.0, 30.0, 3),
+    Item("Cough Drops", 3.0, 6.0, 3),
+    Item("Antacid", 6.0, 12.0, 3),
+    Item("Eye Drops", 8.0, 16.0, 3),
+    Item("Lip Balm", 2.0, 4.5, 2),
+    Item("Sunscreen", 10.0, 20.0, 3),
+    Item("Bug Spray", 7.0, 14.0, 2),
 
-    # Kitchen & Dining
-    Item("Plates Set", 20.0, 40.0),
-    Item("Bowls Set", 15.0, 30.0),
-    Item("Cups Set", 12.0, 24.0),
-    Item("Silverware Set", 25.0, 50.0),
-    Item("Cooking Pot", 30.0, 60.0),
-    Item("Frying Pan", 25.0, 50.0),
-    Item("Baking Sheet", 12.0, 24.0),
-    Item("Mixing Bowl", 10.0, 20.0),
-    Item("Cutting Board", 15.0, 30.0),
-    Item("Kitchen Knife", 20.0, 40.0),
-    Item("Can Opener", 8.0, 16.0),
-    Item("Bottle Opener", 5.0, 10.0),
-    Item("Measuring Cups", 10.0, 20.0),
-    Item("Measuring Spoons", 8.0, 16.0),
-    Item("Spatula", 7.0, 14.0),
-    Item("Whisk", 6.0, 12.0),
-    Item("Tongs", 8.0, 16.0),
-    Item("Ladle", 7.0, 14.0),
-    Item("Colander", 12.0, 24.0),
-    Item("Grater", 10.0, 20.0),
+    # Kitchen & Dining - MEDIUM IMPORTANCE (2)
+    Item("Plates Set", 20.0, 40.0, 2),
+    Item("Bowls Set", 15.0, 30.0, 2),
+    Item("Cups Set", 12.0, 24.0, 2),
+    Item("Silverware Set", 25.0, 50.0, 2),
+    Item("Cooking Pot", 30.0, 60.0, 2),
+    Item("Frying Pan", 25.0, 50.0, 2),
+    Item("Baking Sheet", 12.0, 24.0, 2),
+    Item("Mixing Bowl", 10.0, 20.0, 2),
+    Item("Cutting Board", 15.0, 30.0, 2),
+    Item("Kitchen Knife", 20.0, 40.0, 2),
+    Item("Can Opener", 8.0, 16.0, 2),
+    Item("Bottle Opener", 5.0, 10.0, 2),
+    Item("Measuring Cups", 10.0, 20.0, 2),
+    Item("Measuring Spoons", 8.0, 16.0, 2),
+    Item("Spatula", 7.0, 14.0, 2),
+    Item("Whisk", 6.0, 12.0, 2),
+    Item("Tongs", 8.0, 16.0, 2),
+    Item("Ladle", 7.0, 14.0, 2),
+    Item("Colander", 12.0, 24.0, 2),
+    Item("Grater", 10.0, 20.0, 2),
 
-    # Home Decor
-    Item("Picture Frame", 12.0, 24.0),
-    Item("Wall Art", 25.0, 50.0),
-    Item("Throw Pillow", 15.0, 30.0),
-    Item("Blanket", 25.0, 50.0),
-    Item("Curtains", 30.0, 60.0),
-    Item("Area Rug", 60.0, 120.0),
-    Item("Table Lamp", 35.0, 70.0),
-    Item("Floor Lamp", 50.0, 100.0),
-    Item("Wall Clock", 20.0, 40.0),
-    Item("Vase", 18.0, 36.0),
-    Item("Candle Holder", 12.0, 24.0),
-    Item("Plant Pot", 10.0, 20.0),
-    Item("Fake Plant", 15.0, 30.0),
-    Item("Mirror", 40.0, 80.0),
+    # Home Decor - LOW IMPORTANCE (1)
+    Item("Picture Frame", 12.0, 24.0, 1),
+    Item("Wall Art", 25.0, 50.0, 1),
+    Item("Throw Pillow", 15.0, 30.0, 1),
+    Item("Blanket", 25.0, 50.0, 2),
+    Item("Curtains", 30.0, 60.0, 1),
+    Item("Area Rug", 60.0, 120.0, 1),
+    Item("Table Lamp", 35.0, 70.0, 1),
+    Item("Floor Lamp", 50.0, 100.0, 1),
+    Item("Wall Clock", 20.0, 40.0, 1),
+    Item("Vase", 18.0, 36.0, 1),
+    Item("Candle Holder", 12.0, 24.0, 1),
+    Item("Plant Pot", 10.0, 20.0, 1),
+    Item("Fake Plant", 15.0, 30.0, 1),
+    Item("Mirror", 40.0, 80.0, 1),
 
-    # Garden & Outdoor
-    Item("Garden Hose", 25.0, 50.0),
-    Item("Sprinkler", 20.0, 40.0),
-    Item("Garden Gloves", 8.0, 16.0),
-    Item("Plant Seeds", 3.0, 6.0),
-    Item("Fertilizer", 12.0, 24.0),
-    Item("Potting Soil", 10.0, 20.0),
-    Item("Weed Killer", 15.0, 30.0),
-    Item("Lawn Mower", 200.0, 400.0),
-    Item("Rake", 18.0, 36.0),
-    Item("Shovel", 22.0, 44.0),
-    Item("Garden Shears", 15.0, 30.0),
-    Item("Watering Can", 12.0, 24.0),
-    Item("BBQ Grill", 150.0, 300.0),
-    Item("Charcoal", 10.0, 20.0),
-    Item("Lighter Fluid", 6.0, 12.0),
-    Item("Patio Furniture", 250.0, 500.0),
+    # Garden & Outdoor - MEDIUM IMPORTANCE (2)
+    Item("Garden Hose", 25.0, 50.0, 2),
+    Item("Sprinkler", 20.0, 40.0, 2),
+    Item("Garden Gloves", 8.0, 16.0, 2),
+    Item("Plant Seeds", 3.0, 6.0, 2),
+    Item("Fertilizer", 12.0, 24.0, 2),
+    Item("Potting Soil", 10.0, 20.0, 2),
+    Item("Weed Killer", 15.0, 30.0, 2),
+    Item("Lawn Mower", 200.0, 400.0, 1),
+    Item("Rake", 18.0, 36.0, 2),
+    Item("Shovel", 22.0, 44.0, 2),
+    Item("Garden Shears", 15.0, 30.0, 2),
+    Item("Watering Can", 12.0, 24.0, 2),
+    Item("BBQ Grill", 150.0, 300.0, 1),
+    Item("Charcoal", 10.0, 20.0, 2),
+    Item("Lighter Fluid", 6.0, 12.0, 2),
+    Item("Patio Furniture", 250.0, 500.0, 1),
 
-    # Toys & Games
-    Item("Board Game", 20.0, 40.0),
-    Item("Puzzle", 15.0, 30.0),
-    Item("Playing Cards", 5.0, 10.0),
-    Item("Action Figure", 12.0, 24.0),
-    Item("Doll", 18.0, 36.0),
-    Item("Stuffed Animal", 15.0, 30.0),
-    Item("Building Blocks", 25.0, 50.0),
-    Item("Art Supplies", 20.0, 40.0),
-    Item("Crayons", 4.0, 8.0),
-    Item("Coloring Book", 5.0, 10.0),
-    Item("Play-Doh", 8.0, 16.0),
-    Item("Remote Control Car", 40.0, 80.0),
-    Item("Nerf Gun", 25.0, 50.0),
-    Item("Water Gun", 10.0, 20.0),
-    Item("Frisbee", 8.0, 16.0),
-    Item("Soccer Ball", 18.0, 36.0),
-    Item("Football", 20.0, 40.0),
-    Item("Baseball Glove", 35.0, 70.0),
-    Item("Baseball Bat", 30.0, 60.0),
+    # Toys & Games - LOW IMPORTANCE (1)
+    Item("Board Game", 20.0, 40.0, 1),
+    Item("Puzzle", 15.0, 30.0, 1),
+    Item("Playing Cards", 5.0, 10.0, 1),
+    Item("Action Figure", 12.0, 24.0, 1),
+    Item("Doll", 18.0, 36.0, 1),
+    Item("Stuffed Animal", 15.0, 30.0, 1),
+    Item("Building Blocks", 25.0, 50.0, 1),
+    Item("Art Supplies", 20.0, 40.0, 2),
+    Item("Crayons", 4.0, 8.0, 2),
+    Item("Coloring Book", 5.0, 10.0, 1),
+    Item("Play-Doh", 8.0, 16.0, 1),
+    Item("Remote Control Car", 40.0, 80.0, 1),
+    Item("Nerf Gun", 25.0, 50.0, 1),
+    Item("Water Gun", 10.0, 20.0, 1),
+    Item("Frisbee", 8.0, 16.0, 1),
+    Item("Soccer Ball", 18.0, 36.0, 2),
+    Item("Football", 20.0, 40.0, 2),
+    Item("Baseball Glove", 35.0, 70.0, 1),
+    Item("Baseball Bat", 30.0, 60.0, 1),
 
-    # Car Accessories
-    Item("Car Phone Mount", 15.0, 30.0),
-    Item("Car Charger", 12.0, 24.0),
-    Item("Jumper Cables", 25.0, 50.0),
-    Item("Car Air Freshener", 3.0, 6.0),
-    Item("Windshield Wiper", 18.0, 36.0),
-    Item("Motor Oil", 20.0, 40.0),
+    # Car Accessories - MEDIUM IMPORTANCE (2)
+    Item("Car Phone Mount", 15.0, 30.0, 2),
+    Item("Car Charger", 12.0, 24.0, 2),
+    Item("Jumper Cables", 25.0, 50.0, 2),
+    Item("Car Air Freshener", 3.0, 6.0, 1),
+    Item("Windshield Wiper", 18.0, 36.0, 2),
+    Item("Motor Oil", 20.0, 40.0, 2),
 ]
 
 
@@ -432,6 +435,7 @@ class Player:
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
     purchased_upgrades: List['Upgrade'] = field(default_factory=list)  # Upgrades bought by this player
     is_human: bool = False  # Whether this is a human-controlled player
+    reputation: float = 0.0  # Store reputation from -100 to 100, affects customer choice
     # Sales tracking for AI pricing strategy (yesterday's results)
     daily_sales_data: Dict[str, Dict[str, any]] = field(default_factory=dict)  # item_name -> {units_sold, revenue, sold_out}
     last_wage_payment_day: int = 0  # Track when wages were last paid (for 30-day wage cycle)
@@ -993,6 +997,88 @@ class Customer:
 
         # Return just the players
         return [player for player, price in candidates]
+
+    def choose_supplier_by_reputation(
+        self,
+        players: List[Player],
+        needs: List[CustomerNeed],
+        market_prices: Dict[str, float],
+        items_by_name: Dict[str, Item]
+    ) -> Optional[Player]:
+        """
+        Choose a supplier based on reputation and discount scores.
+
+        Formula:
+        - reputation_multiplier = 10 ** (reputation / 100)
+        - For each item in needs, calculate discount % weighted by importance
+        - discount_score = sum((market_price - player_price) / market_price * 100 * importance)
+        - final_score = discount_score * reputation_multiplier
+
+        Returns the player with the highest score who has capacity to serve customers.
+        Only considers players with stock and acceptable prices.
+        """
+        if not players or not needs:
+            return None
+
+        player_scores = []
+        max_acceptable_price_multiplier = 1.15  # 15% above market price
+
+        for player in players:
+            # Calculate discount score for this player
+            discount_score = 0.0
+            has_any_stock = False
+
+            for need in needs:
+                item_name = need.item_name
+                market_price = market_prices.get(item_name, 0)
+
+                # Skip if no market price
+                if market_price <= 0:
+                    continue
+
+                # Check if player has stock and price
+                if player.inventory.get(item_name, 0) > 0 and item_name in player.prices:
+                    player_price = player.prices[item_name]
+                    max_acceptable_price = market_price * max_acceptable_price_multiplier
+
+                    # Only consider if price is acceptable
+                    if player_price <= max_acceptable_price:
+                        has_any_stock = True
+
+                        # Calculate discount percentage
+                        if player_price < market_price:
+                            discount_pct = ((market_price - player_price) / market_price) * 100
+                        else:
+                            discount_pct = 0  # No discount if at or above market
+
+                        # Get item importance
+                        item = items_by_name.get(item_name)
+                        importance = item.importance if item else 2
+
+                        # Add weighted discount to score
+                        discount_score += discount_pct * importance
+
+            # Skip players with no relevant stock
+            if not has_any_stock:
+                continue
+
+            # Calculate reputation multiplier
+            reputation = player.reputation
+            reputation_multiplier = 10 ** (reputation / 100)
+
+            # Calculate final score
+            final_score = discount_score * reputation_multiplier
+
+            player_scores.append((player, final_score))
+
+        if not player_scores:
+            return None
+
+        # Sort by score descending (highest first)
+        player_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Return the player with the highest score
+        return player_scores[0][0]
 
 
 # -------------------------------------------------------------------
@@ -2302,56 +2388,60 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         customer_spending = 0.0
         customer_budget = customer.budget
 
-        # NEW LOGIC: Sort needs by market price (most expensive first)
-        # Customer finds cheapest store for most expensive item, then stays there
-        needs_with_prices = []
-        for need in needs:
-            market_price = game_state.market_prices.get(need.item_name, 0)
-            needs_with_prices.append((need, market_price))
+        # NEW REPUTATION-BASED SYSTEM: Choose supplier based on reputation and discounts
+        # Build items dictionary for quick lookup
+        items_by_name = {item.name: item for item in game_state.items}
 
-        # Sort by price descending (most expensive first)
-        needs_with_prices.sort(key=lambda x: x[1], reverse=True)
-        remaining_needs = [need for need, _ in needs_with_prices]
+        # Track original needs for reputation calculation
+        original_needs_count = sum(need.quantity for need in needs)
+        fulfilled_needs_count = 0
 
-        # Current supplier (the store customer is shopping at)
+        remaining_needs = list(needs)
+
+        # Choose best supplier based on reputation and discount score
         current_supplier = None
-        # Track which suppliers we've tried for the current most expensive item
-        tried_suppliers = set()
+        visited_stores = []  # Track which stores this customer shopped at
 
         while remaining_needs and customer_spending < customer_budget:
-            # If no current supplier, find cheapest supplier for the most expensive remaining item
+            # Find best supplier for remaining needs
             if current_supplier is None:
-                most_expensive_need = remaining_needs[0]
-                sorted_suppliers = customer.get_all_suppliers_sorted(
-                    game_state.players,
-                    most_expensive_need.item_name,
-                    most_expensive_need.quantity,
-                    game_state.market_prices
+                # Find suppliers with available capacity
+                available_suppliers = [
+                    player for player in game_state.players
+                    if customers_served[player.name] < player.get_max_customers()
+                ]
+
+                if not available_suppliers:
+                    # No stores with capacity, mark remaining as unmet
+                    for need in remaining_needs:
+                        unmet_demand += need.quantity
+                        unmet_demand_per_item[need.item_name] = (
+                            unmet_demand_per_item.get(need.item_name, 0) + need.quantity
+                        )
+                    break
+
+                # Choose supplier based on reputation and discounts
+                current_supplier = customer.choose_supplier_by_reputation(
+                    available_suppliers,
+                    remaining_needs,
+                    game_state.market_prices,
+                    items_by_name
                 )
 
-                # Find a supplier with capacity that we haven't tried yet for this item
-                found_supplier = False
-                for supplier in sorted_suppliers:
-                    # Skip suppliers we've already tried for this item
-                    if supplier.name in tried_suppliers:
-                        continue
-                    if customers_served[supplier.name] < supplier.get_max_customers():
-                        current_supplier = supplier
-                        tried_suppliers.add(supplier.name)
-                        found_supplier = True
-                        break
+                if current_supplier is None:
+                    # No suitable supplier found, mark as unmet
+                    for need in remaining_needs:
+                        unmet_demand += need.quantity
+                        unmet_demand_per_item[need.item_name] = (
+                            unmet_demand_per_item.get(need.item_name, 0) + need.quantity
+                        )
+                    break
 
-                if not found_supplier:
-                    # No more suppliers to try for this item, mark as unmet and move to next item
-                    unmet_demand += most_expensive_need.quantity
-                    unmet_demand_per_item[most_expensive_need.item_name] = (
-                        unmet_demand_per_item.get(most_expensive_need.item_name, 0) + most_expensive_need.quantity
-                    )
-                    remaining_needs.remove(most_expensive_need)
-                    tried_suppliers.clear()  # Reset for next item
-                    continue
+                # Track that this customer visited this store
+                if current_supplier.name not in visited_stores:
+                    visited_stores.append(current_supplier.name)
 
-            # Try to purchase as many items as possible from current supplier
+            # Try to purchase items from current supplier
             purchased_needs = []
             for need in remaining_needs:
                 # Check if current supplier has this item
@@ -2369,7 +2459,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
                         # Check if customer can afford this item (at least 1 unit)
                         if supplier_price > remaining_budget:
-                            # Can't afford even 1 unit, skip this item
                             continue
 
                         # Adjust quantity based on remaining budget
@@ -2383,6 +2472,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                         if revenue > 0:
                             # Track customer spending
                             customer_spending += revenue
+                            fulfilled_needs_count += actual_units_sold
 
                             # Track sales
                             daily_sales[current_supplier.name] += revenue
@@ -2404,23 +2494,55 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                             per_item_sales[current_supplier.name][need.item_name]['revenue'] += revenue
 
                             customer_bought_anything = True
-                            purchased_needs.append(need)
+
+                            # Update need quantity or mark as purchased
+                            if actual_units_sold >= need.quantity:
+                                purchased_needs.append(need)
+                            else:
+                                need.quantity -= actual_units_sold
 
                             # Check if customer has hit their budget limit
                             if customer_spending >= customer_budget:
                                 break
 
-            # Remove purchased items from remaining needs
+            # Remove fully purchased items from remaining needs
             for need in purchased_needs:
                 remaining_needs.remove(need)
 
-            # If there are still remaining needs, reset supplier to force finding cheapest for next item
-            if remaining_needs:
-                # If we made purchases, the most expensive item might have changed - reset tried suppliers
-                if purchased_needs:
-                    tried_suppliers.clear()
-                # If no purchases, keep tried_suppliers so we try the next supplier for same item
-                current_supplier = None
+            # Mark unmet demand and reset to find another store
+            if remaining_needs and not purchased_needs:
+                # Current supplier couldn't fulfill any more needs
+                # Mark remaining as unmet and stop
+                for need in remaining_needs:
+                    unmet_demand += need.quantity
+                    unmet_demand_per_item[need.item_name] = (
+                        unmet_demand_per_item.get(need.item_name, 0) + need.quantity
+                    )
+                break
+
+            # Continue shopping at same store if we made purchases
+            if not remaining_needs or customer_spending >= customer_budget:
+                break
+
+        # Update reputation for all stores this customer visited
+        if original_needs_count > 0:
+            fulfillment_percentage = (fulfilled_needs_count / original_needs_count)
+
+            for store_name in visited_stores:
+                store = next((p for p in game_state.players if p.name == store_name), None)
+                if store:
+                    # Apply reputation changes based on fulfillment
+                    if fulfillment_percentage <= 0.3:
+                        # 30% or less: -1 reputation
+                        store.reputation = max(-100, store.reputation - 1)
+                    elif fulfillment_percentage >= 0.8:
+                        # 80% or more: +1 reputation
+                        store.reputation = min(100, store.reputation + 1)
+
+                        # If 100% fulfilled at exactly one store, +2 total (so +1 additional)
+                        if fulfillment_percentage >= 0.999 and len(visited_stores) == 1:
+                            store.reputation = min(100, store.reputation + 1)
+                    # 50-79%: no change
 
         # Track customer type statistics
         if customer.customer_type in customer_type_stats['bought_something']:
