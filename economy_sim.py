@@ -2296,6 +2296,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # Current supplier (the store customer is shopping at)
         current_supplier = None
+        # Track which suppliers we've tried for the current most expensive item
+        tried_suppliers = set()
 
         while remaining_needs:
             # If no current supplier, find cheapest supplier for the most expensive remaining item
@@ -2308,21 +2310,26 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     game_state.market_prices
                 )
 
-                # Find a supplier with capacity
+                # Find a supplier with capacity that we haven't tried yet for this item
                 found_supplier = False
                 for supplier in sorted_suppliers:
+                    # Skip suppliers we've already tried for this item
+                    if supplier.name in tried_suppliers:
+                        continue
                     if customers_served[supplier.name] < supplier.get_max_customers():
                         current_supplier = supplier
+                        tried_suppliers.add(supplier.name)
                         found_supplier = True
                         break
 
                 if not found_supplier:
-                    # No supplier available, mark as unmet and move to next item
+                    # No more suppliers to try for this item, mark as unmet and move to next item
                     unmet_demand += most_expensive_need.quantity
                     unmet_demand_per_item[most_expensive_need.item_name] = (
                         unmet_demand_per_item.get(most_expensive_need.item_name, 0) + most_expensive_need.quantity
                     )
                     remaining_needs.remove(most_expensive_need)
+                    tried_suppliers.clear()  # Reset for next item
                     continue
 
             # Try to purchase as many items as possible from current supplier
@@ -2373,6 +2380,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             # If there are still remaining needs, reset supplier to force finding cheapest for next item
             if remaining_needs:
+                # If we made purchases, the most expensive item might have changed - reset tried suppliers
+                if purchased_needs:
+                    tried_suppliers.clear()
+                # If no purchases, keep tried_suppliers so we try the next supplier for same item
                 current_supplier = None
 
         # Track customer type statistics
