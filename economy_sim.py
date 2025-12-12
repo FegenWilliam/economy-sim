@@ -891,7 +891,10 @@ class Customer:
 
         # Keep buying items until we hit the item limit or run out of budget
         total_items = 0
-        while total_items < max_items and remaining_budget > 0 and available_items:
+        failed_attempts = 0
+        max_failed_attempts = 100  # Prevent infinite loop if all items are invalid or too expensive
+
+        while total_items < max_items and remaining_budget > 0 and available_items and failed_attempts < max_failed_attempts:
             # Select one item based on demand
             selected_item = weighted_random_sample(available_items, item_demand, 1)[0]
 
@@ -900,6 +903,7 @@ class Customer:
 
             # Skip items with invalid pricing
             if item_price <= 0:
+                failed_attempts += 1
                 continue
 
             # Check if we can afford at least one unit
@@ -908,6 +912,9 @@ class Customer:
                 needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
                 remaining_budget -= item_price
                 total_items += 1
+                failed_attempts = 0  # Reset on successful purchase
+            else:
+                failed_attempts += 1
 
         return needs
 
@@ -2359,8 +2366,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     supplier_price = current_supplier.prices[need.item_name]
 
                     if supplier_price <= max_acceptable_price:
-                        # Calculate total cost for this item
-                        item_total_cost = supplier_price * need.quantity
                         remaining_budget = customer_budget - customer_spending
 
                         # Check if customer can afford this item (at least 1 unit)
@@ -2420,12 +2425,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # Track customer type statistics
         if customer.customer_type in customer_type_stats['bought_something']:
-            if customer_bought_anything or not needs:
-                # If customer bought something OR had no needs (couldn't find matching items)
-                if not needs:
-                    customer_type_stats['found_nothing'][customer.customer_type] += 1
-                else:
-                    customer_type_stats['bought_something'][customer.customer_type] += 1
+            if not needs:
+                # Customer had no needs generated - don't count them
+                pass
+            elif customer_bought_anything:
+                customer_type_stats['bought_something'][customer.customer_type] += 1
             else:
                 customer_type_stats['found_nothing'][customer.customer_type] += 1
 
