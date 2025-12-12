@@ -1998,76 +1998,80 @@ def auto_hire_employees(player: Player, game_state: GameState) -> None:
     Automatically hire employees for AI players based on strategic decision-making.
 
     Strategy:
-    1. Maintain a modest cash reserve ($1000 + $500 per store level)
+    1. Maintain a healthy cash reserve ($2000 + $1000 per store level)
     2. Consider ongoing wage costs ($500/month per employee)
-    3. Hire cashiers when customer capacity is limiting sales
-    4. Hire restockers when inventory capacity is limiting operations
-    5. Scale more aggressively to keep up with customer growth
+    3. Hire cashiers ONLY when at 90%+ customer capacity AND there's unmet demand
+    4. Hire restockers ONLY when there's unmet demand AND customer capacity is available
+    5. Cap employees at reasonable levels to prevent overspending
     """
     HIRING_COST = 500.0
     MONTHLY_WAGE = 500.0
 
-    # Calculate minimum cash reserve (reduced for more aggressive scaling)
-    min_reserve = 1000 + (500 * player.store_level)
+    # Calculate minimum cash reserve (more conservative to prevent overspending)
+    min_reserve = 2000 + (1000 * player.store_level)
 
-    # Reserve enough for 1 month of wages for current + potential new employee
-    # (Reduced from 3 months to be more aggressive)
+    # Reserve enough for 2 months of wages for current + potential new employee
     total_employees = player.cashiers + player.restockers
-    wage_buffer = (total_employees + 1) * MONTHLY_WAGE / 30  # 1 month of daily wages
+    wage_buffer = (total_employees + 1) * MONTHLY_WAGE * 2 / 30  # 2 months of daily wages
 
     available_cash = player.cash - min_reserve - wage_buffer
 
     if available_cash < HIRING_COST:
         return  # Not enough cash to safely hire
 
+    # Set reasonable employee limits based on store level to prevent overspending
+    # These are soft caps - we won't hire beyond these unless really necessary
+    max_cashiers = 2 + player.store_level  # Level 1: 3, Level 5: 7
+    max_restockers = 2 + player.store_level  # Level 1: 3, Level 5: 7
+
+    # Check if we're already at reasonable limits
+    if player.cashiers >= max_cashiers and player.restockers >= max_restockers:
+        return  # Already have plenty of employees
+
     # Analyze current constraints
     current_inventory_count = sum(len(inv.items) for inv in player.inventory.values())
     max_items = player.get_max_items_per_day()
     max_customers = player.get_max_customers()
 
-    # Calculate utilization rates (how close we are to hitting limits)
-    # Higher utilization = more need for that employee type
+    # Calculate actual utilization based on yesterday's data
     inventory_utilization = current_inventory_count / max(max_items, 1)
 
-    # Estimate customer demand based on current inventory and pricing
-    # This is a rough estimate - AI assumes they could sell to capacity if they had stock
-    num_products = len(player.inventory)
-    estimated_customer_demand = min(num_products * 5, max_customers * 1.2)  # Rough estimate
-    customer_utilization = estimated_customer_demand / max(max_customers, 1)
+    # Get actual unmet demand from yesterday's sales data
+    total_unmet_demand = sum(
+        data.get('unmet_demand', 0)
+        for data in player.daily_sales_data.values()
+    )
 
-    # Calculate ROI for each employee type
-    # Cashiers: increase customer capacity by 10 customers/day
-    # Restockers: increase inventory capacity by 20 items/day
-    # Assume average profit per customer is $5, and inventory turnover matters
+    # Count how many items sold out yesterday
+    sold_out_count = sum(
+        1 for data in player.daily_sales_data.values()
+        if data.get('sold_out', False)
+    )
 
-    cashier_value = 0.0
-    restocker_value = 0.0
+    # Calculate customer capacity usage from yesterday's actual served customers
+    # (This is tracked in the daily stats)
+    customer_type_stats = getattr(player, 'customer_type_stats', {})
+    actual_customers_served = sum(customer_type_stats.values())
+    customer_utilization = actual_customers_served / max(max_customers, 1)
 
-    # Score cashiers higher if we're hitting customer capacity limits
-    if customer_utilization > 0.6:  # Over 60% capacity (reduced from 80%)
-        # Expected additional revenue from 10 more customers per day
-        cashier_value = 10 * 5 * 30  # 10 customers * $5 profit * 30 days = $1500/month
-        cashier_value -= MONTHLY_WAGE  # Subtract monthly cost
-        cashier_value *= (customer_utilization - 0.5)  # Scale by how constrained we are
-
-    # Score restockers higher if we're hitting inventory capacity limits
-    if inventory_utilization > 0.5:  # Over 50% capacity (reduced from 70%)
-        # Expected additional revenue from being able to stock more
-        restocker_value = 20 * 2 * 30  # 20 items * $2 profit/item * 30 days = $1200/month
-        restocker_value -= MONTHLY_WAGE  # Subtract monthly cost
-        restocker_value *= (inventory_utilization - 0.4)  # Scale by how constrained we are
-
-    # Only hire if the expected monthly value is positive and significant
-    # Late game: be MORE aggressive (lower threshold) to keep up with customer growth
-    # Early game: be more conservative (higher threshold) to preserve cash
-    min_monthly_value = 300 - (player.store_level * 50)  # Level 1: $250, Level 5: $50
-
-    # Decide what to hire
+    # Decision logic for hiring
     hire_type = None
-    if cashier_value > max(restocker_value, min_monthly_value):
-        hire_type = "cashier"
-    elif restocker_value > min_monthly_value:
-        hire_type = "restocker"
+
+    # Cashier hiring: ONLY if at 90%+ capacity AND there's significant unmet demand
+    if player.cashiers < max_cashiers:
+        if customer_utilization >= 0.9 and total_unmet_demand >= 5:
+            # We're hitting customer capacity limits AND losing sales
+            hire_type = "cashier"
+
+    # Restocker hiring: ONLY if there's unmet demand AND we have customer capacity
+    if hire_type is None and player.restockers < max_restockers:
+        # Check if we have enough customer capacity to serve more items
+        # Don't hire restockers if we're maxing out on customers
+        if customer_utilization < 0.85:
+            # We have customer capacity, check if we need more inventory
+            if sold_out_count >= 2 or (inventory_utilization > 0.7 and total_unmet_demand >= 3):
+                # Multiple items sold out OR high inventory usage with unmet demand
+                hire_type = "restocker"
 
     # Attempt to hire
     if hire_type:
