@@ -2933,8 +2933,8 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         print(f"Note: Wages paid every 30 days for ALL employees (including newly hired)")
 
         print("\nOptions:")
-        print("  1. Hire Cashier (+10 customers/day capacity)")
-        print("  2. Hire Restocker (+20 items/day capacity)")
+        print("  1. Hire Cashier (+30 customers/day capacity)")
+        print("  2. Hire Restocker (+200 items/day capacity)")
         print("  0. Back to Main Menu")
 
         try:
