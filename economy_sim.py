@@ -756,7 +756,7 @@ class CustomerNeed:
 class Customer:
     """Represents a customer with daily needs for items."""
     name: str
-    customer_type: str = "medium"  # "low", "medium", "high", "uncapped", "hoarder", "rich_guy", "poor_man", "kid"
+    customer_type: str = "medium"  # "low", "medium", "high", "uncapped"
     budget: float = 0.0
 
     def __post_init__(self):
@@ -770,14 +770,6 @@ class Customer:
                 self.budget = 100.0
             elif self.customer_type == "uncapped":
                 self.budget = 10000.0  # Effectively unlimited for 1 expensive item
-            elif self.customer_type == "hoarder":
-                self.budget = 40.0
-            elif self.customer_type == "rich_guy":
-                self.budget = 400.0
-            elif self.customer_type == "poor_man":
-                self.budget = 10.0
-            elif self.customer_type == "kid":
-                self.budget = 10.0
 
     def generate_daily_needs(self, available_items: List[Item], market_prices: Dict[str, float] = None, item_demand: Dict[str, float] = None) -> List[CustomerNeed]:
         """
@@ -785,10 +777,6 @@ class Customer:
         Uses item demand as weights for selection - higher demand items are more likely to be chosen.
 
         For uncapped customers: only buy 1 expensive item (base_price >= 100).
-        For hoarder: buys 3-10 of 1 item only (budget $40).
-        For rich_guy: buys only items >$50, normal quantity (budget $400).
-        For poor_man: buys exactly 1 item <$10 (budget $10).
-        For kid: buys exactly 2 items <$5 (budget $10).
         For other customers: randomly selects items and quantities.
         """
         if not available_items:
@@ -807,78 +795,6 @@ class Customer:
                 selected_item = weighted_random_choice(expensive_items, item_demand)
                 if selected_item:
                     needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
-            return needs
-
-        # Hoarder: buys 3-10 of 1 item only
-        if self.customer_type == "hoarder":
-            # Filter items that fit within budget for at least 3 units (use market prices)
-            affordable_items = []
-            for item in available_items:
-                price = market_prices.get(item.name, item.base_price) if market_prices else item.base_price
-                if price * 3 <= self.budget:
-                    affordable_items.append(item)
-
-            if affordable_items:
-                selected_item = weighted_random_choice(affordable_items, item_demand)
-                if selected_item:
-                    price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
-                    max_qty = min(10, int(self.budget / price))
-                    quantity = random.randint(3, max_qty)
-                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=quantity))
-            return needs
-
-        # Rich Guy: buys only items that cost >$50 (uses market prices if available, else base price)
-        if self.customer_type == "rich_guy":
-            if market_prices:
-                expensive_items = [item for item in available_items
-                                 if market_prices.get(item.name, item.base_price) > 50.0]
-            else:
-                expensive_items = [item for item in available_items if item.base_price > 50.0]
-
-            if expensive_items:
-                remaining_budget = self.budget
-                # Buy 1-3 different expensive items
-                num_item_types = random.randint(1, min(3, len(expensive_items)))
-                selected_items = weighted_random_sample(expensive_items, item_demand, num_item_types)
-
-                for item in selected_items:
-                    price = market_prices.get(item.name, item.base_price) if market_prices else item.base_price
-                    max_affordable = int(remaining_budget / price)
-                    if max_affordable > 0:
-                        quantity = random.randint(1, min(2, max_affordable))
-                        needs.append(CustomerNeed(item_name=item.name, quantity=quantity))
-                        remaining_budget -= quantity * price
-            return needs
-
-        # Poor Man: buys exactly 1 item that costs <$10
-        if self.customer_type == "poor_man":
-            if market_prices:
-                cheap_items = [item for item in available_items
-                             if market_prices.get(item.name, item.base_price) < 10.0]
-            else:
-                cheap_items = [item for item in available_items if item.base_price < 10.0]
-
-            if cheap_items:
-                selected_item = weighted_random_choice(cheap_items, item_demand)
-                if selected_item:
-                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
-            return needs
-
-        # A Kid: buys exactly 2 items that cost <$5
-        if self.customer_type == "kid":
-            if market_prices:
-                kid_items = [item for item in available_items
-                           if market_prices.get(item.name, item.base_price) < 5.0]
-            else:
-                kid_items = [item for item in available_items if item.base_price < 5.0]
-
-            if len(kid_items) >= 2:
-                selected_items = weighted_random_sample(kid_items, item_demand, 2)
-                for item in selected_items:
-                    needs.append(CustomerNeed(item_name=item.name, quantity=1))
-            elif len(kid_items) == 1:
-                # If only one item available, buy 2 of the same
-                needs.append(CustomerNeed(item_name=kid_items[0].name, quantity=2))
             return needs
 
         # Regular customers (low, medium, high)
@@ -2407,9 +2323,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Track customer types for daily summary
     customer_type_stats = {
-        'spawned': {'low': 0, 'medium': 0, 'high': 0, 'hoarder': 0, 'rich_guy': 0, 'poor_man': 0, 'kid': 0},
-        'bought_something': {'low': 0, 'medium': 0, 'high': 0, 'hoarder': 0, 'rich_guy': 0, 'poor_man': 0, 'kid': 0},
-        'found_nothing': {'low': 0, 'medium': 0, 'high': 0, 'hoarder': 0, 'rich_guy': 0, 'poor_man': 0, 'kid': 0}
+        'spawned': {'low': 0, 'medium': 0, 'high': 0},
+        'bought_something': {'low': 0, 'medium': 0, 'high': 0},
+        'found_nothing': {'low': 0, 'medium': 0, 'high': 0}
     }
 
     # Track per-item sales data for pricing strategy
@@ -2436,45 +2352,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         all_customers.append(customer)
         customer_type_stats['spawned'][customer_type] += 1
 
-    # Generate special customer types (they count towards cashier limit)
-    # Only spawn if suitable items exist based on market prices
-    special_customer_counter = 0
-
-    # Check for Hoarder-suitable items (can afford 3+ units using market prices)
-    hoarder_items = [item for item in game_state.items
-                     if game_state.market_prices.get(item.name, item.base_price) * 3 <= 40.0]
-    if hoarder_items and random.random() < 0.3:  # 30% chance to spawn
-        special_customer_counter += 1
-        customer = Customer(name=f"Hoarder_{special_customer_counter}", customer_type="hoarder")
-        all_customers.append(customer)
-        customer_type_stats['spawned']['hoarder'] += 1
-
-    # Check for Rich Guy-suitable items (>$50)
-    rich_items = [item for item in game_state.items
-                 if game_state.market_prices.get(item.name, item.base_price) > 50.0]
-    if rich_items and random.random() < 0.3:  # 30% chance to spawn
-        special_customer_counter += 1
-        customer = Customer(name=f"RichGuy_{special_customer_counter}", customer_type="rich_guy")
-        all_customers.append(customer)
-        customer_type_stats['spawned']['rich_guy'] += 1
-
-    # Check for Poor Man-suitable items (<$10)
-    poor_items = [item for item in game_state.items
-                 if game_state.market_prices.get(item.name, item.base_price) < 10.0]
-    if poor_items and random.random() < 0.3:  # 30% chance to spawn
-        special_customer_counter += 1
-        customer = Customer(name=f"PoorMan_{special_customer_counter}", customer_type="poor_man")
-        all_customers.append(customer)
-        customer_type_stats['spawned']['poor_man'] += 1
-
-    # Check for Kid-suitable items (<$5)
-    kid_items = [item for item in game_state.items
-                if game_state.market_prices.get(item.name, item.base_price) < 5.0]
-    if kid_items and random.random() < 0.3:  # 30% chance to spawn
-        special_customer_counter += 1
-        customer = Customer(name=f"Kid_{special_customer_counter}", customer_type="kid")
-        all_customers.append(customer)
-        customer_type_stats['spawned']['kid'] += 1
 
     # Track total demand per item (what customers want to buy today)
     daily_demand_per_item = {}  # item_name -> total quantity wanted
@@ -2788,7 +2665,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # Display customer type statistics
         print(f"\nCustomer Types Today:")
-        for ctype in ['low', 'medium', 'high', 'hoarder', 'rich_guy', 'poor_man', 'kid']:
+        for ctype in ['low', 'medium', 'high']:
             spawned = customer_type_stats['spawned'][ctype]
             if spawned > 0:
                 bought = customer_type_stats['bought_something'][ctype]
@@ -2940,6 +2817,7 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
 
     # Calculate discount score (sum across all stocked items)
     discount_score = 0.0
+    total_discount_pct = 0.0
     items_counted = 0
     if player.inventory and player.prices:
         for item_name, qty in player.inventory.items():
@@ -2957,6 +2835,7 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
                     else:
                         discount_pct = 0
 
+                    total_discount_pct += discount_pct
                     discount_score += discount_pct * importance
                     items_counted += 1
 
@@ -2993,13 +2872,12 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
     final_cas = discount_score * reputation_multiplier * availability_multiplier * fulfillment_multiplier
 
     # Display compact breakdown
-    print(f"   Reputation Multiplier:   {reputation_multiplier:6.3f}x  (10^({player.reputation:.0f}/100))")
-    print(f"   Discount Score:          {discount_score:7.2f}   ({items_counted} items)")
+    print(f"   Reputation:              {player.reputation:.0f}")
+    print(f"   Discount Score:          {total_discount_pct:.1f}% total across {items_counted} items (importance: {discount_score:.2f})")
     print(f"   Availability Multiplier: {availability_multiplier:6.2f}x  ({items_in_stock}/{total_catalog_items} = {availability_pct:.0f}%)")
     print(f"   Fulfillment Multiplier:  {fulfillment_multiplier:6.2f}x  ({fulfillment_pct:.0f}% avg)")
     print(f"   ─────────────────────────────────────────")
     print(f"   📈 FINAL CAS = {final_cas:.2f}")
-    print(f"      ({discount_score:.2f} × {reputation_multiplier:.3f} × {availability_multiplier:.2f} × {fulfillment_multiplier:.2f})")
 
 
 def display_market_table(game_state: GameState) -> None:
