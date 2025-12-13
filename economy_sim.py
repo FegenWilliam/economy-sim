@@ -2324,8 +2324,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: num_players * 15 + (day * 2)
-    base_customer_count = len(game_state.players) * 15 + (game_state.day * 2)
+    # Calculate base customer count: num_players * 15 + scaled growth
+    # Growth scales: +2/day base, +1 every 15 days (day 15: +3, day 30: +4, etc.)
+    def calculate_scaled_customers(day):
+        if day == 0:
+            return 0
+        full_periods = day // 15
+        remaining_days = day % 15
+        # Sum of customers from complete 15-day periods (arithmetic sequence)
+        total = 15 * full_periods * (3 + full_periods) // 2 if full_periods > 0 else 0
+        # Add customers from remaining days in current period
+        current_rate = 2 + full_periods
+        total += remaining_days * current_rate
+        return total
+
+    base_customer_count = len(game_state.players) * 15 + calculate_scaled_customers(game_state.day)
 
     # Add permanent customer increase for every 14-day period that has passed
     fourteen_day_periods = game_state.day // 14
