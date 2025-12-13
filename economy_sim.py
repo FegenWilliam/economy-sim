@@ -1775,7 +1775,10 @@ def update_item_demand(game_state: GameState) -> List[str]:
     - Items at 2.0 (max) → reset to 1.0
     - Items at 0.1 (min) → reset to 0.5
 
-    Then, randomly changes demand for 1/4 of items by ±0.2 to 0.4.
+    Then, randomly changes demand for 1/4 of items based on importance:
+    - Importance 3 (essentials): ±0.2 (more stable)
+    - Importance 2 (medium): ±0.4 (baseline)
+    - Importance 1 (luxury): ±0.6 (more volatile)
     Demand is clamped between 0.1 and 2.0.
 
     Returns list of item names that had demand changes.
@@ -1805,8 +1808,16 @@ def update_item_demand(game_state: GameState) -> List[str]:
     items_to_update = random.sample(game_state.items, min(num_items_to_update, len(game_state.items)))
 
     for item in items_to_update:
-        # Generate random change between -0.4 and +0.4
-        change = random.uniform(-0.4, 0.4)
+        # Generate random change based on importance
+        # Importance 3 (essentials): -0.2 to +0.2 (more stable)
+        # Importance 2 (medium): -0.4 to +0.4 (baseline)
+        # Importance 1 (luxury): -0.6 to +0.6 (more volatile)
+        if item.importance == 3:  # Essentials - more stable
+            change = random.uniform(-0.2, 0.2)
+        elif item.importance == 1:  # Luxury - more volatile
+            change = random.uniform(-0.6, 0.6)
+        else:  # importance == 2 - baseline
+            change = random.uniform(-0.4, 0.4)
 
         # Get current demand (may have been reset above)
         current_demand = game_state.item_demand.get(item.name, 1.0)
@@ -1893,7 +1904,10 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
 def apply_daily_price_fluctuation(market_prices: Dict[str, float], items: List[Item]) -> None:
     """
     Apply daily price fluctuation to 1-2 random items.
-    Prices fluctuate by 5-10% up or down.
+    Fluctuation ranges based on item importance:
+    - Importance 3 (essentials): 3-6% (more stable)
+    - Importance 2 (medium): 5-10% (baseline)
+    - Importance 1 (luxury): 7-14% (more volatile)
     """
     if not items:
         return
@@ -1903,8 +1917,14 @@ def apply_daily_price_fluctuation(market_prices: Dict[str, float], items: List[I
     items_to_fluctuate = random.sample(items, num_items_to_fluctuate)
 
     for item in items_to_fluctuate:
-        # 5-10% fluctuation, can be positive or negative
-        fluctuation = random.uniform(0.05, 0.10)
+        # Fluctuation range based on importance
+        if item.importance == 3:  # Essentials - more stable
+            fluctuation = random.uniform(0.03, 0.06)
+        elif item.importance == 1:  # Luxury - more volatile
+            fluctuation = random.uniform(0.07, 0.14)
+        else:  # importance == 2 - baseline
+            fluctuation = random.uniform(0.05, 0.10)
+
         direction = random.choice([-1, 1])
 
         old_price = market_prices[item.name]
