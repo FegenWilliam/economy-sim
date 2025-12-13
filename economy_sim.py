@@ -2040,28 +2040,59 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
 
 def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendor], market_prices: Dict[str, float], game_state: 'GameState' = None) -> None:
     """
-    Automatically set up buy orders for AI players.
+    Automatically set up strategic buy orders for AI players,
+    using multi-sourcing (up to 3 vendors) to manage lead time and cost.
 
-    AI players will buy to maintain inventory that scales with:
-    - Game progression (day and level)
-    - Item demand (0.1x to 2.0x multiplier based on market trends)
-    - Actual customer demand (yesterday's purchase patterns)
-    Always choosing the cheapest available vendor.
-    Only buys items available at or below market price to avoid overpaying.
-
-    Strategy adjustments for final_score optimization:
-    - Bob: Maintains 20% higher inventory to maximize availability_multiplier
-    - Alice: Standard inventory levels (relies on low prices for discount_score)
+    Strategy adjustments for CAS optimization:
+    - Alice: Uses cheap vendors (3-4d lead) for 80% of inventory (maximize margin/discount_score)
+             + instant vendors (0d lead) for 20% safety stock (maintain availability)
+             Targets 1.2x inventory multiplier
+    - Bob: Uses stable 1-day vendors to balance cost and availability
+           Maintains 1.5x inventory multiplier to ensure 90%+ fulfillment (1.4x multiplier)
     """
-    # Determine AI strategy
+    # Helper lookups
+    vendor_lookup = {v.name: v for v in vendors}
+
+    # --- Vendor Categories for Strategic Sourcing ---
+    # Low-Cost, High-Lead-Time Vendors (Alice's Margin Choice)
+    margin_vendors = ["Cheap Goods Co.", "Discount Wholesale Co.", "Lucky Deal Trader"]
+
+    # Instant/Low-Lead-Time Vendors (Alice's Fulfillment Choice / Bob's Safety)
+    instant_vendors = ["Universal Supply Corp.", "Instant Goods Ltd."]
+
+    # Stable, Moderate-Lead-Time Vendors (Bob's Primary Choice)
+    stable_vendors = ["Budget Goods Ltd.", "Premium Select Inc.", "Bulk Goods Co.", "VIP Goods Co."]
+
+    # Clear all current buy orders to start fresh
+    player.buy_orders.clear()
+
+    # Determine Inventory Multiplier based on strategy
+    is_alice = "Alice" in player.name
     is_bob = "Bob" in player.name
-    inventory_multiplier = 1.2 if is_bob else 1.0  # Bob stocks 20% more for availability
+
+    if is_alice:
+        # Alice is high volume: 1.2x inventory target
+        inventory_multiplier = 1.2
+    elif is_bob:
+        # Bob is high fulfillment: 1.5x inventory target (to guarantee 90%+ fulfillment)
+        inventory_multiplier = 1.5
+    else:
+        # Default strategy
+        inventory_multiplier = 1.0
+
+    # Get maximum products player can stock
+    max_products = player.get_max_products()
+    products_with_orders = 0
 
     for item in items:
-        current_inventory = player.inventory.get(item.name, 0)
+        if products_with_orders >= max_products:
+            break
 
-        # Scale target inventory with game progression and customer count
-        # Base: 20 units, +2 per day, +10 per store level
+        item_name = item.name
+        current_inventory = player.inventory.get(item_name, 0)
+        market_price = market_prices.get(item_name, item.base_price)
+
+        # Determine target inventory (grows with level/day, buffered by demand)
         base_target = 20
         if game_state:
             day_scaling = game_state.day * 2
@@ -2069,43 +2100,127 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
             target_inventory = base_target + day_scaling + level_scaling
 
             # Apply demand multiplier (0.1x to 2.0x based on market trends)
-            demand_multiplier = game_state.item_demand.get(item.name, 1.0)
+            demand_multiplier = game_state.item_demand.get(item_name, 1.0)
             target_inventory *= demand_multiplier
 
             # Also consider yesterday's actual customer demand if available
-            # This helps AI react to real purchase patterns, not just market trends
             if hasattr(player, 'daily_demand_per_item') and player.daily_demand_per_item:
-                yesterday_demand = player.daily_demand_per_item.get(item.name, 0)
-                # Use the higher of: trend-based target OR yesterday's demand * 1.5 (buffer)
-                demand_based_target = yesterday_demand * 1.5
+                yesterday_demand = player.daily_demand_per_item.get(item_name, 0)
+                demand_based_target = yesterday_demand * 1.5  # 50% buffer
                 target_inventory = max(target_inventory, demand_based_target)
 
             # Apply strategy-specific inventory multiplier
             target_inventory *= inventory_multiplier
         else:
-            target_inventory = 20 * inventory_multiplier  # Fallback if no game state
+            target_inventory = 20 * inventory_multiplier
 
-        target_inventory = int(target_inventory)  # Ensure integer
+        target_inventory = int(target_inventory)
         quantity_to_buy = max(0, target_inventory - current_inventory)
 
-        # Find cheapest vendor for this item
-        cheapest_vendor = None
-        cheapest_price = float('inf')
+        if quantity_to_buy <= 0:
+            continue
 
-        for vendor in vendors:
-            vendor_price = vendor.get_price(item.name)
-            if vendor_price and vendor_price < cheapest_price:
-                cheapest_price = vendor_price
-                cheapest_vendor = vendor
+        # --- Helper function to find best price from a list of vendors ---
+        def find_best_vendor(vendor_names: List[str], item_name: str, min_qty: int = 1) -> Optional[tuple]:
+            """Returns (vendor_name, final_price) or None"""
+            best_vendor_name = None
+            cheapest_price = float('inf')
 
-        # Only buy if available at a reasonable price (≤ 110% of market price)
-        # Allows some flexibility while preventing overpaying at expensive vendors
-        market_price = market_prices.get(item.name, item.base_price)
-        max_acceptable_price = market_price * 1.10
-        if cheapest_vendor and quantity_to_buy > 0 and cheapest_price <= max_acceptable_price:
-            player.set_buy_order(item.name, quantity_to_buy, cheapest_vendor.name)
+            for v_name in vendor_names:
+                vendor = vendor_lookup.get(v_name)
+                if not vendor:
+                    continue
+
+                # Check vendor's item availability and price
+                price = vendor.get_price(item_name)
+                if price is None:
+                    continue
+
+                # Check minimum purchase constraint
+                if vendor.min_purchase is not None and min_qty < vendor.min_purchase:
+                    continue
+
+                # Apply player discount
+                discount = player.get_vendor_discount(v_name, game_state.day if game_state else 1)
+                final_price = price * (1.0 - discount)
+
+                if final_price < cheapest_price:
+                    cheapest_price = final_price
+                    best_vendor_name = v_name
+
+            if best_vendor_name:
+                return (best_vendor_name, cheapest_price)
+            return None
+
+        # --- Alice's Strategy: Maximize Margin via Bulk + Instant Fulfillment Safety Net ---
+        if is_alice:
+            # --- Margin Order (80% of Qty) ---
+            target_margin_qty = int(quantity_to_buy * 0.8)
+            best_margin_vendor_info = find_best_vendor(margin_vendors, item_name, target_margin_qty)
+
+            margin_order_qty = 0
+            if best_margin_vendor_info:
+                v_name, price = best_margin_vendor_info
+                vendor = vendor_lookup[v_name]
+                # Ensure we meet the vendor's minimum purchase if it exists
+                actual_qty = max(target_margin_qty, vendor.min_purchase or 1)
+
+                if player.cash >= actual_qty * price:
+                    player.add_vendor_to_buy_order(item_name, actual_qty, v_name)
+                    margin_order_qty = actual_qty
+
+            # --- Safety Order (Remaining Qty) ---
+            safety_order_qty = max(0, quantity_to_buy - margin_order_qty)
+
+            if safety_order_qty > 0:
+                best_safety_vendor_info = find_best_vendor(instant_vendors, item_name, safety_order_qty)
+
+                if best_safety_vendor_info:
+                    v_name, price = best_safety_vendor_info
+                    if player.cash >= safety_order_qty * price:
+                        player.add_vendor_to_buy_order(item_name, safety_order_qty, v_name)
+
+            if margin_order_qty > 0 or safety_order_qty > 0:
+                products_with_orders += 1
+
+        # --- Bob's Strategy: Maximize Fulfillment via Stable/Instant Vendors and Overstock ---
+        elif is_bob:
+            # Primary Order: Stable, 1-day lead vendors
+            best_stable_vendor_info = find_best_vendor(stable_vendors, item_name, quantity_to_buy)
+
+            if best_stable_vendor_info:
+                v_name, price = best_stable_vendor_info
+                vendor = vendor_lookup[v_name]
+                # Ensure we meet minimum purchase requirements
+                actual_qty = max(quantity_to_buy, vendor.min_purchase or 1)
+
+                if player.cash >= actual_qty * price:
+                    player.add_vendor_to_buy_order(item_name, actual_qty, v_name)
+                    products_with_orders += 1
+            else:
+                # If stable vendors fail, use instant vendor as a last resort (expensive but guaranteed)
+                best_instant_vendor_info = find_best_vendor(instant_vendors, item_name, quantity_to_buy)
+                if best_instant_vendor_info:
+                    v_name, price = best_instant_vendor_info
+                    if player.cash >= quantity_to_buy * price:
+                        player.add_vendor_to_buy_order(item_name, quantity_to_buy, v_name)
+                        products_with_orders += 1
+
+        # --- Default AI (Fallback to cheapest single vendor) ---
         else:
-            player.set_buy_order(item.name, 0, "")
+            cheapest_vendor_info = find_best_vendor([v.name for v in vendors], item_name, quantity_to_buy)
+            if cheapest_vendor_info:
+                v_name, price = cheapest_vendor_info
+                if player.cash >= quantity_to_buy * price:
+                    player.add_vendor_to_buy_order(item_name, quantity_to_buy, v_name)
+                    products_with_orders += 1
+
+    # Final check on max products
+    if products_with_orders > max_products:
+        # In case the loop slightly over-ordered, clear the last added orders until max is met
+        all_item_names = list(player.buy_orders.keys())
+        for i in range(len(all_item_names) - 1, max_products - 1, -1):
+            player.buy_orders.pop(all_item_names[i])
 
 
 def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items: List[Item] = None,
@@ -2197,91 +2312,58 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
 
         # Determine pricing strategy based on sales performance and competition
         if is_alice:
-            # ALICE: Volume strategy - always aim to be the cheapest
-            # Strategy: Maximize discount_score by undercutting heavily, especially on high-importance items
-            # High-importance items contribute more to discount_score, so undercut even more aggressively
-            importance_aggression = 1.0 - (importance - 1) * 0.02  # More aggressive for higher importance
+            # ALICE: Volume/Discount Strategy
+            # Goal: Maximize discount_score by being significantly cheaper than market price
+            # Use ESSENTIAL items (I=3) as loss leaders for maximum discount score
+            # Recoup margin on LUXURY items (I=1)
 
-            if not sales_data:
-                # No sales history - undercut market aggressively
-                if min_competitor_price:
-                    price = min_competitor_price * random.uniform(0.90, 0.95) * importance_aggression
-                else:
-                    price = market_price * random.uniform(0.93, 0.97) * importance_aggression
-            elif sold_out:
-                # Even if sold out, Alice only raises price slightly (volume over margin)
-                # Still try to maintain availability for high availability_multiplier
-                if min_competitor_price:
-                    price = min_competitor_price * random.uniform(0.95, 0.98)
-                else:
-                    price = current_price * random.uniform(1.01, 1.03)
+            # Base aggression: Alice always aims to be the cheapest
+            if importance == 3:  # ESSENTIAL (Loss Leader)
+                # Maximize discount score by being 10-15% cheaper than MP
+                target_price = market_price * random.uniform(0.85, 0.90)
+            elif importance == 1:  # LUXURY (Recoup margin)
+                # Price just below MP to look competitive, but prioritize margin
+                target_price = market_price * random.uniform(0.95, 1.00)
+            else:  # MEDIUM (importance == 2)
+                target_price = market_price * random.uniform(0.90, 0.95)
+
+            # --- Price Adjustment based on Sales ---
+            if sold_out:
+                # Sold out? Raise price slightly to increase margin (volume over margin rule)
+                price = current_price * random.uniform(1.01, 1.03)
             elif units_sold == 0:
-                # Aggressively cut prices to move inventory
-                # Extra aggressive on high-importance items to boost discount_score
-                if min_competitor_price:
-                    price = min_competitor_price * random.uniform(0.88, 0.93) * importance_aggression
-                else:
-                    price = current_price * random.uniform(0.85, 0.90) * importance_aggression
-            elif unmet_demand > 5:
-                # Even with high demand, only moderate increase (want volume)
-                if min_competitor_price:
-                    price = min_competitor_price * random.uniform(0.96, 0.99)
-                else:
-                    price = current_price * random.uniform(1.00, 1.03)
+                # Didn't sell any? Aggressively cut price to generate discount score points
+                price = target_price * random.uniform(0.90, 0.95)
             else:
-                # Normal sales - stay cheapest, extra aggressive on high-importance
-                if min_competitor_price:
-                    price = min_competitor_price * random.uniform(0.92, 0.97) * importance_aggression
-                else:
-                    price = market_price * random.uniform(0.95, 0.98) * importance_aggression
+                # Normal sales: follow the calculated target price
+                price = target_price
 
         elif is_bob:
-            # BOB: Profit margin strategy - maximize profit per item while staying competitive
-            # Strategy: Accept lower discount_score but compensate with:
-            #   - High availability_multiplier (keep diverse stock)
-            #   - High fulfillment_multiplier (fulfill orders reliably)
-            #   - Build reputation over time (reputation_multiplier)
-            # Bob can afford higher prices if he maintains these other multipliers
+            # BOB: Margin/Stability Strategy
+            # Goal: Maximize item_stability by staying within 5% of Market Price (proximity_score)
+            #       and maintaining price consistency (consistency_bonus)
+            # This gives Bob the full 10 points for Price Proximity + 2 point Consistency Bonus
+            # Combined with his high fulfillment_multiplier (1.4x from 90%+ fulfillment),
+            # this compensates for lower discount_score
 
-            # Bob is less sensitive to importance because he relies on other multipliers
-            # But still be somewhat competitive on high-importance items to not lose too much discount_score
-            importance_moderation = 1.0 - (importance - 1) * 0.01  # Slightly more competitive on high-importance
+            # Target Price: 2% below MP ensures it's within the 5% buffer (MP * 0.95 to MP * 1.05)
+            target_stable_price = market_price * 0.98
 
-            if not sales_data:
-                # No sales history - price at higher end but competitive
-                if avg_competitor_price:
-                    price = avg_competitor_price * random.uniform(0.98, 1.05) * (2.0 - importance_moderation)
-                else:
-                    price = market_price * random.uniform(1.00, 1.08) * (2.0 - importance_moderation)
-            elif sold_out:
-                # Sold out - raise prices more aggressively for profit
-                # But ensure we restock to maintain availability_multiplier
-                if max_competitor_price:
-                    price = max_competitor_price * random.uniform(1.00, 1.08)
-                else:
-                    price = current_price * random.uniform(1.08, 1.15)
-            elif units_sold == 0:
-                # Didn't sell - reduce price but maintain margin
-                # Still try to keep stock for availability_multiplier
-                if avg_competitor_price:
-                    price = avg_competitor_price * random.uniform(0.95, 1.00)
-                else:
-                    price = current_price * random.uniform(0.93, 0.97)
-            elif unmet_demand > 5:
-                # High demand - raise prices significantly to maximize profit
-                # This is where Bob shines - higher margins when demand is there
-                if avg_competitor_price:
-                    price = max(current_price * random.uniform(1.05, 1.12),
-                               avg_competitor_price * random.uniform(1.00, 1.05))
-                else:
-                    price = current_price * random.uniform(1.05, 1.12)
+            # --- Consistency Check (The key to Bob's success) ---
+            # Bob only changes price if the market has moved so much that his current price
+            # is outside the 3% consistency threshold of the target stable price
+            price_change_pct = abs((current_price - target_stable_price) / target_stable_price) * 100 if target_stable_price > 0 else 100
+
+            if sold_out:
+                # Sold out: Temporarily break stability to maximize profit margin
+                # He prioritizes selling out a high-demand item quickly
+                price = current_price * random.uniform(1.05, 1.10)
+            elif price_change_pct > 3.0:  # Only adjust if current price is more than 3% off the optimal stable price
+                # Adjust price back to the optimal CAS stability point
+                price = target_stable_price
             else:
-                # Normal sales - maintain healthy margins
-                # Rely on availability & fulfillment multipliers to win customers despite higher prices
-                if avg_competitor_price:
-                    price = avg_competitor_price * random.uniform(0.98, 1.04) * (2.0 - importance_moderation)
-                else:
-                    price = current_price * random.uniform(1.00, 1.05)
+                # Maintain existing price to maximize Consistency Bonus (+2 points)
+                price = current_price
         else:
             # Default strategy (for any other AI players)
             if not sales_data:
