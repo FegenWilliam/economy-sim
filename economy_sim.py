@@ -3088,6 +3088,271 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> None:
+    """Combined menu for configuring buy orders and sell prices."""
+    while True:
+        print("\n" + "=" * 120)
+        print("CONFIGURE BUY ORDERS AND SALE PRICES")
+        print("=" * 120)
+
+        # Build table data
+        print(f"\n{'Item':<15} {'Qty':>6} {'Market':>8} {'Buy Qty':>8} {'Vendor':>15} {'Vend $':>8} {'Sell $':>8}")
+        print("-" * 120)
+
+        for item in game_state.items:
+            # Get current inventory quantity
+            inv_qty = player.inventory.get(item.name, 0)
+            qty_str = str(inv_qty) if inv_qty > 0 else ""
+
+            # Get market price
+            market_price = game_state.market_prices.get(item.name, 0)
+
+            # Get buy order info
+            order_qty, vendor_name = player.get_buy_order(item.name)
+            vendor_display = vendor_name[:15] if vendor_name else "-"
+
+            # Get vendor buy price (current price from the selected vendor)
+            vendor_buy_price = 0.0
+            if vendor_name:
+                # Check if it's a production line
+                own_price = player.get_production_line_price(item.name, market_price)
+                if own_price is not None:
+                    vendor_buy_price = own_price
+                else:
+                    # Find the vendor and get its price
+                    for vendor in game_state.vendors:
+                        if vendor.name == vendor_name:
+                            price = vendor.get_price(item.name)
+                            if price:
+                                # Apply vendor discount if applicable
+                                discount = player.get_vendor_discount(vendor_name, game_state.day)
+                                vendor_buy_price = price * (1 - discount)
+                            break
+
+            vendor_price_str = f"${vendor_buy_price:.2f}" if vendor_buy_price > 0 else "-"
+
+            # Get sell price
+            sell_price = player.prices.get(item.name, 0)
+            sell_price_str = f"${sell_price:.2f}" if sell_price > 0 else "-"
+
+            # Show ordered quantity in parentheses if no inventory
+            if inv_qty == 0 and order_qty > 0:
+                qty_str = f"({order_qty})"
+
+            print(f"{item.name:<15} {qty_str:>6} ${market_price:>7.2f} {order_qty:>8} {vendor_display:>15} {vendor_price_str:>8} {sell_price_str:>8}")
+
+        print("\nOptions:")
+        print("  b. Configure Buy Order (select item)")
+        print("  p. Set Sale Price (select item)")
+        print("  c. Change All Prices (one by one)")
+        print("  0. Back to Main Menu")
+
+        try:
+            choice = input("\nSelect option (b/p/c/0): ").strip().lower()
+
+            if choice == '0':
+                break
+            elif choice == 'b':
+                # Configure buy order
+                print("\nSelect item to configure buy order:")
+                for i, item in enumerate(game_state.items, 1):
+                    print(f"  {i}. {item.name}")
+                print("  0. Cancel")
+
+                item_choice = input(f"\nSelect item (0-{len(game_state.items)}): ")
+                item_num = int(item_choice)
+
+                if item_num == 0:
+                    continue
+
+                if 1 <= item_num <= len(game_state.items):
+                    item = game_state.items[item_num - 1]
+
+                    # Show vendor options
+                    print(f"\n=== Configuring Buy Order for {item.name} ===")
+                    print("\n  0. Clear buy order")
+                    print("\nAvailable Vendors:")
+                    available_vendors = []
+                    for i, vendor in enumerate(game_state.vendors, 1):
+                        price = vendor.get_price(item.name)
+                        # Show minimum purchase requirement if it exists
+                        min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                        if price:
+                            # Calculate price with discount
+                            discount = player.get_vendor_discount(vendor.name, game_state.day)
+                            final_price = price * (1 - discount)
+                            discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
+                            print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text}")
+                            available_vendors.append((i, vendor))
+                        else:
+                            status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
+                            print(f"  {i}. {vendor.name}{min_text} - {status}")
+                            available_vendors.append((i, vendor))
+
+                    vendor_choice = input(f"\nSelect vendor (0 to clear, 1-{len(game_state.vendors)}): ")
+                    vendor_num = int(vendor_choice)
+
+                    if vendor_num == 0:
+                        # Clear the buy order
+                        player.set_buy_order(item.name, 0, "")
+                        print(f"\n✓ Buy order cleared for {item.name}")
+                    elif 1 <= vendor_num <= len(game_state.vendors):
+                        selected_vendor = game_state.vendors[vendor_num - 1]
+
+                        quantity_str = input(f"Enter quantity to buy (0 to skip): ")
+                        quantity = int(quantity_str)
+
+                        if quantity >= 0:
+                            # Check minimum purchase requirement
+                            if quantity > 0 and selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
+                                print(f"\n✗ {selected_vendor.name} requires a minimum purchase of {selected_vendor.min_purchase} units.")
+                                print(f"   You tried to order {quantity} units. Please order at least {selected_vendor.min_purchase} or choose a different vendor.")
+                                continue
+
+                            # Check product limit BEFORE setting buy order
+                            if quantity > 0:
+                                # Count how many different products will have quantity > 0
+                                products_with_orders = 0
+                                for check_item in game_state.items:
+                                    check_qty, _ = player.get_buy_order(check_item.name)
+                                    # Count this item if it will have quantity > 0
+                                    if check_item.name == item.name:
+                                        if quantity > 0:
+                                            products_with_orders += 1
+                                    else:
+                                        if check_qty > 0:
+                                            products_with_orders += 1
+
+                                max_products = player.get_max_products()
+                                if products_with_orders > max_products:
+                                    print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
+                                    print(f"   Please increase store level or reduce other buy orders.")
+                                    continue
+
+                            player.set_buy_order(item.name, quantity, selected_vendor.name)
+                            print(f"\n✓ Buy order set: {quantity} {item.name} from {selected_vendor.name}")
+                        else:
+                            print("\n✗ Quantity must be non-negative!")
+                    else:
+                        print("\n✗ Invalid vendor selection!")
+                else:
+                    print("\n✗ Invalid item selection!")
+
+            elif choice == 'p':
+                # Set sale price
+                print("\nSelect item to set sale price:")
+                for i, item in enumerate(game_state.items, 1):
+                    print(f"  {i}. {item.name}")
+                print("  0. Cancel")
+
+                item_choice = input(f"\nSelect item (0-{len(game_state.items)}): ")
+                item_num = int(item_choice)
+
+                if item_num == 0:
+                    continue
+
+                if 1 <= item_num <= len(game_state.items):
+                    item = game_state.items[item_num - 1]
+                    market_price = game_state.market_prices.get(item.name, 0)
+                    current_price = player.prices.get(item.name, 0)
+
+                    # Get vendor buy price for reference
+                    order_qty, vendor_name = player.get_buy_order(item.name)
+                    vendor_buy_price = 0.0
+                    if vendor_name:
+                        own_price = player.get_production_line_price(item.name, market_price)
+                        if own_price is not None:
+                            vendor_buy_price = own_price
+                        else:
+                            for vendor in game_state.vendors:
+                                if vendor.name == vendor_name:
+                                    price = vendor.get_price(item.name)
+                                    if price:
+                                        discount = player.get_vendor_discount(vendor_name, game_state.day)
+                                        vendor_buy_price = price * (1 - discount)
+                                    break
+
+                    print(f"\n=== Setting Sale Price for {item.name} ===")
+                    print(f"Market price: ${market_price:.2f}")
+                    if vendor_buy_price > 0:
+                        print(f"Your buy price: ${vendor_buy_price:.2f}")
+                    print(f"Current sale price: ${current_price:.2f}")
+
+                    price_str = input(f"Enter new sale price: $")
+                    price = float(price_str)
+
+                    if price >= 0:
+                        player.set_price(item.name, price)
+                        print(f"\n✓ Sale price set to ${price:.2f}")
+                        if vendor_buy_price > 0:
+                            margin = price - vendor_buy_price
+                            margin_pct = (margin / vendor_buy_price) * 100 if vendor_buy_price > 0 else 0
+                            print(f"  Margin: ${margin:.2f} ({margin_pct:.1f}%)")
+                    else:
+                        print("\n✗ Price must be positive!")
+                else:
+                    print("\n✗ Invalid item selection!")
+
+            elif choice == 'c':
+                # Change all prices
+                print("\n" + "=" * 50)
+                print("CHANGE ALL SALE PRICES")
+                print("=" * 50)
+                print("Press Enter to skip an item without changing its price.\n")
+
+                for item in game_state.items:
+                    market_price = game_state.market_prices.get(item.name, 0)
+                    current_price = player.prices.get(item.name, 0)
+
+                    # Get vendor buy price for reference
+                    order_qty, vendor_name = player.get_buy_order(item.name)
+                    vendor_buy_price = 0.0
+                    if vendor_name:
+                        own_price = player.get_production_line_price(item.name, market_price)
+                        if own_price is not None:
+                            vendor_buy_price = own_price
+                        else:
+                            for vendor in game_state.vendors:
+                                if vendor.name == vendor_name:
+                                    price = vendor.get_price(item.name)
+                                    if price:
+                                        discount = player.get_vendor_discount(vendor_name, game_state.day)
+                                        vendor_buy_price = price * (1 - discount)
+                                    break
+
+                    print(f"\n{item.name}")
+                    print(f"  Market: ${market_price:.2f}")
+                    if vendor_buy_price > 0:
+                        print(f"  Your buy price: ${vendor_buy_price:.2f}")
+                    print(f"  Current sale price: ${current_price:.2f}")
+
+                    price_str = input(f"  New sale price (or Enter to skip): $").strip()
+
+                    if price_str:
+                        try:
+                            price = float(price_str)
+                            if price >= 0:
+                                player.set_price(item.name, price)
+                                if vendor_buy_price > 0:
+                                    margin = price - vendor_buy_price
+                                    margin_pct = (margin / vendor_buy_price) * 100 if vendor_buy_price > 0 else 0
+                                    print(f"  ✓ Price set to ${price:.2f} (margin: ${margin:.2f}, {margin_pct:.1f}%)")
+                                else:
+                                    print(f"  ✓ Price set to ${price:.2f}")
+                            else:
+                                print("  ✗ Price must be positive! Skipping...")
+                        except ValueError:
+                            print("  ✗ Invalid price! Skipping...")
+
+                print("\n✓ Finished updating prices!")
+                input("\nPress Enter to continue...")
+            else:
+                print("\n✗ Invalid option!")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+
+
 def buy_order_menu(game_state: GameState, player: Player) -> None:
     """Menu for setting buy orders (quantity and vendor selection per item)."""
     while True:
@@ -3737,18 +4002,17 @@ def main_menu(game_state: GameState) -> bool:
         print("  1. Pass Day (Simulate)")
         print("  2. View Market Prices")
         print("  3. View Vendors")
-        print("  4. Configure Buy Orders")
-        print("  5. Set Your Prices")
-        print("  6. Hire Employees")
-        print("  7. View Your Store Status")
-        print("  8. View Competitor Status")
-        print("  9. Store Upgrades")
+        print("  4. Configure Buy Orders & Sale Prices")
+        print("  5. Hire Employees")
+        print("  6. View Your Store Status")
+        print("  7. View Competitor Status")
+        print("  8. Store Upgrades")
         print("  c. Customer Forecast")
         print("  s. Save Game")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-9, c, s): ").strip().lower()
+            choice = input("\nSelect option (0-8, c, s): ").strip().lower()
 
             # Handle customer forecast
             if choice == 'c':
@@ -3801,15 +4065,13 @@ def main_menu(game_state: GameState) -> bool:
                 display_vendor_table(game_state)
                 input("\nPress Enter to continue...")
             elif choice_num == 4:
-                buy_order_menu(game_state, player)
+                configure_orders_and_prices_menu(game_state, player)
             elif choice_num == 5:
-                pricing_menu(game_state, player)
-            elif choice_num == 6:
                 employee_menu(game_state, player)
-            elif choice_num == 7:
+            elif choice_num == 6:
                 display_player_status(player)
                 input("\nPress Enter to continue...")
-            elif choice_num == 8:
+            elif choice_num == 7:
                 print("\n" + "=" * 50)
                 print("COMPETITOR STATUS")
                 print("=" * 50)
@@ -3822,7 +4084,7 @@ def main_menu(game_state: GameState) -> bool:
                         print(f"  Prices: {dict(p.prices)}")
                 print("=" * 50)
                 input("\nPress Enter to continue...")
-            elif choice_num == 9:
+            elif choice_num == 8:
                 upgrades_menu(game_state, player)
             else:
                 print("\n✗ Invalid option!")
