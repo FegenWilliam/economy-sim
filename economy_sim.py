@@ -441,6 +441,7 @@ class Player:
     daily_sales_data: Dict[str, Dict[str, any]] = field(default_factory=dict)  # item_name -> {units_sold, revenue, sold_out}
     last_wage_payment_day: int = 0  # Track when wages were last paid (for 30-day wage cycle)
     vendor_partnership_expiration: Dict[str, int] = field(default_factory=dict)  # upgrade_name -> expiration_day (for temporary vendor partnerships)
+    price_history: Dict[str, float] = field(default_factory=dict)  # item_name -> previous_price (for consistency tracking)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -611,9 +612,15 @@ class Player:
     def set_price(self, item_name: str, price: float) -> None:
         """
         Set the selling price for an item in the player's store.
+        Tracks previous price for consistency bonus calculation.
         """
         if price <= 0:
             raise ValueError(f"Price must be positive: {price}")
+
+        # Save previous price for consistency tracking
+        if item_name in self.prices:
+            self.price_history[item_name] = self.prices[item_name]
+
         self.prices[item_name] = price
 
     def produce_item(self, item: Item, quantity: int) -> None:
@@ -1054,6 +1061,9 @@ class Customer:
         - reputation_multiplier = 10 ** (reputation / 100)
         - For each item in needs, calculate discount % weighted by importance (only for stocked items)
         - discount_score = sum((market_price - player_price) / market_price * 100 * importance)
+        - item_stability = sum of (proximity_score + consistency_bonus) * importance for all stocked items
+          * proximity_score: 10 if within 5% of market, -1 per 1% beyond 5%
+          * consistency_bonus: +6 if price change <= 5% from previous
         - availability_multiplier based on % of catalog items in stock (global, not customer-specific):
           * >= 100%: ×1.2
           * >= 80%: ×1.1
@@ -1065,7 +1075,7 @@ class Customer:
           * 50-90%: ×1.0
           * 90-99%: ×1.4
           * 100%: ×2.0
-        - final_score = discount_score * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+        - final_score = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
 
         Returns the player with the highest score who has capacity to serve customers.
         Only considers players with stock and acceptable prices.
@@ -1150,8 +1160,11 @@ class Customer:
             reputation = player.reputation
             reputation_multiplier = 10 ** (reputation / 100)
 
+            # Calculate item stability score
+            item_stability = calculate_item_stability(player, market_prices, items_by_name)
+
             # Calculate final score
-            final_score = discount_score * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+            final_score = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
 
             player_scores.append((player, final_score))
 
@@ -3310,9 +3323,73 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 # Interactive menu system
 # -------------------------------------------------------------------
 
+def calculate_item_stability(player: Player, market_prices: Dict[str, float], items_by_name: Dict[str, Item]) -> float:
+    """
+    Calculate item stability score to reward pricing close to market price and consistent pricing.
+
+    Formula:
+    For each item with stock:
+    1. Price proximity score:
+       - Starts at 10 if within 5% of market price
+       - Decreases by 1 for each 1% beyond 5% difference
+       - Minimum of 0
+    2. Consistency bonus:
+       - +6 if price hasn't changed more than ±5% from previous price
+    3. Multiply by item importance (1, 2, or 3)
+    4. Sum all items
+
+    Returns: Total item stability score
+    """
+    total_stability = 0.0
+
+    for item_name, qty in player.inventory.items():
+        # Only consider items with stock and set prices
+        if qty <= 0 or item_name not in player.prices:
+            continue
+
+        player_price = player.prices[item_name]
+        market_price = market_prices.get(item_name, 0)
+
+        # Skip if no market price
+        if market_price <= 0:
+            continue
+
+        # Get item importance
+        item = items_by_name.get(item_name)
+        importance = item.importance if item else 2
+
+        # Calculate price difference percentage
+        price_diff_pct = abs((player_price - market_price) / market_price) * 100
+
+        # Calculate proximity score
+        if price_diff_pct <= 5:
+            proximity_score = 10.0
+        else:
+            # Decrease by 1 for each 1% beyond 5%
+            proximity_score = max(0, 10 - (price_diff_pct - 5))
+
+        # Calculate consistency bonus
+        consistency_bonus = 0.0
+        if item_name in player.price_history:
+            prev_price = player.price_history[item_name]
+            if prev_price > 0:
+                price_change_pct = abs((player_price - prev_price) / prev_price) * 100
+                if price_change_pct <= 5:
+                    consistency_bonus = 6.0
+
+        # Combine and weight by importance
+        item_stability = (proximity_score + consistency_bonus) * importance
+        total_stability += item_stability
+
+    return total_stability
+
+
 def display_cas_breakdown(player: Player, game_state: GameState) -> None:
     """Display Customer Attraction Score (CAS) breakdown for a player."""
     print(f"\n🎯 {player.name} - Customer Attraction Score (CAS):")
+
+    # Build items_by_name dict for item_stability calculation
+    items_by_name = {item.name: item for item in game_state.items}
 
     # Calculate reputation multiplier
     reputation_multiplier = 10 ** (player.reputation / 100)
@@ -3340,6 +3417,9 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
                     total_discount_pct += discount_pct
                     discount_score += discount_pct * importance
                     items_counted += 1
+
+    # Calculate item stability score
+    item_stability = calculate_item_stability(player, game_state.market_prices, items_by_name)
 
     # Calculate global availability multiplier
     total_catalog_items = len(game_state.items)
@@ -3371,11 +3451,12 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
         fulfillment_multiplier = 0.5
 
     # Calculate final CAS
-    final_cas = discount_score * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+    final_cas = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
 
     # Display compact breakdown
     print(f"   Reputation:              {player.reputation:.0f}")
     print(f"   Discount Score:          {total_discount_pct:.1f}% total across {items_counted} items (importance: {discount_score:.2f})")
+    print(f"   Item Stability:          {item_stability:.2f}")
     print(f"   Availability Multiplier: {availability_multiplier:6.2f}x  ({items_in_stock}/{total_catalog_items} = {availability_pct:.0f}%)")
     print(f"   Fulfillment Multiplier:  {fulfillment_multiplier:6.2f}x  ({fulfillment_pct:.0f}% avg)")
     print(f"   ─────────────────────────────────────────")
