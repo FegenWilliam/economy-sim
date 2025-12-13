@@ -2873,9 +2873,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # If no customers visited today, keep previous average
 
         # Show reputation changes for all players
-        if show_details and (rep_change != 0 or decay_amount > 0):
+        if show_details:
             decay_text = f" (decay: -{decay_amount})" if decay_amount > 0 else ""
-            print(f"\n📊 {player.name} Reputation: {player.reputation:.0f} (change: {rep_change:+d}{decay_text})")
+            change_text = f" (change: {rep_change:+d}{decay_text})" if (rep_change != 0 or decay_amount > 0) else ""
+            print(f"\n📊 {player.name} Reputation: {player.reputation:.0f}{change_text}")
             if daily_fulfillment_data[player.name]:
                 print(f"   Average Fulfillment: {player.average_fulfillment_pct:.1f}% (from {len(daily_fulfillment_data[player.name])} customers)")
 
