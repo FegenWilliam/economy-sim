@@ -1750,7 +1750,15 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
     - Actual customer demand (yesterday's purchase patterns)
     Always choosing the cheapest available vendor.
     Only buys items available at or below market price to avoid overpaying.
+
+    Strategy adjustments for final_score optimization:
+    - Bob: Maintains 20% higher inventory to maximize availability_multiplier
+    - Alice: Standard inventory levels (relies on low prices for discount_score)
     """
+    # Determine AI strategy
+    is_bob = "Bob" in player.name
+    inventory_multiplier = 1.2 if is_bob else 1.0  # Bob stocks 20% more for availability
+
     for item in items:
         current_inventory = player.inventory.get(item.name, 0)
 
@@ -1773,8 +1781,11 @@ def auto_setup_buy_orders(player: Player, items: List[Item], vendors: List[Vendo
                 # Use the higher of: trend-based target OR yesterday's demand * 1.5 (buffer)
                 demand_based_target = yesterday_demand * 1.5
                 target_inventory = max(target_inventory, demand_based_target)
+
+            # Apply strategy-specific inventory multiplier
+            target_inventory *= inventory_multiplier
         else:
-            target_inventory = 20  # Fallback if no game state
+            target_inventory = 20 * inventory_multiplier  # Fallback if no game state
 
         target_inventory = int(target_inventory)  # Ensure integer
         quantity_to_buy = max(0, target_inventory - current_inventory)
@@ -1806,7 +1817,20 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
 
     Strategy:
     - Alice Corp: Volume strategy - aims to be the cheapest and sell maximum units
+      * Optimizes for high discount_score by undercutting heavily
+      * Extra aggressive on high-importance items (importance weights discount_score)
+      * Maintains inventory to keep availability_multiplier high
     - Bob Ltd: Profit margin strategy - maintains higher prices while staying competitive
+      * Accepts lower discount_score but compensates with reputation & availability
+      * Focuses on maintaining high stock levels (availability_multiplier)
+      * Ensures order fulfillment (fulfillment_multiplier) to offset higher prices
+
+    Customer attractiveness scoring (final_score mechanism):
+    - final_score = discount_score * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+    - discount_score = sum((market_price - player_price) / market_price * 100 * importance)
+    - reputation_multiplier = 10 ** (reputation / 100)
+    - availability_multiplier based on % of catalog in stock (0.5-1.2×)
+    - fulfillment_multiplier based on % needs fulfilled historically (0.5-2.0×)
 
     Common rules:
     - Never sell at a loss (price must be > cost)
@@ -1818,11 +1842,14 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
     # Determine AI strategy based on player name
     is_alice = "Alice" in player.name  # Volume strategy - be the cheapest
     is_bob = "Bob" in player.name  # Profit margin strategy - maximize profit per item
-    # Build a lookup for item base costs
+
+    # Build a lookup for item base costs and importance
     item_costs_lookup = {}
+    item_importance_lookup = {}
     if items:
         for item in items:
             item_costs_lookup[item.name] = item.base_cost
+            item_importance_lookup[item.name] = item.importance
 
     # Build competitor price lookup (prices set by other players)
     competitor_prices = {}  # item_name -> list of competitor prices
@@ -1867,27 +1894,36 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
         min_vendor_price = min(vend_prices) if vend_prices else None
         avg_vendor_price = sum(vend_prices) / len(vend_prices) if vend_prices else None
 
+        # Get item importance for strategic pricing
+        importance = item_importance_lookup.get(item_name, 2)  # Default to 2 if not found
+
         # Determine pricing strategy based on sales performance and competition
         if is_alice:
             # ALICE: Volume strategy - always aim to be the cheapest
+            # Strategy: Maximize discount_score by undercutting heavily, especially on high-importance items
+            # High-importance items contribute more to discount_score, so undercut even more aggressively
+            importance_aggression = 1.0 - (importance - 1) * 0.02  # More aggressive for higher importance
+
             if not sales_data:
                 # No sales history - undercut market aggressively
                 if min_competitor_price:
-                    price = min_competitor_price * random.uniform(0.90, 0.95)
+                    price = min_competitor_price * random.uniform(0.90, 0.95) * importance_aggression
                 else:
-                    price = market_price * random.uniform(0.93, 0.97)
+                    price = market_price * random.uniform(0.93, 0.97) * importance_aggression
             elif sold_out:
                 # Even if sold out, Alice only raises price slightly (volume over margin)
+                # Still try to maintain availability for high availability_multiplier
                 if min_competitor_price:
                     price = min_competitor_price * random.uniform(0.95, 0.98)
                 else:
                     price = current_price * random.uniform(1.01, 1.03)
             elif units_sold == 0:
                 # Aggressively cut prices to move inventory
+                # Extra aggressive on high-importance items to boost discount_score
                 if min_competitor_price:
-                    price = min_competitor_price * random.uniform(0.88, 0.93)
+                    price = min_competitor_price * random.uniform(0.88, 0.93) * importance_aggression
                 else:
-                    price = current_price * random.uniform(0.85, 0.90)
+                    price = current_price * random.uniform(0.85, 0.90) * importance_aggression
             elif unmet_demand > 5:
                 # Even with high demand, only moderate increase (want volume)
                 if min_competitor_price:
@@ -1895,34 +1931,47 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
                 else:
                     price = current_price * random.uniform(1.00, 1.03)
             else:
-                # Normal sales - stay cheapest
+                # Normal sales - stay cheapest, extra aggressive on high-importance
                 if min_competitor_price:
-                    price = min_competitor_price * random.uniform(0.92, 0.97)
+                    price = min_competitor_price * random.uniform(0.92, 0.97) * importance_aggression
                 else:
-                    price = market_price * random.uniform(0.95, 0.98)
+                    price = market_price * random.uniform(0.95, 0.98) * importance_aggression
 
         elif is_bob:
             # BOB: Profit margin strategy - maximize profit per item while staying competitive
+            # Strategy: Accept lower discount_score but compensate with:
+            #   - High availability_multiplier (keep diverse stock)
+            #   - High fulfillment_multiplier (fulfill orders reliably)
+            #   - Build reputation over time (reputation_multiplier)
+            # Bob can afford higher prices if he maintains these other multipliers
+
+            # Bob is less sensitive to importance because he relies on other multipliers
+            # But still be somewhat competitive on high-importance items to not lose too much discount_score
+            importance_moderation = 1.0 - (importance - 1) * 0.01  # Slightly more competitive on high-importance
+
             if not sales_data:
                 # No sales history - price at higher end but competitive
                 if avg_competitor_price:
-                    price = avg_competitor_price * random.uniform(0.98, 1.05)
+                    price = avg_competitor_price * random.uniform(0.98, 1.05) * (2.0 - importance_moderation)
                 else:
-                    price = market_price * random.uniform(1.00, 1.08)
+                    price = market_price * random.uniform(1.00, 1.08) * (2.0 - importance_moderation)
             elif sold_out:
                 # Sold out - raise prices more aggressively for profit
+                # But ensure we restock to maintain availability_multiplier
                 if max_competitor_price:
                     price = max_competitor_price * random.uniform(1.00, 1.08)
                 else:
                     price = current_price * random.uniform(1.08, 1.15)
             elif units_sold == 0:
                 # Didn't sell - reduce price but maintain margin
+                # Still try to keep stock for availability_multiplier
                 if avg_competitor_price:
                     price = avg_competitor_price * random.uniform(0.95, 1.00)
                 else:
                     price = current_price * random.uniform(0.93, 0.97)
             elif unmet_demand > 5:
                 # High demand - raise prices significantly to maximize profit
+                # This is where Bob shines - higher margins when demand is there
                 if avg_competitor_price:
                     price = max(current_price * random.uniform(1.05, 1.12),
                                avg_competitor_price * random.uniform(1.00, 1.05))
@@ -1930,8 +1979,9 @@ def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items
                     price = current_price * random.uniform(1.05, 1.12)
             else:
                 # Normal sales - maintain healthy margins
+                # Rely on availability & fulfillment multipliers to win customers despite higher prices
                 if avg_competitor_price:
-                    price = avg_competitor_price * random.uniform(0.98, 1.04)
+                    price = avg_competitor_price * random.uniform(0.98, 1.04) * (2.0 - importance_moderation)
                 else:
                     price = current_price * random.uniform(1.00, 1.05)
         else:
