@@ -2300,13 +2300,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     if show_details:
         print(f"\n=== Day {game_state.day} ===")
 
-    # Step 0: Unlock new product every 5 days
-    if game_state.day % 5 == 0 and game_state.day > 0:
-        new_product = unlock_new_product(game_state)
-        if new_product and show_details:
-            print(f"\n🎁 NEW PRODUCT UNLOCKED: {new_product.name} (${new_product.base_price:.2f})")
-            print(f"   Total products available: {len(game_state.items)}")
-
     # Step 1: Reset any event price changes from previous day
     if game_state.event_price_changes:
         for item_name, original_price in game_state.event_price_changes.items():
@@ -2811,6 +2804,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             else:
                 emoji = "➡️"
             print(f"   {emoji} {item_name}: {demand:.2f}x demand")
+
+    # Unlock new product every 5 days (at end of day, so players can buy it next day)
+    if game_state.day % 5 == 0 and game_state.day > 0:
+        new_product = unlock_new_product(game_state)
+        if new_product and show_details:
+            print(f"\n🎁 NEW PRODUCT UNLOCKED: {new_product.name} (${new_product.base_price:.2f})")
+            print(f"   Total products available: {len(game_state.items)}")
 
     # Step 7.5: Store per-item sales data for AI pricing strategy
     for player in game_state.players:
