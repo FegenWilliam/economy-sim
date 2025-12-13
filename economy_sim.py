@@ -1063,7 +1063,7 @@ class Customer:
         - discount_score = sum((market_price - player_price) / market_price * 100 * importance)
         - item_stability = sum of (proximity_score + consistency_bonus) * importance for all stocked items
           * proximity_score: 10 if within 5% of market, -1 per 1% beyond 5%
-          * consistency_bonus: +6 if price change <= 5% from previous
+          * consistency_bonus: +2 if price change <= 5% from previous
         - availability_multiplier based on % of catalog items in stock (global, not customer-specific):
           * >= 100%: ×1.2
           * >= 80%: ×1.1
@@ -3334,7 +3334,7 @@ def calculate_item_stability(player: Player, market_prices: Dict[str, float], it
        - Decreases by 1 for each 1% beyond 5% difference
        - Minimum of 0
     2. Consistency bonus:
-       - +6 if price hasn't changed more than ±5% from previous price
+       - +2 if price hasn't changed more than ±5% from previous price
     3. Multiply by item importance (1, 2, or 3)
     4. Sum all items
 
@@ -3375,7 +3375,7 @@ def calculate_item_stability(player: Player, market_prices: Dict[str, float], it
             if prev_price > 0:
                 price_change_pct = abs((player_price - prev_price) / prev_price) * 100
                 if price_change_pct <= 5:
-                    consistency_bonus = 6.0
+                    consistency_bonus = 2.0
 
         # Combine and weight by importance
         item_stability = (proximity_score + consistency_bonus) * importance
