@@ -403,6 +403,7 @@ class Vendor:
     min_purchase: Optional[int] = None  # Minimum quantity per purchase (None = no minimum)
     price_min: Optional[float] = None  # Minimum price threshold (None = no minimum)
     price_max: Optional[float] = None  # Maximum price threshold (None = no maximum)
+    lead_time: int = 0  # Number of days for delivery (0 = instant delivery)
 
     def get_price(self, item_name: str) -> Optional[float]:
         """Get the wholesale price for an item from this vendor."""
@@ -442,6 +443,7 @@ class Player:
     last_wage_payment_day: int = 0  # Track when wages were last paid (for 30-day wage cycle)
     vendor_partnership_expiration: Dict[str, int] = field(default_factory=dict)  # upgrade_name -> expiration_day (for temporary vendor partnerships)
     price_history: Dict[str, float] = field(default_factory=dict)  # item_name -> previous_price (for consistency tracking)
+    pending_deliveries: List[tuple] = field(default_factory=list)  # List of (item_name, quantity, cost_per_item, delivery_day) for orders with lead time
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -732,17 +734,23 @@ class Player:
 
         self.cash -= total_cost
 
-        # Update weighted average cost
-        current_inventory = self.inventory.get(item_name, 0)
-        current_cost = self.item_costs.get(item_name, 0)
+        # Check if vendor has lead time
+        if vendor.lead_time > 0 and game_state is not None:
+            # Add to pending deliveries instead of inventory
+            delivery_day = game_state.day + vendor.lead_time
+            self.pending_deliveries.append((item_name, quantity, final_price, delivery_day))
+        else:
+            # Immediate delivery - update inventory and weighted average cost
+            current_inventory = self.inventory.get(item_name, 0)
+            current_cost = self.item_costs.get(item_name, 0)
 
-        # Weighted average: (old_qty * old_cost + new_qty * new_cost) / total_qty
-        new_total_qty = current_inventory + quantity
-        if new_total_qty > 0:
-            weighted_cost = ((current_inventory * current_cost) + (quantity * final_price)) / new_total_qty
-            self.item_costs[item_name] = weighted_cost
+            # Weighted average: (old_qty * old_cost + new_qty * new_cost) / total_qty
+            new_total_qty = current_inventory + quantity
+            if new_total_qty > 0:
+                weighted_cost = ((current_inventory * current_cost) + (quantity * final_price)) / new_total_qty
+                self.item_costs[item_name] = weighted_cost
 
-        self.inventory[item_name] = new_total_qty
+            self.inventory[item_name] = new_total_qty
 
         # Track purchase for max-per-player limits
         if vendor.max_per_item_per_player is not None and game_state is not None:
@@ -1497,82 +1505,99 @@ def create_customers(num_customers: int) -> List[Customer]:
 
 def create_vendors() -> List[Vendor]:
     """
-    Create 8 vendors with different pricing and selection strategies.
+    Create 9 vendors with different pricing and selection strategies.
 
     Vendor inventory is refreshed daily based on their selection type.
     """
     vendors = []
 
-    # Vendor 1: 50% of market price, 1 random item per day, max 100 per item per player
+    # Vendor 1: 70% of market price, 1 random item per day, max 100 per item per player, 4 day lead time
     vendors.append(Vendor(
         name="Lucky Deal Trader",
-        pricing_multiplier=0.50,
+        pricing_multiplier=0.70,
         selection_type="random_daily",
         selection_params=1,  # 1 item
-        max_per_item_per_player=100
+        max_per_item_per_player=100,
+        lead_time=4
     ))
 
-    # Vendor 2: 80% of market price, 5 random items per day, max 100 per item per player
+    # Vendor 2: 80% of market price, 5 random items per day, max 100 per item per player, 3 day lead time
     vendors.append(Vendor(
         name="Discount Wholesale Co.",
         pricing_multiplier=0.80,
         selection_type="random_daily",
         selection_params=5,  # 5 items
-        max_per_item_per_player=100
+        max_per_item_per_player=100,
+        lead_time=3
     ))
 
-    # Vendor 3: 90% of market price, all items under $20 market price
+    # Vendor 3: 90% of market price, all items under $20 market price, 1 day lead time
     vendors.append(Vendor(
         name="Budget Goods Ltd.",
         pricing_multiplier=0.90,
         selection_type="price_threshold",
-        selection_params=20.0  # $20 threshold
+        selection_params=20.0,  # $20 threshold
+        lead_time=1
     ))
 
-    # Vendor 4: 95% of market price, all items under $50 market price
+    # Vendor 4: 95% of market price, all items under $50 market price, 1 day lead time
     vendors.append(Vendor(
         name="Premium Select Inc.",
         pricing_multiplier=0.95,
         selection_type="price_threshold",
-        selection_params=50.0  # $50 threshold
+        selection_params=50.0,  # $50 threshold
+        lead_time=1
     ))
 
-    # Vendor 5: 102% of market price, all items available
+    # Vendor 5: 98% of market price, all items under $40, instant delivery (no lead time)
+    vendors.append(Vendor(
+        name="Instant Goods Ltd.",
+        pricing_multiplier=0.98,
+        selection_type="price_threshold",
+        selection_params=40.0,  # $40 threshold
+        lead_time=0
+    ))
+
+    # Vendor 6: 105% of market price, all items available, instant delivery (no lead time)
     vendors.append(Vendor(
         name="Universal Supply Corp.",
-        pricing_multiplier=1.02,
+        pricing_multiplier=1.05,
         selection_type="all",
-        selection_params=0  # No limit
+        selection_params=0,  # No limit
+        lead_time=0
     ))
 
-    # Vendor 6: 85% of market price, min 100 per purchase, items $30 or less
+    # Vendor 7: 85% of market price, min 100 per purchase, items $30 or less, 1 day lead time
     vendors.append(Vendor(
         name="Bulk Goods Co.",
         pricing_multiplier=0.85,
         selection_type="price_range",
         selection_params=0,
         min_purchase=100,
-        price_max=30.0
+        price_max=30.0,
+        lead_time=1
     ))
 
-    # Vendor 7: 80% of market price, min 500 per purchase, items $10 or less
+    # Vendor 8: 80% of market price, min 500 per purchase, items $10 or less, 3 day lead time
     vendors.append(Vendor(
         name="Cheap Goods Co.",
         pricing_multiplier=0.80,
         selection_type="price_range",
         selection_params=0,
         min_purchase=500,
-        price_max=10.0
+        price_max=10.0,
+        lead_time=3
     ))
 
-    # Vendor 8: 95% of market price, min 10 per purchase, items $200 or more
+    # Vendor 9: 95% of market price, min 10 per purchase, items $200 or more, 1 day lead time
     vendors.append(Vendor(
         name="VIP Goods Co.",
         pricing_multiplier=0.95,
         selection_type="price_range",
         selection_params=0,
         min_purchase=10,
-        price_min=200.0
+        price_min=200.0,
+        lead_time=1
     ))
 
     return vendors
@@ -3295,6 +3320,42 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 9: Advance day counter
     game_state.day += 1
 
+    # Step 9.25: Process pending deliveries for all players
+    for player in game_state.players:
+        deliveries_to_process = []
+        remaining_deliveries = []
+
+        for delivery in player.pending_deliveries:
+            item_name, quantity, cost_per_item, delivery_day = delivery
+            if delivery_day <= game_state.day:
+                # Delivery has arrived
+                deliveries_to_process.append(delivery)
+            else:
+                # Still in transit
+                remaining_deliveries.append(delivery)
+
+        # Process deliveries that have arrived
+        for delivery in deliveries_to_process:
+            item_name, quantity, cost_per_item, delivery_day = delivery
+
+            # Update weighted average cost
+            current_inventory = player.inventory.get(item_name, 0)
+            current_cost = player.item_costs.get(item_name, 0)
+
+            # Weighted average: (old_qty * old_cost + new_qty * new_cost) / total_qty
+            new_total_qty = current_inventory + quantity
+            if new_total_qty > 0:
+                weighted_cost = ((current_inventory * current_cost) + (quantity * cost_per_item)) / new_total_qty
+                player.item_costs[item_name] = weighted_cost
+
+            player.inventory[item_name] = new_total_qty
+
+            if player.is_human and show_details:
+                print(f"\n📦 Delivery arrived: {quantity}x {item_name}")
+
+        # Update pending deliveries list
+        player.pending_deliveries = remaining_deliveries
+
     # Step 9.5: Clean up expired vendor partnerships
     for player in game_state.players:
         expired_upgrades = []
@@ -3495,6 +3556,12 @@ def display_vendor_table(game_state: GameState) -> None:
 
         print(f"   Pricing: {vendor.pricing_multiplier*100:.0f}% of market price")
 
+        # Display lead time
+        if vendor.lead_time > 0:
+            print(f"   Lead Time: {vendor.lead_time} day(s)")
+        else:
+            print(f"   Lead Time: Instant delivery")
+
         # Display minimum purchase requirement if it exists
         if vendor.min_purchase is not None:
             print(f"   MINIMUM BUY: {vendor.min_purchase} units per purchase")
@@ -3538,6 +3605,21 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
                 print(f"  {item_name}: {quantity} units")
     else:
         print("  (empty)")
+
+    # Display pending deliveries if any
+    if player.pending_deliveries:
+        print(f"\n📦 Pending Deliveries:")
+        # Group deliveries by item for cleaner display
+        delivery_summary = {}
+        for item_name, quantity, cost, delivery_day in player.pending_deliveries:
+            if item_name not in delivery_summary:
+                delivery_summary[item_name] = []
+            delivery_summary[item_name].append((quantity, delivery_day))
+
+        for item_name, deliveries in sorted(delivery_summary.items()):
+            for quantity, delivery_day in sorted(deliveries, key=lambda x: x[1]):
+                days_remaining = delivery_day - (game_state.day if game_state else 0)
+                print(f"  {item_name}: {quantity} units (arrives in {days_remaining} day(s))")
 
     print(f"\nYour Prices:")
     if player.prices:
