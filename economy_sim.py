@@ -3880,6 +3880,8 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "is_human": player.is_human,
                 "last_wage_payment_day": player.last_wage_payment_day,
                 "vendor_partnership_expiration": player.vendor_partnership_expiration,
+                "reputation": player.reputation,
+                "average_fulfillment_pct": player.average_fulfillment_pct,
             }
             for player in game_state.players
         ],
@@ -3966,6 +3968,8 @@ def deserialize_game_state(data: dict) -> GameState:
             is_human=player_data["is_human"],
             last_wage_payment_day=player_data.get("last_wage_payment_day", 0),
             vendor_partnership_expiration=player_data.get("vendor_partnership_expiration", {}),
+            reputation=player_data.get("reputation", 0.0),
+            average_fulfillment_pct=player_data.get("average_fulfillment_pct", 70.0),
         )
         players.append(player)
 
