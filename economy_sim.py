@@ -2893,6 +2893,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             if daily_fulfillment_data[player.name]:
                 print(f"   Average Fulfillment: {player.average_fulfillment_pct:.1f}% (from {len(daily_fulfillment_data[player.name])} customers)")
 
+            # Display CAS breakdown for this player
+            display_cas_breakdown(player, game_state)
+
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
     refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
@@ -2927,6 +2930,77 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 # -------------------------------------------------------------------
 # Interactive menu system
 # -------------------------------------------------------------------
+
+def display_cas_breakdown(player: Player, game_state: GameState) -> None:
+    """Display Customer Attraction Score (CAS) breakdown for a player."""
+    print(f"\n🎯 {player.name} - Customer Attraction Score (CAS):")
+
+    # Calculate reputation multiplier
+    reputation_multiplier = 10 ** (player.reputation / 100)
+
+    # Calculate discount score (sum across all stocked items)
+    discount_score = 0.0
+    items_counted = 0
+    if player.inventory and player.prices:
+        for item_name, qty in player.inventory.items():
+            if qty > 0 and item_name in player.prices:
+                market_price = game_state.market_prices.get(item_name, 0)
+                if market_price > 0:
+                    player_price = player.prices[item_name]
+                    # Get item importance
+                    item = next((i for i in game_state.items if i.name == item_name), None)
+                    importance = item.importance if item else 2
+
+                    # Calculate discount percentage
+                    if player_price < market_price:
+                        discount_pct = ((market_price - player_price) / market_price) * 100
+                    else:
+                        discount_pct = 0
+
+                    discount_score += discount_pct * importance
+                    items_counted += 1
+
+    # Calculate global availability multiplier
+    total_catalog_items = len(game_state.items)
+    items_in_stock = sum(1 for qty in player.inventory.values() if qty > 0)
+    availability_pct = (items_in_stock / total_catalog_items) * 100 if total_catalog_items > 0 else 0
+
+    if availability_pct >= 100:
+        availability_multiplier = 1.2
+    elif availability_pct >= 80:
+        availability_multiplier = 1.1
+    elif availability_pct < 20:
+        availability_multiplier = 0.5
+    elif availability_pct < 50:
+        availability_multiplier = 0.8
+    else:
+        availability_multiplier = 1.0
+
+    # Calculate fulfillment multiplier
+    fulfillment_pct = player.average_fulfillment_pct
+    if fulfillment_pct >= 100:
+        fulfillment_multiplier = 2.0
+    elif fulfillment_pct >= 90:
+        fulfillment_multiplier = 1.4
+    elif fulfillment_pct >= 50:
+        fulfillment_multiplier = 1.0
+    elif fulfillment_pct >= 20:
+        fulfillment_multiplier = 0.9
+    else:
+        fulfillment_multiplier = 0.5
+
+    # Calculate final CAS
+    final_cas = discount_score * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+
+    # Display compact breakdown
+    print(f"   Reputation Multiplier:   {reputation_multiplier:6.3f}x  (10^({player.reputation:.0f}/100))")
+    print(f"   Discount Score:          {discount_score:7.2f}   ({items_counted} items)")
+    print(f"   Availability Multiplier: {availability_multiplier:6.2f}x  ({items_in_stock}/{total_catalog_items} = {availability_pct:.0f}%)")
+    print(f"   Fulfillment Multiplier:  {fulfillment_multiplier:6.2f}x  ({fulfillment_pct:.0f}% avg)")
+    print(f"   ─────────────────────────────────────────")
+    print(f"   📈 FINAL CAS = {final_cas:.2f}")
+    print(f"      ({discount_score:.2f} × {reputation_multiplier:.3f} × {availability_multiplier:.2f} × {fulfillment_multiplier:.2f})")
+
 
 def display_market_table(game_state: GameState) -> None:
     """Display the current market prices for all items."""
@@ -3015,107 +3089,9 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
     print(f"\n📊 Reputation: {player.reputation:.0f}/100")
     print(f"   Average Fulfillment: {player.average_fulfillment_pct:.1f}%")
 
-    # Add Customer Attraction Score (CAS) details if game_state is provided
+    # Add CAS display if game_state is provided
     if game_state:
-        print(f"\n🎯 Customer Attraction Score (CAS) Breakdown:")
-        print(f"   (How customers choose between stores)")
-        print("-" * 60)
-
-        # Calculate reputation multiplier
-        reputation_multiplier = 10 ** (player.reputation / 100)
-
-        # Calculate discount score (average across all stocked items)
-        discount_score = 0.0
-        items_counted = 0
-        if player.inventory and player.prices:
-            for item_name, qty in player.inventory.items():
-                if qty > 0 and item_name in player.prices:
-                    market_price = game_state.market_prices.get(item_name, 0)
-                    if market_price > 0:
-                        player_price = player.prices[item_name]
-                        # Get item importance
-                        item = next((i for i in game_state.items if i.name == item_name), None)
-                        importance = item.importance if item else 2
-
-                        # Calculate discount percentage
-                        if player_price < market_price:
-                            discount_pct = ((market_price - player_price) / market_price) * 100
-                        else:
-                            discount_pct = 0
-
-                        discount_score += discount_pct * importance
-                        items_counted += 1
-
-        # Calculate global availability multiplier
-        total_catalog_items = len(game_state.items)
-        items_in_stock = sum(1 for qty in player.inventory.values() if qty > 0)
-        availability_pct = (items_in_stock / total_catalog_items) * 100 if total_catalog_items > 0 else 0
-
-        if availability_pct >= 100:
-            availability_multiplier = 1.2
-        elif availability_pct >= 80:
-            availability_multiplier = 1.1
-        elif availability_pct < 20:
-            availability_multiplier = 0.5
-        elif availability_pct < 50:
-            availability_multiplier = 0.8
-        else:
-            availability_multiplier = 1.0
-
-        # Calculate fulfillment multiplier
-        fulfillment_pct = player.average_fulfillment_pct
-        if fulfillment_pct >= 100:
-            fulfillment_multiplier = 2.0
-        elif fulfillment_pct >= 90:
-            fulfillment_multiplier = 1.4
-        elif fulfillment_pct >= 50:
-            fulfillment_multiplier = 1.0
-        elif fulfillment_pct >= 20:
-            fulfillment_multiplier = 0.9
-        else:
-            fulfillment_multiplier = 0.5
-
-        # Calculate final CAS
-        final_cas = discount_score * reputation_multiplier * availability_multiplier * fulfillment_multiplier
-
-        # Display breakdown
-        print(f"\n   1. Reputation Multiplier: {reputation_multiplier:.3f}x")
-        print(f"      (10^(reputation/100) = 10^({player.reputation:.0f}/100))")
-
-        print(f"\n   2. Discount Score: {discount_score:.2f}")
-        print(f"      (Sum of weighted discounts for {items_counted} items in stock)")
-        print(f"      Formula: Σ((market-price)/market × 100 × importance)")
-
-        print(f"\n   3. Global Availability Multiplier: {availability_multiplier:.2f}x")
-        print(f"      ({items_in_stock}/{total_catalog_items} catalog items in stock = {availability_pct:.1f}%)")
-        if availability_pct >= 100:
-            print(f"      (≥100%: ×1.2)")
-        elif availability_pct >= 80:
-            print(f"      (≥80%: ×1.1)")
-        elif availability_pct < 20:
-            print(f"      (<20%: ×0.5)")
-        elif availability_pct < 50:
-            print(f"      (<50%: ×0.8)")
-        else:
-            print(f"      (50-79%: ×1.0)")
-
-        print(f"\n   4. Fulfillment Multiplier: {fulfillment_multiplier:.2f}x")
-        print(f"      (Average {fulfillment_pct:.1f}% of customer needs fulfilled)")
-        if fulfillment_pct >= 100:
-            print(f"      (100%: ×2.0)")
-        elif fulfillment_pct >= 90:
-            print(f"      (90-99%: ×1.4)")
-        elif fulfillment_pct >= 50:
-            print(f"      (50-89%: ×1.0)")
-        elif fulfillment_pct >= 20:
-            print(f"      (20-49%: ×0.9)")
-        else:
-            print(f"      (<20%: ×0.5)")
-
-        print("-" * 60)
-        print(f"   📈 FINAL CAS: {final_cas:.2f}")
-        print(f"   Formula: Discount × Reputation × Availability × Fulfillment")
-        print(f"           = {discount_score:.2f} × {reputation_multiplier:.3f} × {availability_multiplier:.2f} × {fulfillment_multiplier:.2f}")
+        display_cas_breakdown(player, game_state)
 
     print("=" * 60)
 
