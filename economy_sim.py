@@ -756,8 +756,9 @@ class CustomerNeed:
 class Customer:
     """Represents a customer with daily needs for items."""
     name: str
-    customer_type: str = "medium"  # "low", "medium", "high", "uncapped"
+    customer_type: str = "medium"  # "low", "medium", "high", "uncapped", or special types
     budget: float = 0.0
+    day: int = 0  # Current game day for budget scaling
 
     def __post_init__(self):
         """Set budget based on customer type if not already set."""
@@ -767,9 +768,27 @@ class Customer:
             elif self.customer_type == "medium":
                 self.budget = 50.0
             elif self.customer_type == "high":
-                self.budget = 100.0
+                # High spender budget increases by $100 every 30 days
+                base_budget = 100.0
+                additional_budget = (self.day // 30) * 100.0
+                self.budget = base_budget + additional_budget
             elif self.customer_type == "uncapped":
                 self.budget = 10000.0  # Effectively unlimited for 1 expensive item
+            # Special customer types
+            elif self.customer_type == "hoarder":
+                self.budget = 500.0
+            elif self.customer_type == "shoplifter":
+                self.budget = 0.0  # Shoplifters steal, don't buy
+            elif self.customer_type == "party_prep_mom":
+                self.budget = 200.0
+            elif self.customer_type == "gamer":
+                self.budget = 600.0
+            elif self.customer_type == "christmas_dad":
+                self.budget = 1400.0  # Enough for Gaming Console + 4K TV
+            elif self.customer_type == "lottery_winner":
+                self.budget = 3000.0
+            elif self.customer_type == "youtuber":
+                self.budget = 10000.0
 
     def generate_daily_needs(self, available_items: List[Item], market_prices: Dict[str, float] = None, item_demand: Dict[str, float] = None) -> List[CustomerNeed]:
         """
@@ -795,6 +814,111 @@ class Customer:
                 selected_item = weighted_random_choice(expensive_items, item_demand)
                 if selected_item:
                     needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+            return needs
+
+        # Special customer types have unique need generation
+        if self.customer_type == "hoarder":
+            # Hoarder: buys 20-30 units of ONE random item type (not affected by demand)
+            if available_items:
+                selected_item = random.choice(available_items)
+                # Calculate how many they can afford
+                item_price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
+                max_affordable = int(self.budget / item_price) if item_price > 0 else 0
+                quantity = min(random.randint(20, 30), max_affordable)
+                if quantity > 0:
+                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=quantity))
+            return needs
+
+        if self.customer_type == "shoplifter":
+            # Shoplifter: doesn't generate needs normally, stealing is handled in selection logic
+            return []
+
+        if self.customer_type == "party_prep_mom":
+            # Party Prep Mom: buys 20-30 items with importance 3
+            importance_3_items = [item for item in available_items if item.importance == 3]
+            if importance_3_items:
+                remaining_budget = self.budget
+                target_items = random.randint(20, 30)
+                total_items = 0
+
+                while total_items < target_items and remaining_budget > 0 and importance_3_items:
+                    affordable_items = [
+                        item for item in importance_3_items
+                        if (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) <= remaining_budget
+                    ]
+                    if not affordable_items:
+                        break
+
+                    selected_item = random.choice(affordable_items)
+                    item_price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
+                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+                    remaining_budget -= item_price
+                    total_items += 1
+            return needs
+
+        if self.customer_type == "gamer":
+            # Gamer: buys 1-3 gaming-related electronics
+            gamer_items = ["Gaming Console", "Laptop", "VR Headset", "4K TV", "Noise-Cancelling Headphones"]
+            available_gamer_items = [item for item in available_items if item.name in gamer_items]
+            if available_gamer_items:
+                remaining_budget = self.budget
+                target_items = random.randint(1, 3)
+                selected_items = []
+
+                for _ in range(target_items):
+                    affordable_items = [
+                        item for item in available_gamer_items
+                        if item not in selected_items  # Don't buy duplicates
+                        and (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) <= remaining_budget
+                    ]
+                    if not affordable_items:
+                        break
+
+                    selected_item = random.choice(affordable_items)
+                    item_price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
+                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+                    remaining_budget -= item_price
+                    selected_items.append(selected_item)
+            return needs
+
+        if self.customer_type == "christmas_dad":
+            # Christmas Dad: buys exactly Gaming Console and 4K TV
+            target_items = ["Gaming Console", "4K TV"]
+            for item_name in target_items:
+                needs.append(CustomerNeed(item_name=item_name, quantity=1))
+            return needs
+
+        if self.customer_type == "lottery_winner":
+            # Lottery Winner: buys up to 10 importance 1 (luxury) items
+            luxury_items = [item for item in available_items if item.importance == 1]
+            if luxury_items:
+                remaining_budget = self.budget
+                target_items = 10
+                total_items = 0
+                selected_items = []
+
+                while total_items < target_items and remaining_budget > 0 and luxury_items:
+                    affordable_items = [
+                        item for item in luxury_items
+                        if item not in selected_items  # Don't buy duplicates
+                        and (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) <= remaining_budget
+                    ]
+                    if not affordable_items:
+                        break
+
+                    selected_item = random.choice(affordable_items)
+                    item_price = market_prices.get(selected_item.name, selected_item.base_price) if market_prices else selected_item.base_price
+                    needs.append(CustomerNeed(item_name=selected_item.name, quantity=1))
+                    remaining_budget -= item_price
+                    total_items += 1
+                    selected_items.append(selected_item)
+            return needs
+
+        if self.customer_type == "youtuber":
+            # Youtuber: wants to buy everything, actual purchase handled in selection logic
+            # Generate needs for all available items
+            for item in available_items:
+                needs.append(CustomerNeed(item_name=item.name, quantity=100))  # Request large quantity
             return needs
 
         # Regular customers (low, medium, high)
@@ -1039,6 +1163,177 @@ class Customer:
 
         # Return the player with the highest score
         return player_scores[0][0]
+
+    def choose_supplier_for_special_customer(
+        self,
+        players: List[Player],
+        needs: List[CustomerNeed],
+        market_prices: Dict[str, float],
+        items_by_name: Dict[str, Item],
+        all_available_items: List[Item]
+    ) -> Optional[Player]:
+        """
+        Choose supplier for special customers based on their unique selection criteria.
+        Different logic for each special customer type.
+        """
+        if self.customer_type == "hoarder":
+            # Hoarder: picks player with highest total stock
+            player_stock_counts = []
+            for player in players:
+                total_stock = sum(player.inventory.values())
+                if total_stock > 0:
+                    player_stock_counts.append((player, total_stock))
+
+            if not player_stock_counts:
+                return None
+
+            # Sort by total stock (highest first)
+            player_stock_counts.sort(key=lambda x: x[1], reverse=True)
+            return player_stock_counts[0][0]
+
+        elif self.customer_type == "shoplifter":
+            # Shoplifter: targets highest reputation player
+            # If tied, check stock amount
+            max_reputation = max((p.reputation for p in players), default=0)
+            high_rep_players = [p for p in players if p.reputation == max_reputation]
+
+            if not high_rep_players:
+                return None
+
+            # If multiple players with max reputation, pick one with most stock
+            if len(high_rep_players) > 1:
+                player_stock = [(p, sum(p.inventory.values())) for p in high_rep_players]
+                player_stock.sort(key=lambda x: x[1], reverse=True)
+                return player_stock[0][0]
+            else:
+                return high_rep_players[0]
+
+        elif self.customer_type == "party_prep_mom":
+            # Party Prep Mom: picks based on global availability of importance 3 items and lowest avg price
+            player_scores = []
+            for player in players:
+                importance_3_stock = sum(
+                    player.inventory.get(item.name, 0)
+                    for item in all_available_items
+                    if item.importance == 3
+                )
+
+                if importance_3_stock == 0:
+                    continue
+
+                # Calculate average price for importance 3 items
+                total_price = 0
+                count = 0
+                for item in all_available_items:
+                    if item.importance == 3 and player.inventory.get(item.name, 0) > 0 and item.name in player.prices:
+                        total_price += player.prices[item.name]
+                        count += 1
+
+                avg_price = total_price / count if count > 0 else float('inf')
+                player_scores.append((player, importance_3_stock, avg_price))
+
+            if not player_scores:
+                return None
+
+            # Sort by stock (descending), then by price (ascending)
+            player_scores.sort(key=lambda x: (-x[1], x[2]))
+            return player_scores[0][0]
+
+        elif self.customer_type == "gamer":
+            # Gamer: picks store with most types of gaming items, ties broken by lowest price
+            gamer_items = ["Gaming Console", "Laptop", "VR Headset", "4K TV", "Noise-Cancelling Headphones"]
+            player_scores = []
+
+            for player in players:
+                available_types = sum(
+                    1 for item_name in gamer_items
+                    if player.inventory.get(item_name, 0) > 0 and item_name in player.prices
+                )
+
+                if available_types == 0:
+                    continue
+
+                # Calculate average price for available gaming items
+                total_price = 0
+                count = 0
+                for item_name in gamer_items:
+                    if player.inventory.get(item_name, 0) > 0 and item_name in player.prices:
+                        total_price += player.prices[item_name]
+                        count += 1
+
+                avg_price = total_price / count if count > 0 else float('inf')
+                player_scores.append((player, available_types, avg_price))
+
+            if not player_scores:
+                return None
+
+            # Sort by number of types (descending), then by average price (ascending)
+            player_scores.sort(key=lambda x: (-x[1], x[2]))
+            return player_scores[0][0]
+
+        elif self.customer_type == "christmas_dad":
+            # Christmas Dad: checks lowest price and reputation for Gaming Console and 4K TV
+            target_items = ["Gaming Console", "4K TV"]
+            player_scores = []
+
+            for player in players:
+                # Check if player has both items
+                has_both = all(
+                    player.inventory.get(item_name, 0) > 0 and item_name in player.prices
+                    for item_name in target_items
+                )
+
+                if not has_both:
+                    continue
+
+                # Calculate total price for both items
+                total_price = sum(player.prices[item_name] for item_name in target_items)
+                player_scores.append((player, total_price, player.reputation))
+
+            if not player_scores:
+                return None
+
+            # Sort by total price (ascending), then by reputation (descending)
+            player_scores.sort(key=lambda x: (x[1], -x[2]))
+            return player_scores[0][0]
+
+        elif self.customer_type == "lottery_winner":
+            # Lottery Winner: picks store with most available expensive items (>$100)
+            player_scores = []
+
+            for player in players:
+                expensive_count = sum(
+                    1 for item in all_available_items
+                    if item.base_price > 100
+                    and player.inventory.get(item.name, 0) > 0
+                    and item.name in player.prices
+                )
+
+                if expensive_count > 0:
+                    player_scores.append((player, expensive_count))
+
+            if not player_scores:
+                return None
+
+            # Sort by count (descending), random tiebreaker
+            random.shuffle(player_scores)
+            player_scores.sort(key=lambda x: x[1], reverse=True)
+            return player_scores[0][0]
+
+        elif self.customer_type == "youtuber":
+            # Youtuber: picks player with lowest cash (near bankruptcy, <$1000)
+            low_cash_players = [p for p in players if p.cash < 1000]
+
+            if not low_cash_players:
+                return None
+
+            # Pick the one with lowest cash
+            low_cash_players.sort(key=lambda p: p.cash)
+            return low_cash_players[0]
+
+        else:
+            # Default to reputation-based selection
+            return self.choose_supplier_by_reputation(players, needs, market_prices, items_by_name, all_available_items)
 
 
 # -------------------------------------------------------------------
@@ -2196,6 +2491,85 @@ def auto_hire_employees(player: Player, game_state: GameState) -> None:
 # Daily simulation logic
 # -------------------------------------------------------------------
 
+def get_weighted_customer_type(day: int) -> str:
+    """
+    Returns a weighted random customer type based on the current day.
+
+    Day ranges:
+    - Below Day 30: Low=50%, Medium=40%, High=10%
+    - Day 30-99: Low=30%, Medium=60%, High=10%
+    - Day 100+: Low=10%, Medium=30%, High=60%
+    """
+    if day < 30:
+        weights = {"low": 0.50, "medium": 0.40, "high": 0.10}
+    elif day < 100:
+        weights = {"low": 0.30, "medium": 0.60, "high": 0.10}
+    else:
+        weights = {"low": 0.10, "medium": 0.30, "high": 0.60}
+
+    rand = random.random()
+    cumulative = 0.0
+
+    for customer_type, weight in weights.items():
+        cumulative += weight
+        if rand < cumulative:
+            return customer_type
+
+    return "medium"  # Fallback
+
+
+def get_special_customer_count(day: int) -> int:
+    """
+    Calculate how many special customers should spawn today.
+
+    - Available from day 10+
+    - Starts with 1 special customer
+    - Adds +1 at day 30
+    - Then +1 every 30 days after that (day 60, 90, 120, etc.)
+    """
+    if day < 10:
+        return 0
+    elif day < 30:
+        return 1
+    else:
+        # day 30: 2, day 60: 3, day 90: 4, etc.
+        return 2 + ((day - 30) // 30)
+
+
+def get_weighted_special_customer_type() -> str:
+    """
+    Returns a weighted random special customer type.
+
+    Spawn rates:
+    - Hoarder: 30%
+    - Shoplifter: 15%
+    - Party Prep Mom: 30%
+    - Gamer: 10%
+    - Christmas Dad: 10%
+    - Lottery Winner: 4%
+    - Youtuber: 1%
+    """
+    weights = {
+        "hoarder": 0.30,
+        "shoplifter": 0.15,
+        "party_prep_mom": 0.30,
+        "gamer": 0.10,
+        "christmas_dad": 0.10,
+        "lottery_winner": 0.04,
+        "youtuber": 0.01
+    }
+
+    rand = random.random()
+    cumulative = 0.0
+
+    for customer_type, weight in weights.items():
+        cumulative += weight
+        if rand < cumulative:
+            return customer_type
+
+    return "hoarder"  # Fallback
+
+
 def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float]:
     """
     Simulate a single day in the economic game.
@@ -2328,6 +2702,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         'found_nothing': {'low': 0, 'medium': 0, 'high': 0}
     }
 
+    # Track special customers for daily summary
+    special_customer_events = []  # List of (customer_type, target_player_name, items_taken/bought)
+
     # Track per-item sales data for pricing strategy
     # player_name -> item_name -> {units_sold, revenue, starting_inventory}
     per_item_sales = {player.name: {} for player in game_state.players}
@@ -2347,8 +2724,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Generate all regular customers for the day
     all_customers = []
     for i in range(base_customer_count):
-        customer_type = random.choice(["low", "medium", "high"])
-        customer = Customer(name=f"Customer_{i+1}", customer_type=customer_type)
+        customer_type = get_weighted_customer_type(game_state.day)
+        customer = Customer(name=f"Customer_{i+1}", customer_type=customer_type, day=game_state.day)
         all_customers.append(customer)
         customer_type_stats['spawned'][customer_type] += 1
 
@@ -2580,7 +2957,126 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     unmet_uncapped_demand += need.quantity
                     unmet_demand_per_item[need.item_name] = unmet_demand_per_item.get(need.item_name, 0) + need.quantity
 
-    # Step 5.5: Calculate actual profits (Sales - Daily Spending, before wages)
+    # Step 5.6: Process special customers (no cashier limits, unique selection logic)
+    special_customer_count = get_special_customer_count(game_state.day)
+    if special_customer_count > 0:
+        special_customers = []
+        lottery_winner_spawned = False
+        youtuber_spawned = False
+
+        for i in range(special_customer_count):
+            # Get weighted special customer type
+            special_type = get_weighted_special_customer_type()
+
+            # Enforce max 1 lottery winner and 1 youtuber per day
+            if special_type == "lottery_winner":
+                if lottery_winner_spawned:
+                    special_type = "hoarder"  # Fallback to hoarder
+                else:
+                    lottery_winner_spawned = True
+            elif special_type == "youtuber":
+                if youtuber_spawned:
+                    special_type = "hoarder"  # Fallback to hoarder
+                else:
+                    youtuber_spawned = True
+
+            customer = Customer(name=f"Special_{i+1}", customer_type=special_type, day=game_state.day)
+            special_customers.append(customer)
+
+        # Process each special customer
+        for customer in special_customers:
+            # Build items dictionary for quick lookup
+            items_by_name = {item.name: item for item in game_state.items}
+
+            # Shoplifter has special handling (steals items)
+            if customer.customer_type == "shoplifter":
+                # Choose target (highest reputation player)
+                target = customer.choose_supplier_for_special_customer(
+                    game_state.players, [], game_state.market_prices, items_by_name, game_state.items
+                )
+
+                if target:
+                    # Find 1-2 most expensive items in target's inventory
+                    available_items = [
+                        (item_name, target.prices.get(item_name, 0))
+                        for item_name in target.inventory.keys()
+                        if target.inventory[item_name] > 0 and item_name in target.prices
+                    ]
+
+                    if available_items:
+                        # Sort by price descending
+                        available_items.sort(key=lambda x: x[1], reverse=True)
+                        steal_count = random.randint(1, 2)
+                        stolen_items = []
+
+                        for item_name, price in available_items[:steal_count]:
+                            # Steal 1 unit
+                            if target.inventory[item_name] > 0:
+                                target.inventory[item_name] -= 1
+                                stolen_items.append(item_name)
+
+                        if stolen_items:
+                            special_customer_events.append((
+                                "Shoplifter",
+                                target.name,
+                                f"Stole: {', '.join(stolen_items)}"
+                            ))
+                            # Apply reputation penalty for theft
+                            daily_reputation_changes[target.name] -= 5
+                continue
+
+            # For other special customers, generate needs
+            needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
+
+            if not needs:
+                continue
+
+            # Choose supplier using special customer logic
+            supplier = customer.choose_supplier_for_special_customer(
+                game_state.players, needs, game_state.market_prices, items_by_name, game_state.items
+            )
+
+            if not supplier:
+                continue
+
+            # Track purchases
+            items_bought = []
+            total_spent = 0.0
+
+            for need in needs:
+                if need.item_name in supplier.inventory and supplier.inventory[need.item_name] > 0:
+                    if need.item_name in supplier.prices:
+                        price = supplier.prices[need.item_name]
+                        # Special customers bypass the 15% market price rule
+                        revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price)
+
+                        if revenue > 0:
+                            daily_sales[supplier.name] += revenue
+                            daily_profits[supplier.name] += profit
+                            total_spent += revenue
+
+                            # Track per-item sales
+                            if need.item_name not in per_item_sales[supplier.name]:
+                                per_item_sales[supplier.name][need.item_name] = {
+                                    'units_sold': 0,
+                                    'revenue': 0.0,
+                                    'starting_inventory': 0
+                                }
+                            per_item_sales[supplier.name][need.item_name]['units_sold'] += actual_units_sold
+                            per_item_sales[supplier.name][need.item_name]['revenue'] += revenue
+
+                            items_bought.append(f"{actual_units_sold}x {need.item_name}")
+
+            if items_bought:
+                # Format special customer type for display
+                customer_type_display = customer.customer_type.replace("_", " ").title()
+                special_customer_events.append((
+                    customer_type_display,
+                    supplier.name,
+                    f"Bought: {', '.join(items_bought[:3])}{'...' if len(items_bought) > 3 else ''} (${total_spent:.2f})"
+                ))
+
+    # Step 5.7: Calculate actual profits (Sales - Daily Spending, before wages)
     for player in game_state.players:
         daily_profits[player.name] = daily_sales[player.name] - daily_spending[player.name]
 
@@ -2671,6 +3167,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 bought = customer_type_stats['bought_something'][ctype]
                 found_nothing = customer_type_stats['found_nothing'][ctype]
                 print(f"  {ctype.replace('_', ' ').title()}: {spawned} spawned | {bought} bought | {found_nothing} found nothing")
+
+        # Display special customer events
+        if special_customer_events:
+            print(f"\n🌟 Special Customers Today:")
+            for customer_type, target_name, details in special_customer_events:
+                print(f"  {customer_type} → {target_name}: {details}")
 
         # Display demand per item (what customers wanted today)
         if daily_demand_per_item:
