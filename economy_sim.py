@@ -5448,7 +5448,7 @@ def serialize_game_state(game_state: GameState) -> dict:
             "customers_per_day": game_state.config.customers_per_day,
         },
         "items": [
-            {"name": item.name, "base_cost": item.base_cost, "base_price": item.base_price}
+            {"name": item.name, "base_cost": item.base_cost, "base_price": item.base_price, "category": item.category}
             for item in game_state.items
         ],
         "market_prices": game_state.market_prices,
@@ -5521,11 +5521,22 @@ def deserialize_game_state(data: dict) -> GameState:
         customers_per_day=data["config"]["customers_per_day"],
     )
 
-    # Recreate items
-    items = [
-        Item(name=item_data["name"], base_cost=item_data["base_cost"], base_price=item_data["base_price"])
-        for item_data in data["items"]
-    ]
+    # Recreate items with backward compatibility for missing category
+    items = []
+    for item_data in data["items"]:
+        # Get category from saved data, or look it up in PRODUCT_CATALOG, or use default
+        category = item_data.get("category")
+        if not category:
+            # Try to find matching item in PRODUCT_CATALOG for backward compatibility
+            matching_item = next((item for item in PRODUCT_CATALOG if item.name == item_data["name"]), None)
+            category = matching_item.category if matching_item else "Food & Groceries"
+
+        items.append(Item(
+            name=item_data["name"],
+            base_cost=item_data["base_cost"],
+            base_price=item_data["base_price"],
+            category=category
+        ))
 
     # Recreate vendors
     vendors = [
