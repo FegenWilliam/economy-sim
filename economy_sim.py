@@ -74,6 +74,9 @@ PRODUCT_CATALOG = [
     Item("Bread", 2.0, 5.0, "Food & Groceries"),
     Item("Milk", 3.0, 6.0, "Food & Groceries"),
     Item("Eggs", 2.5, 5.5, "Food & Groceries"),
+    Item("Bananas", 1.5, 3.5, "Fresh Produce"),
+    Item("Batteries", 5.0, 10.0, "Household Essentials"),
+    Item("Rice", 5.0, 10.0, "Food & Groceries"),
     Item("Coffee", 6.0, 12.0, "Food & Groceries"),
     Item("Toilet Paper", 8.0, 15.0, "Household Essentials"),
     Item("Vitamins", 12.0, 24.0, "Health & Pharmacy"),
@@ -81,7 +84,6 @@ PRODUCT_CATALOG = [
     Item("Butter", 3.5, 7.0, "Food & Groceries"),
     Item("Yogurt", 2.0, 4.5, "Food & Groceries"),
     Item("Cereal", 3.0, 6.5, "Food & Groceries"),
-    Item("Rice", 5.0, 10.0, "Food & Groceries"),
     Item("Pasta", 2.0, 4.0, "Food & Groceries"),
     Item("Canned Soup", 1.5, 3.5, "Food & Groceries"),
     Item("Frozen Pizza", 4.0, 8.5, "Food & Groceries"),
@@ -101,7 +103,6 @@ PRODUCT_CATALOG = [
 
     # Fresh Produce
     Item("Apples", 2.5, 5.5, "Fresh Produce"),
-    Item("Bananas", 1.5, 3.5, "Fresh Produce"),
     Item("Oranges", 3.0, 6.0, "Fresh Produce"),
     Item("Grapes", 4.0, 8.5, "Fresh Produce"),
     Item("Strawberries", 4.5, 9.0, "Fresh Produce"),
@@ -120,7 +121,6 @@ PRODUCT_CATALOG = [
     Item("Aluminum Foil", 4.0, 8.5, "Household Essentials"),
     Item("Plastic Wrap", 3.5, 7.5, "Household Essentials"),
     Item("Light Bulbs", 6.0, 12.0, "Household Essentials"),
-    Item("Batteries", 5.0, 10.0, "Household Essentials"),
     Item("Candles", 4.0, 8.5, "Household Essentials"),
     Item("Air Freshener", 3.5, 7.5, "Household Essentials"),
 
