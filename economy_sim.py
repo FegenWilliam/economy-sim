@@ -417,7 +417,7 @@ class Vendor:
     """A vendor that sells items to players at wholesale prices."""
     name: str
     pricing_multiplier: float = 1.0  # Multiplier applied to market price (e.g., 0.7 = 70% of market)
-    selection_type: str = "all"  # "random_daily", "price_threshold", "price_range", "all"
+    selection_type: str = "all"  # "random_daily", "price_threshold", "price_range", "all", "category"
     selection_params: float = 0.0  # For random_daily: count of items. For price_threshold: max price
     items: Dict[str, float] = field(default_factory=dict)  # item_name -> wholesale_price (refreshed daily)
     max_per_item_per_player: Optional[int] = None  # Max quantity per item per player per day (None = unlimited)
@@ -425,10 +425,33 @@ class Vendor:
     price_min: Optional[float] = None  # Minimum price threshold (None = no minimum)
     price_max: Optional[float] = None  # Maximum price threshold (None = no maximum)
     lead_time: int = 0  # Number of days for delivery (0 = instant delivery)
+    volume_pricing_tiers: Optional[List[tuple]] = None  # List of (quantity_threshold, pricing_multiplier) sorted by quantity
+    required_reputation: Optional[float] = None  # Minimum reputation required to use this vendor
+    allowed_categories: Optional[List[str]] = None  # If set, only items from these categories are available
 
-    def get_price(self, item_name: str) -> Optional[float]:
-        """Get the wholesale price for an item from this vendor."""
-        return self.items.get(item_name)
+    def get_price(self, item_name: str, quantity: int = 1) -> Optional[float]:
+        """
+        Get the wholesale price for an item from this vendor.
+        If quantity is provided and volume_pricing_tiers is set, returns price with volume discount.
+        """
+        base_price = self.items.get(item_name)
+        if base_price is None:
+            return None
+
+        # Apply volume pricing if available
+        if self.volume_pricing_tiers and quantity > 0:
+            # Find the appropriate tier (tiers are sorted by quantity descending)
+            applicable_multiplier = self.pricing_multiplier
+            for threshold, multiplier in self.volume_pricing_tiers:
+                if quantity >= threshold:
+                    applicable_multiplier = multiplier
+                    break
+            # Recalculate price with volume discount multiplier
+            # base_price was calculated with pricing_multiplier, so we need to adjust
+            market_price = base_price / self.pricing_multiplier
+            return market_price * applicable_multiplier
+
+        return base_price
 
 
 @dataclass
@@ -756,8 +779,13 @@ class Player:
         Also tracks the weighted average cost per item for profit calculation.
         Applies vendor discount upgrades and production line pricing.
         Enforces vendor-specific purchase limits (min/max per player).
+        Checks reputation requirements.
         """
         if quantity <= 0:
+            return False
+
+        # Check reputation requirement
+        if vendor.required_reputation is not None and self.reputation < vendor.required_reputation:
             return False
 
         # Check minimum purchase requirement
@@ -786,8 +814,8 @@ class Player:
             # Use production line pricing (50% of market)
             final_price = production_price
         else:
-            # Use vendor pricing
-            vendor_price = vendor.get_price(item_name)
+            # Use vendor pricing with volume discounts
+            vendor_price = vendor.get_price(item_name, quantity)
             if vendor_price is None:
                 return False
 
@@ -1594,69 +1622,13 @@ def create_customers(num_customers: int) -> List[Customer]:
 
 def create_vendors() -> List[Vendor]:
     """
-    Create 9 vendors with different pricing and selection strategies.
+    Create 7 vendors with different pricing and selection strategies.
 
     Vendor inventory is refreshed daily based on their selection type.
     """
     vendors = []
 
-    # Vendor 1: 70% of market price, 1 random item per day, max 100 per item per player, 3 day lead time
-    vendors.append(Vendor(
-        name="Lucky Deal Trader",
-        pricing_multiplier=0.70,
-        selection_type="random_daily",
-        selection_params=1,  # 1 item
-        max_per_item_per_player=100,
-        lead_time=3
-    ))
-
-    # Vendor 2: 80% of market price, 5 random items per day, max 100 per item per player, 2 day lead time
-    vendors.append(Vendor(
-        name="Discount Wholesale Co.",
-        pricing_multiplier=0.80,
-        selection_type="random_daily",
-        selection_params=5,  # 5 items
-        max_per_item_per_player=100,
-        lead_time=2
-    ))
-
-    # Vendor 3: 90% of market price, all items under $20 market price, 1 day lead time
-    vendors.append(Vendor(
-        name="Budget Goods Ltd.",
-        pricing_multiplier=0.90,
-        selection_type="price_threshold",
-        selection_params=20.0,  # $20 threshold
-        lead_time=1
-    ))
-
-    # Vendor 4: 95% of market price, all items under $50 market price, 1 day lead time
-    vendors.append(Vendor(
-        name="Premium Select Inc.",
-        pricing_multiplier=0.95,
-        selection_type="price_threshold",
-        selection_params=50.0,  # $50 threshold
-        lead_time=1
-    ))
-
-    # Vendor 5: 98% of market price, all items under $40, instant delivery (no lead time)
-    vendors.append(Vendor(
-        name="Instant Goods Ltd.",
-        pricing_multiplier=0.98,
-        selection_type="price_threshold",
-        selection_params=40.0,  # $40 threshold
-        lead_time=0
-    ))
-
-    # Vendor 6: 105% of market price, all items available, instant delivery (no lead time)
-    vendors.append(Vendor(
-        name="Universal Supply Corp.",
-        pricing_multiplier=1.05,
-        selection_type="all",
-        selection_params=0,  # No limit
-        lead_time=0
-    ))
-
-    # Vendor 7: 85% of market price, min 100 per purchase, items $30 or less, 1 day lead time
+    # Vendor 1: Bulk Goods Co. - 85% of market price, min 100 per purchase, items $30 or less, 1 day lead time
     vendors.append(Vendor(
         name="Bulk Goods Co.",
         pricing_multiplier=0.85,
@@ -1667,26 +1639,81 @@ def create_vendors() -> List[Vendor]:
         lead_time=1
     ))
 
-    # Vendor 8: 80% of market price, min 500 per purchase, items $10 or less, 2 day lead time
+    # Vendor 2: Instant Goods Ltd. - 98% of market price, all items under $40, instant delivery (no lead time)
     vendors.append(Vendor(
-        name="Cheap Goods Co.",
-        pricing_multiplier=0.80,
-        selection_type="price_range",
-        selection_params=0,
-        min_purchase=500,
-        price_max=10.0,
-        lead_time=2
+        name="Instant Goods Ltd.",
+        pricing_multiplier=0.98,
+        selection_type="price_threshold",
+        selection_params=40.0,  # $40 threshold
+        lead_time=0
     ))
 
-    # Vendor 9: 95% of market price, min 10 per purchase, items $200 or more, 1 day lead time
+    # Vendor 3: Universal Supply Corp. - 105% of market price, all items available, instant delivery (no lead time)
     vendors.append(Vendor(
-        name="VIP Goods Co.",
-        pricing_multiplier=0.95,
-        selection_type="price_range",
+        name="Universal Supply Corp.",
+        pricing_multiplier=1.05,
+        selection_type="all",
+        selection_params=0,  # No limit
+        lead_time=0
+    ))
+
+    # Vendor 4: Bulk Master Co. - Volume-based pricing, items under $100, 1 day lead time
+    # Base: 110% market, scales down with volume
+    # Tiers (sorted descending): 10000->70%, 5000->75%, 2500->80%, 1000->85%, 500->90%, 300->95%, 100->100%
+    vendors.append(Vendor(
+        name="Bulk Master Co.",
+        pricing_multiplier=1.10,  # Base pricing
+        selection_type="price_threshold",
+        selection_params=100.0,  # Items under $100
+        lead_time=1,
+        volume_pricing_tiers=[
+            (10000, 0.70),
+            (5000, 0.75),
+            (2500, 0.80),
+            (1000, 0.85),
+            (500, 0.90),
+            (300, 0.95),
+            (100, 1.00)
+        ]
+    ))
+
+    # Vendor 5: Stock Masters Ltd - 80% market price, requires 100 reputation, max 500 per item, 2 day lead time, all items
+    vendors.append(Vendor(
+        name="Stock Masters Ltd",
+        pricing_multiplier=0.80,
+        selection_type="all",
         selection_params=0,
-        min_purchase=10,
-        price_min=200.0,
-        lead_time=1
+        max_per_item_per_player=500,
+        lead_time=2,
+        required_reputation=100.0
+    ))
+
+    # Vendor 6: Luxury House Co. - Only Gaming and Luxury categories
+    # Base: 98% market, 90% at 50+ items
+    vendors.append(Vendor(
+        name="Luxury House Co.",
+        pricing_multiplier=0.98,
+        selection_type="category",
+        selection_params=0,
+        allowed_categories=["Gaming", "Luxury"],
+        lead_time=0,
+        volume_pricing_tiers=[
+            (50, 0.90)
+        ]
+    ))
+
+    # Vendor 7: Daily Essentials Co. - Only Food & Groceries and Fresh Produce categories
+    # Base: 90% market, 80% at 1000+ items
+    vendors.append(Vendor(
+        name="Daily Essentials Co.",
+        pricing_multiplier=0.90,
+        selection_type="category",
+        selection_params=0,
+        allowed_categories=["Food & Groceries", "Fresh Produce"],
+        lead_time=0,
+        volume_pricing_tiers=[
+            (1000, 0.80)
+        ]
     ))
 
     return vendors
@@ -1701,11 +1728,16 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
     for vendor in vendors:
         vendor.items.clear()
 
+        # Filter items by allowed categories if specified
+        available_items = items
+        if vendor.allowed_categories is not None:
+            available_items = [item for item in items if item.category in vendor.allowed_categories]
+
         if vendor.selection_type == "random_daily":
             # Select N random items
             num_items = int(vendor.selection_params)
-            if num_items > 0 and items:
-                selected_items = random.sample(items, min(num_items, len(items)))
+            if num_items > 0 and available_items:
+                selected_items = random.sample(available_items, min(num_items, len(available_items)))
                 for item in selected_items:
                     market_price = market_prices.get(item.name, item.base_price)
                     vendor.items[item.name] = market_price * vendor.pricing_multiplier
@@ -1713,14 +1745,14 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
         elif vendor.selection_type == "price_threshold":
             # Select all items where market price is at or under threshold
             price_threshold = vendor.selection_params
-            for item in items:
+            for item in available_items:
                 market_price = market_prices.get(item.name, item.base_price)
                 if market_price <= price_threshold:
                     vendor.items[item.name] = market_price * vendor.pricing_multiplier
 
         elif vendor.selection_type == "price_range":
             # Select items within a price range (min and/or max)
-            for item in items:
+            for item in available_items:
                 market_price = market_prices.get(item.name, item.base_price)
                 # Check if price is within range
                 if vendor.price_min is not None and market_price < vendor.price_min:
@@ -1731,7 +1763,13 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
 
         elif vendor.selection_type == "all":
             # Include all items
-            for item in items:
+            for item in available_items:
+                market_price = market_prices.get(item.name, item.base_price)
+                vendor.items[item.name] = market_price * vendor.pricing_multiplier
+
+        elif vendor.selection_type == "category":
+            # Select items from allowed categories only (already filtered above)
+            for item in available_items:
                 market_price = market_prices.get(item.name, item.base_price)
                 vendor.items[item.name] = market_price * vendor.pricing_multiplier
 
@@ -3346,7 +3384,9 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
 
         print("\nSelect Vendor:")
         for i, vendor in enumerate(game_state.vendors, 1):
-            print(f"  {i}. {vendor.name}")
+            rep_info = f" (Requires {vendor.required_reputation:.0f} reputation)" if vendor.required_reputation else ""
+            locked = " [LOCKED]" if vendor.required_reputation and player.reputation < vendor.required_reputation else ""
+            print(f"  {i}. {vendor.name}{rep_info}{locked}")
         print(f"  0. Back to Main Menu")
 
         try:
@@ -3359,11 +3399,23 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
             if 1 <= choice_num <= len(game_state.vendors):
                 vendor = game_state.vendors[choice_num - 1]
 
+                # Check reputation requirement
+                if vendor.required_reputation and player.reputation < vendor.required_reputation:
+                    print(f"\n✗ You need {vendor.required_reputation:.0f} reputation to use this vendor. Your reputation: {player.reputation:.0f}")
+                    continue
+
+                # Show volume pricing info if applicable
+                if vendor.volume_pricing_tiers:
+                    print(f"\n{vendor.name} - Volume Pricing Tiers:")
+                    print(f"  Base: {vendor.pricing_multiplier*100:.0f}% of market price")
+                    for threshold, multiplier in sorted(vendor.volume_pricing_tiers, key=lambda x: x[0]):
+                        print(f"  {threshold}+ items: {multiplier*100:.0f}% of market price")
+
                 # Show items available from this vendor
-                print(f"\n{vendor.name} - Available Items:")
+                print(f"\n{vendor.name} - Available Items (showing base prices):")
                 available_items = []
                 for i, item in enumerate(game_state.items, 1):
-                    price = vendor.get_price(item.name)
+                    price = vendor.get_price(item.name, 1)  # Show base price (quantity=1)
                     if price:
                         print(f"  {i}. {item.name} - ${price:.2f}")
                         available_items.append((i, item.name))
@@ -3391,16 +3443,26 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
 
                     if quantity > 0:
                         market_price = game_state.market_prices.get(selected_item_name, 0)
+
+                        # Calculate and show the actual price with volume discount
+                        actual_price_per_unit = player.get_production_line_price(selected_item_name, market_price)
+                        if actual_price_per_unit is None:
+                            actual_price_per_unit = vendor.get_price(selected_item_name, quantity)
+                        total_cost = actual_price_per_unit * quantity
+
+                        print(f"\nTotal cost: ${total_cost:.2f} (${actual_price_per_unit:.2f} per unit)")
+
                         success = player.purchase_from_vendor(vendor, selected_item_name, quantity, market_price, game_state)
                         if success:
-                            # Calculate actual cost (may be production line pricing)
-                            actual_price = player.get_production_line_price(selected_item_name, market_price)
-                            if actual_price is None:
-                                actual_price = vendor.get_price(selected_item_name)
-                            total_cost = actual_price * quantity
                             print(f"\n✓ Purchased {quantity} {selected_item_name} for ${total_cost:.2f}")
                         else:
-                            print(f"\n✗ Failed to purchase. Not enough cash!")
+                            # More detailed error message
+                            if vendor.min_purchase and quantity < vendor.min_purchase:
+                                print(f"\n✗ Failed to purchase. Minimum purchase: {vendor.min_purchase} units")
+                            elif player.cash < total_cost:
+                                print(f"\n✗ Failed to purchase. Not enough cash! Need ${total_cost:.2f}, have ${player.cash:.2f}")
+                            else:
+                                print(f"\n✗ Failed to purchase. Check requirements!")
                     else:
                         print("\n✗ Invalid quantity!")
             else:
@@ -3454,12 +3516,12 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
             if own_price is not None:
                 vendor_buy_price = own_price
             elif vendor_orders:
-                # Find cheapest vendor price among all orders
+                # Find cheapest vendor price among all orders (using their ordered quantities)
                 cheapest_price = float('inf')
                 for qty, vendor_name in vendor_orders:
                     for vendor in game_state.vendors:
                         if vendor.name == vendor_name:
-                            price = vendor.get_price(item.name)
+                            price = vendor.get_price(item.name, qty)  # Pass quantity for volume pricing
                             if price:
                                 discount = player.get_vendor_discount(vendor_name, game_state.day)
                                 actual_price = price * (1 - discount)
@@ -3527,7 +3589,7 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                     # Get vendor price and lead time
                                     vendor = next((v for v in game_state.vendors if v.name == vendor_name), None)
                                     if vendor:
-                                        price = vendor.get_price(item.name)
+                                        price = vendor.get_price(item.name, qty)  # Pass quantity for volume pricing
                                         # Calculate effective lead time with player's upgrades
                                         lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                         effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -3571,8 +3633,10 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                             # Show vendor list
                                             print("\nAvailable Vendors:")
                                             for i, vendor in enumerate(game_state.vendors, 1):
-                                                price = vendor.get_price(item.name)
+                                                price = vendor.get_price(item.name, 1)  # Show base price
                                                 min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                                                vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                                                rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
                                                 # Calculate effective lead time with player's upgrades
                                                 lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                                 effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -3581,10 +3645,10 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                                     discount = player.get_vendor_discount(vendor.name, game_state.day)
                                                     final_price = price * (1 - discount)
                                                     discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
-                                                    print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                                                    print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
                                                 else:
                                                     status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                                    print(f"  {i}. {vendor.name}{min_text} - {status}")
+                                                    print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
 
                                             vendor_choice = input(f"\nSelect new vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
                                             vendor_num = int(vendor_choice)
@@ -3624,8 +3688,10 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                     # Add new vendor
                                     print("\nAvailable Vendors:")
                                     for i, vendor in enumerate(game_state.vendors, 1):
-                                        price = vendor.get_price(item.name)
+                                        price = vendor.get_price(item.name, 1)  # Show base price
                                         min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                                        vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                                        rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
                                         # Calculate effective lead time with player's upgrades
                                         lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                         effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -3634,10 +3700,10 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                             discount = player.get_vendor_discount(vendor.name, game_state.day)
                                             final_price = price * (1 - discount)
                                             discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
-                                            print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
                                         else:
                                             status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                            print(f"  {i}. {vendor.name}{min_text} - {status}")
+                                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
 
                                     vendor_choice = input(f"\nEnter vendor number and quantity (e.g., '2 100'), or just vendor number (0 to cancel): ").strip()
                                     try:
@@ -3730,8 +3796,10 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                 # Add multiple vendors at once
                                 print("\nAvailable Vendors:")
                                 for i, vendor in enumerate(game_state.vendors, 1):
-                                    price = vendor.get_price(item.name)
+                                    price = vendor.get_price(item.name, 1)  # Show base price
                                     min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                                    vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                                    rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
                                     # Calculate effective lead time with player's upgrades
                                     lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                     effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -3740,10 +3808,10 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                         discount = player.get_vendor_discount(vendor.name, game_state.day)
                                         final_price = price * (1 - discount)
                                         discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
-                                        print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                                        print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
                                     else:
                                         status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                        print(f"  {i}. {vendor.name}{min_text} - {status}")
+                                        print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
 
                                 slots_available = 3 - len(vendor_orders)
                                 print(f"\nEnter up to {slots_available} vendor(s) in format: vendor_number quantity")
@@ -4040,17 +4108,19 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                                     # Show vendor list
                                     print("\nAvailable Vendors:")
                                     for i, vendor in enumerate(game_state.vendors, 1):
-                                        price = vendor.get_price(item.name)
+                                        price = vendor.get_price(item.name, 1)  # Show base price
                                         min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                                        vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                                        rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
                                         # Calculate effective lead time with player's upgrades
                                         lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                         effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
                                         lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
                                         if price:
-                                            print(f"  {i}. {vendor.name}{min_text} - ${price:.2f} (lead: {lead_time_str})")
+                                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${price:.2f} (lead: {lead_time_str})")
                                         else:
                                             status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                            print(f"  {i}. {vendor.name}{min_text} - {status}")
+                                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
 
                                     vendor_choice = input(f"\nSelect new vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
                                     vendor_num = int(vendor_choice)
@@ -4090,17 +4160,19 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                             # Add new vendor
                             print("\nAvailable Vendors:")
                             for i, vendor in enumerate(game_state.vendors, 1):
-                                price = vendor.get_price(item.name)
+                                price = vendor.get_price(item.name, 1)  # Show base price
                                 min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                                vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                                rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
                                 # Calculate effective lead time with player's upgrades
                                 lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                 effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
                                 lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
                                 if price:
-                                    print(f"  {i}. {vendor.name}{min_text} - ${price:.2f} (lead: {lead_time_str})")
+                                    print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${price:.2f} (lead: {lead_time_str})")
                                 else:
                                     status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                    print(f"  {i}. {vendor.name}{min_text} - {status}")
+                                    print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
 
                             vendor_choice = input(f"\nEnter vendor number and quantity (e.g., '2 100'), or just vendor number (0 to cancel): ").strip()
                             try:
@@ -4195,17 +4267,19 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                         # Add multiple vendors at once
                         print("\nAvailable Vendors:")
                         for i, vendor in enumerate(game_state.vendors, 1):
-                            price = vendor.get_price(item.name)
+                            price = vendor.get_price(item.name, 1)  # Show base price
                             min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                            vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                            rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
                             # Calculate effective lead time with player's upgrades
                             lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                             effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
                             lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
                             if price:
-                                print(f"  {i}. {vendor.name}{min_text} - ${price:.2f} (lead: {lead_time_str})")
+                                print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${price:.2f} (lead: {lead_time_str})")
                             else:
                                 status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                print(f"  {i}. {vendor.name}{min_text} - {status}")
+                                print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
 
                         slots_available = 3 - len(vendor_orders)
                         print(f"\nEnter up to {slots_available} vendor(s) in format: vendor_number quantity")
@@ -4961,6 +5035,9 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "price_min": vendor.price_min,
                 "price_max": vendor.price_max,
                 "lead_time": vendor.lead_time,
+                "volume_pricing_tiers": vendor.volume_pricing_tiers,
+                "required_reputation": vendor.required_reputation,
+                "allowed_categories": vendor.allowed_categories,
             }
             for vendor in game_state.vendors
         ],
@@ -5063,6 +5140,9 @@ def deserialize_game_state(data: dict) -> GameState:
             price_min=vendor_data.get("price_min"),
             price_max=vendor_data.get("price_max"),
             lead_time=vendor_data.get("lead_time", default_lead_times.get(vendor_data["name"], 0)),
+            volume_pricing_tiers=[tuple(tier) for tier in vendor_data["volume_pricing_tiers"]] if vendor_data.get("volume_pricing_tiers") else None,
+            required_reputation=vendor_data.get("required_reputation"),
+            allowed_categories=vendor_data.get("allowed_categories"),
         )
         for vendor_data in data["vendors"]
     ]
