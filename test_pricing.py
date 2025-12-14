@@ -13,8 +13,8 @@ def test_pricing_strategy():
 
     # Create a simple game state
     items = [
-        Item("Bread", 2.0, 5.0),
-        Item("Milk", 1.5, 4.0),
+        Item("Bread", 2.0, 5.0, "Food & Groceries"),
+        Item("Milk", 1.5, 4.0, "Food & Groceries"),
     ]
 
     vendors = [
