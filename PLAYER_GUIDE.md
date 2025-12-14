@@ -12,7 +12,6 @@ Welcome to Economy Simulation! This guide will teach you everything you need to 
 - [Customers](#customers)
 - [Employees](#employees)
 - [Store Upgrades](#store-upgrades)
-- [Strategy Guide](#strategy-guide)
 - [Winning the Game](#winning-the-game)
 
 ---
@@ -75,9 +74,11 @@ Profit = (Selling Price - Cost Price) × Units Sold
 - **Pay** employee wages monthly (every 30 days)
 - **Invest** in upgrades to increase capacity and efficiency
 
+**Important**: Profit also earns you XP! **$1 profit = 1 XP**
+
 ### Store Leveling
 
-- Earn **1 XP per item sold**
+- Earn **XP from profit**: Every $1 in profit = 1 XP
 - Level up to unlock more product slots
 - Each level allows you to stock +1 additional product type
 - XP Required = 500 × level + (10,000 × (level ÷ 10))
@@ -129,8 +130,8 @@ You buy inventory from **9 different vendors**, each with unique pricing, delive
 |-------------|------------------|---------------|--------|----------|
 | **Lucky Deal Trader** | 70% | 4 days | 1 random item, max 100/day | Extreme savings (if you can wait) |
 | **Discount Wholesale Co.** | 80% | 3 days | 5 random items, max 100/day | Good deals on select items |
-| **Budget Goods Ltd.** | 90% | Instant | Items < $20 only | Cheap essentials |
-| **Premium Select Inc.** | 95% | Instant | Items < $50 only | Mid-range items |
+| **Budget Goods Ltd.** | 90% | 1 day | Items < $20 only | Cheap essentials |
+| **Premium Select Inc.** | 95% | 1 day | Items < $50 only | Mid-range items |
 | **Instant Goods Ltd.** | 98% | Instant | Items < $40 only | Quick reliable stock |
 | **Universal Supply Corp.** | 105% | Instant | ALL items available | Expensive but guaranteed availability |
 | **Bulk Goods Co.** | 85% | 1 day | Min 100/order, items ≤ $30 | Volume discounts on cheap items |
@@ -154,16 +155,24 @@ You buy inventory from **9 different vendors**, each with unique pricing, delive
 
 ### Product Categories
 
-The game features **80+ products** across categories:
+The game features **300 products** across diverse categories:
 
-- **Food & Groceries** (Bread, Milk, Cheese, Rice, Pasta, etc.)
+- **Food & Groceries** (Bread, Milk, Cheese, Rice, Pasta, Condiments, etc.)
 - **Fresh Produce** (Apples, Bananas, Lettuce, Tomatoes, etc.)
 - **Household Essentials** (Paper Towels, Soap, Detergent, Trash Bags, etc.)
 - **Personal Care** (Shampoo, Toothpaste, Deodorant, etc.)
 - **Electronics** (Phone Chargers, Headphones, Monitors, Laptops, etc.)
 - **Gaming** (Gaming Mouse, Keyboard, Console, VR Headset, etc.)
 - **Luxury Items** (Designer Handbags, Jewelry, Watches, etc.)
-- **Home Appliances** (Coffee Maker, Microwave, Air Fryer, etc.)
+- **Home Appliances** (Coffee Maker, Microwave, Air Fryer, Vacuum Cleaner, etc.)
+- **Office Supplies** (Pens, Notebooks, Staplers, Printer Paper, etc.)
+- **Sports & Outdoor** (Yoga Mats, Camping Gear, Hiking Boots, etc.)
+- **Pet Supplies** (Pet Food, Toys, Collars, Leashes, etc.)
+- **Baby Products** (Diapers, Formula, Baby Wipes, etc.)
+- **Health & Pharmacy** (Pain Relievers, Vitamins, First Aid, etc.)
+- **Kitchen & Dining** (Cookware, Utensils, Plates, etc.)
+- **Home Decor** (Picture Frames, Lamps, Rugs, Mirrors, etc.)
+- **Garden & Outdoor** (Garden Tools, Plant Seeds, Hoses, etc.)
 
 ### Starting Products (Day 1)
 
@@ -327,83 +336,11 @@ Permanent improvements to your store. One-time purchase.
 
 ### Production Lines (Advanced)
 
-Manufacture items at 50% market price:
+Manufacture items at 50% market price. Production lines can be purchased for individual items, allowing you to produce them at half the market cost. These are expensive upgrades but offer significant savings for high-volume items.
 
-| Production Line | Cost | Unlocks At | Items Produced |
-|----------------|------|------------|----------------|
-| **Basic Food** | $30,000 | Level 15 | Bread, Pasta, Rice, etc. |
-| **Electronics** | $100,000 | Level 25 | Chargers, Headphones, etc. |
-| **Luxury Goods** | $250,000 | Level 40 | Designer items, Jewelry, etc. |
+**Cost Formula**: Production line cost varies by item (typically 10-50x the item's base cost)
 
----
-
-## Strategy Guide
-
-### Early Game (Days 1-30)
-
-**Goals**: Build cash reserves, establish profitable items
-
-1. **Focus on essentials** - Bread, Milk, Eggs are high-demand, low-cost
-2. **Use instant delivery vendors** - Avoid stockouts while learning
-3. **Price at 110-115% market** - Maximize margin while staying competitive
-4. **Don't hire yet** - Save your money, base capacity is enough initially
-5. **Monitor demand** - See which items sell out fastest
-
-**Target**: $5,000-10,000 by Day 30
-
-### Mid Game (Days 30-100)
-
-**Goals**: Expand product range, hire first employees, increase volume
-
-1. **Expand to mid-range items** ($10-50) - Coffee Maker, Shampoo, Office supplies
-2. **Hire your first cashier** when hitting 20 customer cap regularly
-3. **Use bulk vendors** - Cheap Goods Co. and Bulk Goods Co. for volume discounts
-4. **Buy capacity upgrades** - Additional Shelving ($2k) for +2 products
-5. **Consider vendor partnerships** - If one vendor dominates your supply
-6. **Watch for special events** - Stock up before +50% price spikes, sell during -50% sales
-
-**Target**: $25,000-50,000 by Day 100
-
-### Late Game (Days 100-365)
-
-**Goals**: Maximize profits, dominate high-end market
-
-1. **Target uncapped customers** (Day 50+) - Stock expensive items ($100+)
-2. **Use VIP Goods Co.** - 95% pricing on luxury items is excellent
-3. **Hire multiple employees** - Scale up to handle 100+ customers/day
-4. **Focus on high-margin items** - Electronics, Gaming, Luxury goods
-5. **Consider Production Lines** - 50% manufacturing cost is huge savings
-6. **Optimize portfolio** - Drop low-profit items, focus on winners
-7. **Distribution Network** ($150k) - Eliminate lead times for flexibility
-
-**Target**: $100,000+ by Day 365
-
-### Advanced Tips
-
-**Vendor Optimization**
-- Always use 3 vendors per key item for price competition
-- Mix instant delivery (safety) with delayed delivery (savings)
-- Check vendor limits - don't rely on limited suppliers for high-volume items
-
-**Pricing Strategy**
-- Track market price changes - raise prices during spikes
-- Lower prices slightly on overstocked items to clear inventory
-- Keep prices consistent to maintain reputation
-
-**Reputation Management**
-- Reputation ranges from -100 to +100
-- Built on: pricing consistency, availability, fulfillment rate
-- Higher reputation = more customers choose you over competitors
-
-**Cash Flow**
-- Always keep $5,000+ reserve for emergencies
-- Employee wages hit every 30 days - plan ahead
-- Reinvest profits into upgrades that increase capacity
-
-**Competitor Analysis**
-- Check competitor status regularly (Menu option 7)
-- If they're ahead, analyze: What items? What prices? More employees?
-- Undercut their prices on high-volume items to steal market share
+Production lines are available for purchase through the Store Upgrades menu and become increasingly valuable as you scale up your operations.
 
 ---
 
@@ -416,14 +353,6 @@ Manufacture items at 50% market price:
 - Only liquid cash counts (not inventory value)
 - Inventory doesn't convert to cash at game end
 - Sell off inventory in final days to maximize cash
-
-### Final Week Strategy (Days 358-365)
-
-1. **Stop buying inventory** - No new orders that won't sell
-2. **Lower prices aggressively** - Clear out all stock
-3. **Avoid hiring** - No new employees this late
-4. **Don't buy upgrades** - Cash is more valuable than improvements now
-5. **Focus on volume** - Sell, sell, sell!
 
 ### Difficulty Scaling
 
@@ -473,49 +402,6 @@ Product Slots = 3 + Level + Upgrades
 - **Every 14 days**: +20 customers
 - **Every 30 days**: Employee wages, price events
 
-### Optimal Starting Strategy
-
-**Day 1-3:**
-1. Set buy orders: 50 Bread, 50 Milk, 30 Eggs (Cheap Goods Co.)
-2. Set prices: 115% of market price for all
-3. Pass day and observe
-
-**Day 4-7:**
-1. Adjust based on sales data
-2. Add Coffee and Toilet Paper if profitable
-3. Increase quantities on items that sold out
-
-**Day 8-14:**
-1. Expand to all 6 starting items
-2. Monitor which items have highest demand
-3. Prepare for first special customers (Day 10)
-
-**Day 15-30:**
-1. Save for first upgrade (Additional Shelving $2k)
-2. Expand product range to 5 items
-3. Prepare for employee wages (Day 30)
-
----
-
-## Troubleshooting
-
-**Problem: Running out of cash**
-- Solution: Lower buy order quantities, focus on high-margin items, delay hiring
-
-**Problem: Items not selling**
-- Solution: Lower prices to 100-105% market, check if item matches customer budgets
-
-**Problem: Losing to competitors**
-- Solution: Match their prices on popular items, expand product range, improve fulfillment rate
-
-**Problem: Too many customers, not enough capacity**
-- Solution: Hire cashiers (+30 each), buy checkout upgrades
-
-**Problem: Can't restock enough items**
-- Solution: Hire restockers (+200 each), buy warehouse upgrades
-
-**Problem: Not leveling up fast enough**
-- Solution: Sell more volume (cheap items work), buy XP boost upgrades
 
 ---
 
