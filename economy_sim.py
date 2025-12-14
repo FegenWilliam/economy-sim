@@ -427,6 +427,7 @@ class Vendor:
     lead_time: int = 0  # Number of days for delivery (0 = instant delivery)
     volume_pricing_tiers: Optional[List[tuple]] = None  # List of (quantity_threshold, pricing_multiplier) sorted by quantity
     required_reputation: Optional[float] = None  # Minimum reputation required to use this vendor
+    required_level: Optional[int] = None  # Minimum player level required to use this vendor
     allowed_categories: Optional[List[str]] = None  # If set, only items from these categories are available
 
     def get_price(self, item_name: str, quantity: int = 1) -> Optional[float]:
@@ -786,6 +787,10 @@ class Player:
 
         # Check reputation requirement
         if vendor.required_reputation is not None and self.reputation < vendor.required_reputation:
+            return False
+
+        # Check level requirement
+        if vendor.required_level is not None and self.store_level < vendor.required_level:
             return False
 
         # Check minimum purchase requirement
@@ -1677,7 +1682,7 @@ def create_vendors() -> List[Vendor]:
         ]
     ))
 
-    # Vendor 5: Stock Masters Ltd - 80% market price, requires 100 reputation, max 500 per item, 2 day lead time, all items
+    # Vendor 5: Stock Masters Ltd - 80% market price, requires 100 reputation, level 10, max 500 per item, 2 day lead time, all items
     vendors.append(Vendor(
         name="Stock Masters Ltd",
         pricing_multiplier=0.80,
@@ -1685,7 +1690,8 @@ def create_vendors() -> List[Vendor]:
         selection_params=0,
         max_per_item_per_player=500,
         lead_time=2,
-        required_reputation=100.0
+        required_reputation=100.0,
+        required_level=10
     ))
 
     # Vendor 6: Luxury House Co. - Only Gaming and Luxury categories
@@ -1696,7 +1702,7 @@ def create_vendors() -> List[Vendor]:
         selection_type="category",
         selection_params=0,
         allowed_categories=["Gaming", "Luxury"],
-        lead_time=0,
+        lead_time=1,
         volume_pricing_tiers=[
             (50, 0.90)
         ]
@@ -1710,7 +1716,7 @@ def create_vendors() -> List[Vendor]:
         selection_type="category",
         selection_params=0,
         allowed_categories=["Food & Groceries", "Fresh Produce"],
-        lead_time=0,
+        lead_time=1,
         volume_pricing_tiers=[
             (1000, 0.80)
         ]
@@ -2970,15 +2976,27 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 7.8: Apply daily reputation changes with limits and decay
     import math
     for player in game_state.players:
-        # Apply daily reputation changes with max -5 loss limit
+        # Apply daily reputation changes from customer interactions
         rep_change = daily_reputation_changes[player.name]
 
         # Limit negative changes to -5 max per day
         if rep_change < -5:
             rep_change = -5
-        # Positive changes have no limit
+        # Limit positive changes to +25 max per day
+        if rep_change > 25:
+            rep_change = 25
 
-        # Apply the change
+        # Additional penalties (applied separately from customer interaction cap)
+        # Penalty: -5 reputation if stock is completely empty
+        total_stock = sum(player.inventory.values())
+        if total_stock == 0:
+            rep_change -= 5
+
+        # Penalty: -5 reputation if average fulfillment is below 30%
+        if player.average_fulfillment_pct < 30.0:
+            rep_change -= 5
+
+        # Apply the total change
         player.reputation += rep_change
 
         # Apply 5% decay (rounded up) for positive reputation only
@@ -3384,9 +3402,20 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
 
         print("\nSelect Vendor:")
         for i, vendor in enumerate(game_state.vendors, 1):
-            rep_info = f" (Requires {vendor.required_reputation:.0f} reputation)" if vendor.required_reputation else ""
-            locked = " [LOCKED]" if vendor.required_reputation and player.reputation < vendor.required_reputation else ""
-            print(f"  {i}. {vendor.name}{rep_info}{locked}")
+            requirements = []
+            if vendor.required_reputation:
+                requirements.append(f"{vendor.required_reputation:.0f} reputation")
+            if vendor.required_level:
+                requirements.append(f"level {vendor.required_level}")
+
+            req_info = f" (Requires {', '.join(requirements)})" if requirements else ""
+
+            # Check if vendor is locked
+            rep_locked = vendor.required_reputation and player.reputation < vendor.required_reputation
+            level_locked = vendor.required_level and player.store_level < vendor.required_level
+            locked = " [LOCKED]" if (rep_locked or level_locked) else ""
+
+            print(f"  {i}. {vendor.name}{req_info}{locked}")
         print(f"  0. Back to Main Menu")
 
         try:
@@ -3402,6 +3431,11 @@ def vendor_menu(game_state: GameState, player: Player) -> None:
                 # Check reputation requirement
                 if vendor.required_reputation and player.reputation < vendor.required_reputation:
                     print(f"\n✗ You need {vendor.required_reputation:.0f} reputation to use this vendor. Your reputation: {player.reputation:.0f}")
+                    continue
+
+                # Check level requirement
+                if vendor.required_level and player.store_level < vendor.required_level:
+                    print(f"\n✗ You need level {vendor.required_level} to use this vendor. Your level: {player.store_level}")
                     continue
 
                 # Show volume pricing info if applicable
@@ -3636,7 +3670,12 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                                 price = vendor.get_price(item.name, 1)  # Show base price
                                                 min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                                                 vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
-                                                rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
+                                                req_parts = []
+                                                if vendor.required_reputation:
+                                                    req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                                                if vendor.required_level:
+                                                    req_parts.append(f"lvl: {vendor.required_level}")
+                                                rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
                                                 # Calculate effective lead time with player's upgrades
                                                 lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                                 effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -3691,7 +3730,12 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                         price = vendor.get_price(item.name, 1)  # Show base price
                                         min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                                         vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
-                                        rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
+                                        req_parts = []
+                                        if vendor.required_reputation:
+                                            req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                                        if vendor.required_level:
+                                            req_parts.append(f"lvl: {vendor.required_level}")
+                                        rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
                                         # Calculate effective lead time with player's upgrades
                                         lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                         effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -3799,7 +3843,12 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                     price = vendor.get_price(item.name, 1)  # Show base price
                                     min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                                     vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
-                                    rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
+                                    req_parts = []
+                                    if vendor.required_reputation:
+                                        req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                                    if vendor.required_level:
+                                        req_parts.append(f"lvl: {vendor.required_level}")
+                                    rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
                                     # Calculate effective lead time with player's upgrades
                                     lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                     effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -4111,7 +4160,12 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                                         price = vendor.get_price(item.name, 1)  # Show base price
                                         min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                                         vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
-                                        rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
+                                        req_parts = []
+                                        if vendor.required_reputation:
+                                            req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                                        if vendor.required_level:
+                                            req_parts.append(f"lvl: {vendor.required_level}")
+                                        rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
                                         # Calculate effective lead time with player's upgrades
                                         lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                         effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -4163,7 +4217,12 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                                 price = vendor.get_price(item.name, 1)  # Show base price
                                 min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                                 vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
-                                rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
+                                req_parts = []
+                                if vendor.required_reputation:
+                                    req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                                if vendor.required_level:
+                                    req_parts.append(f"lvl: {vendor.required_level}")
+                                rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
                                 # Calculate effective lead time with player's upgrades
                                 lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                                 effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -4270,7 +4329,12 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                             price = vendor.get_price(item.name, 1)  # Show base price
                             min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                             vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
-                            rep_text = f" [req rep: {vendor.required_reputation:.0f}]" if vendor.required_reputation else ""
+                            req_parts = []
+                            if vendor.required_reputation:
+                                req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                            if vendor.required_level:
+                                req_parts.append(f"lvl: {vendor.required_level}")
+                            rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
                             # Calculate effective lead time with player's upgrades
                             lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                             effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
@@ -5037,6 +5101,7 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "lead_time": vendor.lead_time,
                 "volume_pricing_tiers": vendor.volume_pricing_tiers,
                 "required_reputation": vendor.required_reputation,
+                "required_level": vendor.required_level,
                 "allowed_categories": vendor.allowed_categories,
             }
             for vendor in game_state.vendors
@@ -5142,6 +5207,7 @@ def deserialize_game_state(data: dict) -> GameState:
             lead_time=vendor_data.get("lead_time", default_lead_times.get(vendor_data["name"], 0)),
             volume_pricing_tiers=[tuple(tier) for tier in vendor_data["volume_pricing_tiers"]] if vendor_data.get("volume_pricing_tiers") else None,
             required_reputation=vendor_data.get("required_reputation"),
+            required_level=vendor_data.get("required_level"),
             allowed_categories=vendor_data.get("allowed_categories"),
         )
         for vendor_data in data["vendors"]
