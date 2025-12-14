@@ -551,7 +551,7 @@ class Player:
 
     def get_max_items_per_day(self) -> int:
         """Get max number of items that can be restocked per day."""
-        base = 100 + (self.restockers * 200)  # Base 100 items + 200 per restocker
+        base = 200 + (self.restockers * 200)  # Base 200 items + 200 per restocker
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
         return int(base + bonus)
 
@@ -1605,23 +1605,23 @@ def create_vendors() -> List[Vendor]:
     """
     vendors = []
 
-    # Vendor 1: 70% of market price, 1 random item per day, max 200 per item per player, 4 day lead time
+    # Vendor 1: 70% of market price, 1 random item per day, max 100 per item per player, 4 day lead time
     vendors.append(Vendor(
         name="Lucky Deal Trader",
         pricing_multiplier=0.70,
         selection_type="random_daily",
         selection_params=1,  # 1 item
-        max_per_item_per_player=200,
+        max_per_item_per_player=100,
         lead_time=4
     ))
 
-    # Vendor 2: 80% of market price, 5 random items per day, max 200 per item per player, 3 day lead time
+    # Vendor 2: 80% of market price, 5 random items per day, max 100 per item per player, 3 day lead time
     vendors.append(Vendor(
         name="Discount Wholesale Co.",
         pricing_multiplier=0.80,
         selection_type="random_daily",
         selection_params=5,  # 5 items
-        max_per_item_per_player=200,
+        max_per_item_per_player=100,
         lead_time=3
     ))
 
