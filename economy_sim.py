@@ -4303,13 +4303,6 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                         print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
                                         continue
 
-                                    # Check available capacity
-                                    total_on_order = sum(order[0] for order in player.get_buy_order(item.name))
-                                    remaining_capacity = player.get_max_items() - len(player.inventory)
-                                    if total_on_order + quantity > remaining_capacity:
-                                        print(f"\n✗ Not enough capacity! Can only add {remaining_capacity - total_on_order} more items.")
-                                        continue
-
                                     success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
                                     if success:
                                         print(f"✓ Added: {quantity} {item.name} from {selected_vendor.name}")
@@ -4770,13 +4763,6 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                                 max_products = player.get_max_products()
                                 if products_with_orders > max_products:
                                     print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
-                                    continue
-
-                                # Check available capacity
-                                total_on_order = sum(order[0] for order in player.get_buy_order(item.name))
-                                remaining_capacity = player.get_max_items() - len(player.inventory)
-                                if total_on_order + quantity > remaining_capacity:
-                                    print(f"\n✗ Not enough capacity! Can only add {remaining_capacity - total_on_order} more items.")
                                     continue
 
                                 success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
