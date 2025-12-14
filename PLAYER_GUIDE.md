@@ -23,7 +23,7 @@ Welcome to Economy Simulation! This guide will teach you everything you need to 
 ### Quick Facts
 - **Starting Cash**: $3,000
 - **Game Duration**: 365 days
-- **Players**: 1-4 human players + 2 AI competitors
+- **Players**: 1-4 human players
 - **Goal**: Have the most cash at the end of the year
 - **Gameplay**: Buy wholesale, sell retail, manage employees, expand your store
 
@@ -51,11 +51,10 @@ The game is menu-driven. Each day you can:
 4. **Configure Buy Orders & Sale Prices** - Set your purchasing and pricing strategy
 5. **Hire Employees** - Add cashiers or restockers
 6. **View Your Store Status** - Check your cash, inventory, XP, and level
-7. **View Competitor Status** - See how AI competitors are performing
-8. **Store Upgrades** - Purchase permanent improvements
-9. **Customer Forecast** - Preview tomorrow's expected customers
-10. **Save Game** - Save your progress
-11. **Quit** - Exit the game
+7. **Store Upgrades** - Purchase permanent improvements
+c. **Customer Forecast** - Preview tomorrow's expected customers
+s. **Save Game** - Save your progress
+0. **Quit** - Exit the game
 
 ---
 
@@ -102,12 +101,11 @@ You have three main capacity constraints:
 Each day follows this sequence:
 
 1. **Market Prices Update** - Prices fluctuate (typically ±5%)
-2. **AI Players Take Actions** - Competitors adjust their strategies
-3. **Your Buy Orders Execute** - Inventory arrives based on your orders
-4. **Customers Shop** - Customers visit stores and make purchases
-5. **Employee Wages Deducted** - Every 30 days ($500 per employee)
-6. **Vendor Inventories Refresh** - Vendors restock for tomorrow
-7. **Day Counter Advances** - Day increments by 1
+2. **Your Buy Orders Execute** - Inventory arrives based on your orders
+3. **Customers Shop** - Customers visit stores and make purchases
+4. **Employee Wages Deducted** - Every 30 days ($500 per employee)
+5. **Vendor Inventories Refresh** - Vendors restock for tomorrow
+6. **Day Counter Advances** - Day increments by 1
 
 ### Special Events
 
@@ -358,16 +356,15 @@ Production lines are available for purchase through the Store Upgrades menu and 
 
 The game gets harder as days progress:
 - **Customer budgets increase** (high-spenders become majority)
-- **Customer count grows** (more competition for their business)
+- **Customer count grows** (more customers to serve)
 - **Market volatility** (bigger price swings, demand shifts)
-- **AI competitors improve** (they level up and expand too)
+- **Increased complexity** (more products, higher stakes)
 
 ### Multiplayer
 
 - 2-4 human players can compete
 - Turn-based: all humans must "Pass Day" before day advances
-- 2 AI competitors (Alice Corp, Bob Ltd) always play optimally
-- Compete on same market - your success affects their opportunities
+- Compete on same market - your success affects other players' opportunities
 
 ---
 
