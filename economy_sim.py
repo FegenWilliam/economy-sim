@@ -450,7 +450,6 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, List[tuple]] = field(default_factory=dict)  # item_name -> [(quantity, vendor_name), ...] (up to 3 vendors)
-    cashiers: int = 0  # Each cashier adds 30 customers per day capacity
     restockers: int = 0  # Each restocker adds 200 items per day capacity
     store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
     experience: float = 0.0  # XP gained from profits
@@ -531,15 +530,9 @@ class Player:
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_products")
         return int(base + bonus)
 
-    def get_max_customers(self) -> int:
-        """Get max number of customers that can be served per day."""
-        base = 20 + (self.cashiers * 30)  # Base 20 customers + 30 per cashier
-        bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_customers")
-        return int(base + bonus)
-
     def get_max_items_per_day(self) -> int:
-        """Get max number of items that can be restocked per day."""
-        base = 200 + (self.restockers * 200)  # Base 200 items + 200 per restocker
+        """Get max number of items that can be bought per day (buy order limit)."""
+        base = 300 + ((self.store_level - 1) * 100)  # Base 300 items + 100 per level
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
         return int(base + bonus)
 
@@ -632,7 +625,7 @@ class Player:
 
     def hire_employee(self, employee_type: str) -> bool:
         """
-        Hire an employee (cashier or restocker).
+        Hire an employee (restocker).
         Costs $500. Returns True if successful, False if not enough cash.
         """
         HIRING_COST = 500.0
@@ -641,9 +634,7 @@ class Player:
             return False
 
         self.cash -= HIRING_COST
-        if employee_type == "cashier":
-            self.cashiers += 1
-        elif employee_type == "restocker":
+        if employee_type == "restocker":
             self.restockers += 1
         else:
             return False
@@ -660,7 +651,7 @@ class Player:
         if current_day - self.last_wage_payment_day < 30:
             return 0.0
 
-        total_employees = self.cashiers + self.restockers
+        total_employees = self.restockers
 
         # No wages if no employees
         if total_employees == 0:
@@ -1446,7 +1437,7 @@ class Customer:
 @dataclass
 class GameConfig:
     """Configuration for the economic simulation."""
-    starting_cash: float = 3000.0
+    starting_cash: float = 5000.0
     num_days: int = 30
     customers_per_day: int = 10
     # TODO: add more config options if needed (e.g. random seed, max inventory, etc.)
@@ -1594,24 +1585,24 @@ def create_vendors() -> List[Vendor]:
     """
     vendors = []
 
-    # Vendor 1: 70% of market price, 1 random item per day, max 100 per item per player, 4 day lead time
+    # Vendor 1: 70% of market price, 1 random item per day, max 100 per item per player, 3 day lead time
     vendors.append(Vendor(
         name="Lucky Deal Trader",
         pricing_multiplier=0.70,
         selection_type="random_daily",
         selection_params=1,  # 1 item
         max_per_item_per_player=100,
-        lead_time=4
+        lead_time=3
     ))
 
-    # Vendor 2: 80% of market price, 5 random items per day, max 100 per item per player, 3 day lead time
+    # Vendor 2: 80% of market price, 5 random items per day, max 100 per item per player, 2 day lead time
     vendors.append(Vendor(
         name="Discount Wholesale Co.",
         pricing_multiplier=0.80,
         selection_type="random_daily",
         selection_params=5,  # 5 items
         max_per_item_per_player=100,
-        lead_time=3
+        lead_time=2
     ))
 
     # Vendor 3: 90% of market price, all items under $20 market price, 1 day lead time
@@ -1661,7 +1652,7 @@ def create_vendors() -> List[Vendor]:
         lead_time=1
     ))
 
-    # Vendor 8: 80% of market price, min 500 per purchase, items $10 or less, 3 day lead time
+    # Vendor 8: 80% of market price, min 500 per purchase, items $10 or less, 2 day lead time
     vendors.append(Vendor(
         name="Cheap Goods Co.",
         pricing_multiplier=0.80,
@@ -1669,7 +1660,7 @@ def create_vendors() -> List[Vendor]:
         selection_params=0,
         min_purchase=500,
         price_max=10.0,
-        lead_time=3
+        lead_time=2
     ))
 
     # Vendor 9: 95% of market price, min 10 per purchase, items $200 or more, 1 day lead time
@@ -1876,10 +1867,6 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
     Admins can add more upgrades to this list.
     """
     upgrades = [
-        # Customer capacity upgrades
-        Upgrade(name="Extra Cashier Station", cost=3000, effect_type="max_customers", effect_value=30),
-        Upgrade(name="Express Checkout Lane", cost=5000, effect_type="max_customers", effect_value=60),
-
         # Buyout capacity upgrades
         Upgrade(name="Warehouse Extension", cost=5000, effect_type="max_items", effect_value=400),
         Upgrade(name="Loading Dock", cost=10000, effect_type="max_items", effect_value=600),
@@ -2177,6 +2164,158 @@ def get_weighted_special_customer_type() -> str:
     return "hoarder"  # Fallback
 
 
+def calculate_player_cas(
+    player: Player,
+    market_prices: Dict[str, float],
+    items_by_name: Dict[str, Item],
+    all_available_items: List[Item]
+) -> float:
+    """
+    Calculate Customer Attraction Score (CAS) for a player based on their overall store.
+    This is used for weighted customer distribution.
+
+    Formula:
+    - reputation_multiplier = 10 ** (reputation / 100)
+    - discount_score = sum of discount % for all stocked items
+    - item_stability = sum of proximity and consistency scores
+    - availability_multiplier based on % of catalog in stock
+    - fulfillment_multiplier based on average fulfillment %
+    - CAS = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+
+    Returns 0 if player has no stock or no acceptable prices.
+    """
+    discount_score = 0.0
+    has_any_stock = False
+    max_acceptable_price_multiplier = 1.15
+    total_catalog_items = len(all_available_items)
+
+    # Calculate discount score for all stocked items
+    for item_name, quantity in player.inventory.items():
+        if quantity <= 0 or item_name not in player.prices:
+            continue
+
+        market_price = market_prices.get(item_name, 0)
+        if market_price <= 0:
+            continue
+
+        player_price = player.prices[item_name]
+        max_acceptable_price = market_price * max_acceptable_price_multiplier
+
+        # Only consider if price is acceptable
+        if player_price <= max_acceptable_price:
+            has_any_stock = True
+
+            # Calculate discount percentage
+            if player_price < market_price:
+                discount_pct = ((market_price - player_price) / market_price) * 100
+            else:
+                discount_pct = 0
+
+            # Get item importance
+            item = items_by_name.get(item_name)
+            importance = item.importance if item else 2
+
+            # Add weighted discount to score
+            discount_score += discount_pct * importance
+
+    # Return 0 if no stock
+    if not has_any_stock:
+        return 0.0
+
+    # Calculate availability multiplier
+    items_in_stock = sum(1 for qty in player.inventory.values() if qty > 0)
+    availability_pct = (items_in_stock / total_catalog_items) * 100 if total_catalog_items > 0 else 0
+
+    if availability_pct >= 100:
+        availability_multiplier = 1.2
+    elif availability_pct >= 80:
+        availability_multiplier = 1.1
+    elif availability_pct < 20:
+        availability_multiplier = 0.5
+    elif availability_pct < 50:
+        availability_multiplier = 0.8
+    else:
+        availability_multiplier = 1.0
+
+    # Calculate fulfillment multiplier
+    fulfillment_pct = player.average_fulfillment_pct
+    if fulfillment_pct >= 100:
+        fulfillment_multiplier = 2.0
+    elif fulfillment_pct >= 90:
+        fulfillment_multiplier = 1.4
+    elif fulfillment_pct >= 50:
+        fulfillment_multiplier = 1.0
+    elif fulfillment_pct >= 20:
+        fulfillment_multiplier = 0.9
+    else:
+        fulfillment_multiplier = 0.5
+
+    # Calculate reputation multiplier
+    reputation_multiplier = 10 ** (player.reputation / 100)
+
+    # Calculate item stability
+    item_stability = calculate_item_stability(player, market_prices, items_by_name)
+
+    # Calculate final CAS
+    cas = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+
+    return cas
+
+
+def assign_customers_by_cas(
+    customers: List[Customer],
+    players: List[Player],
+    market_prices: Dict[str, float],
+    items_by_name: Dict[str, Item],
+    all_available_items: List[Item]
+) -> Dict[str, List[Customer]]:
+    """
+    Assign customers to players based on weighted CAS distribution.
+
+    Returns a dictionary mapping player name to list of assigned customers.
+    """
+    # Calculate CAS for each player
+    player_cas = {}
+    for player in players:
+        cas = calculate_player_cas(player, market_prices, items_by_name, all_available_items)
+        player_cas[player.name] = cas
+
+    # Calculate total CAS
+    total_cas = sum(player_cas.values())
+
+    # If no players have any CAS, distribute evenly
+    if total_cas == 0:
+        # Equal distribution
+        assignments = {player.name: [] for player in players}
+        for i, customer in enumerate(customers):
+            player = players[i % len(players)]
+            assignments[player.name].append(customer)
+        return assignments
+
+    # Distribute customers based on CAS weights
+    assignments = {player.name: [] for player in players}
+
+    for customer in customers:
+        # Weighted random selection
+        rand = random.random() * total_cas
+        cumulative = 0.0
+
+        selected_player = None
+        for player in players:
+            cumulative += player_cas[player.name]
+            if rand < cumulative:
+                selected_player = player
+                break
+
+        # Fallback to first player if something goes wrong
+        if selected_player is None:
+            selected_player = players[0]
+
+        assignments[selected_player.name].append(customer)
+
+    return assignments
+
+
 def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float]:
     """
     Simulate a single day in the economic game.
@@ -2221,7 +2360,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: num_players * 15 + scaled growth
+    # Calculate base customer count: num_players * 25 + scaled growth
     # Growth scales: +2/day base, +1 every 15 days (day 15: +3, day 30: +4, etc.)
     def calculate_scaled_customers(day):
         if day == 0:
@@ -2235,7 +2374,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         total += remaining_days * current_rate
         return total
 
-    base_customer_count = len(game_state.players) * 15 + calculate_scaled_customers(game_state.day)
+    base_customer_count = len(game_state.players) * 25 + calculate_scaled_customers(game_state.day)
 
     # Add permanent customer increase for every 14-day period that has passed
     fourteen_day_periods = game_state.day // 14
@@ -2328,138 +2467,109 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Track total demand per item (what customers want to buy today)
     daily_demand_per_item = {}  # item_name -> total quantity wanted
 
-    # Process each regular customer (with cashier limits)
-    for customer in all_customers:
-        needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
+    # Build items dictionary for quick lookup (needed for CAS calculation)
+    items_by_name = {item.name: item for item in game_state.items}
 
-        # Track demand for each item the customer wants
-        for need in needs:
-            daily_demand_per_item[need.item_name] = daily_demand_per_item.get(need.item_name, 0) + need.quantity
+    # Assign customers to players based on weighted CAS distribution
+    customer_assignments = assign_customers_by_cas(
+        all_customers,
+        game_state.players,
+        game_state.market_prices,
+        items_by_name,
+        game_state.items
+    )
 
-        # Track which stores this customer has been counted at (to count each customer only once per store)
-        customer_counted_at_store = {}
-        customer_bought_anything = False
-        # Track customer spending against their budget
-        customer_spending = 0.0
-        customer_budget = customer.budget
+    # Process customers for each player
+    for player in game_state.players:
+        assigned_customers = customer_assignments.get(player.name, [])
 
-        # NEW REPUTATION-BASED SYSTEM: Choose supplier based on reputation and discounts
-        # Build items dictionary for quick lookup
-        items_by_name = {item.name: item for item in game_state.items}
+        for customer in assigned_customers:
+            needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
 
-        # Track original needs for reputation calculation
-        original_needs_count = sum(need.quantity for need in needs)
-        fulfilled_needs_count = 0
+            # Track demand for each item the customer wants
+            for need in needs:
+                daily_demand_per_item[need.item_name] = daily_demand_per_item.get(need.item_name, 0) + need.quantity
 
-        remaining_needs = list(needs)
+            # Track customer spending against their budget
+            customer_spending = 0.0
+            customer_budget = customer.budget
+            customer_counted_at_store = {}
+            customer_bought_anything = False
 
-        # Choose best supplier based on reputation and discount score
-        current_supplier = None
-        visited_stores = []  # Track which stores this customer shopped at
+            # Track original needs for reputation calculation
+            original_needs_count = sum(need.quantity for need in needs)
+            fulfilled_needs_count = 0
 
-        while remaining_needs and customer_spending < customer_budget:
-            # Find best supplier for remaining needs
-            if current_supplier is None:
-                # Find suppliers with available capacity
-                available_suppliers = [
-                    player for player in game_state.players
-                    if customers_served[player.name] < player.get_max_customers()
-                ]
+            remaining_needs = list(needs)
 
-                if not available_suppliers:
-                    # No stores with capacity, mark remaining as unmet
-                    for need in remaining_needs:
-                        unmet_demand += need.quantity
-                        unmet_demand_per_item[need.item_name] = (
-                            unmet_demand_per_item.get(need.item_name, 0) + need.quantity
-                        )
-                    break
+            # Customer will shop at their assigned player's store
+            current_supplier = player
+            visited_stores = [player.name]  # Track which stores this customer shopped at
 
-                # Choose supplier based on reputation and discounts
-                current_supplier = customer.choose_supplier_by_reputation(
-                    available_suppliers,
-                    remaining_needs,
-                    game_state.market_prices,
-                    items_by_name,
-                    game_state.items
-                )
+            while remaining_needs and customer_spending < customer_budget:
+                # Try to purchase items from assigned supplier
+                purchased_needs = []
+                for need in remaining_needs:
+                    # Check if current supplier has this item
+                    if (need.item_name in current_supplier.inventory and
+                        current_supplier.inventory[need.item_name] > 0 and
+                        need.item_name in current_supplier.prices):
 
-                if current_supplier is None:
-                    # No suitable supplier found, mark as unmet
-                    for need in remaining_needs:
-                        unmet_demand += need.quantity
-                        unmet_demand_per_item[need.item_name] = (
-                            unmet_demand_per_item.get(need.item_name, 0) + need.quantity
-                        )
-                    break
+                        # Check if price is acceptable
+                        market_price = game_state.market_prices.get(need.item_name, float('inf'))
+                        max_acceptable_price = market_price * 1.15
+                        supplier_price = current_supplier.prices[need.item_name]
 
-                # Track that this customer visited this store
-                if current_supplier.name not in visited_stores:
-                    visited_stores.append(current_supplier.name)
+                        if supplier_price <= max_acceptable_price:
+                            remaining_budget = customer_budget - customer_spending
 
-            # Try to purchase items from current supplier
-            purchased_needs = []
-            for need in remaining_needs:
-                # Check if current supplier has this item
-                if (need.item_name in current_supplier.inventory and
-                    current_supplier.inventory[need.item_name] > 0 and
-                    need.item_name in current_supplier.prices):
+                            # Check if customer can afford this item (at least 1 unit)
+                            if supplier_price > remaining_budget:
+                                continue
 
-                    # Check if price is acceptable
-                    market_price = game_state.market_prices.get(need.item_name, float('inf'))
-                    max_acceptable_price = market_price * 1.15
-                    supplier_price = current_supplier.prices[need.item_name]
+                            # Adjust quantity based on remaining budget
+                            affordable_quantity = min(need.quantity, int(remaining_budget / supplier_price))
 
-                    if supplier_price <= max_acceptable_price:
-                        remaining_budget = customer_budget - customer_spending
+                            # Purchase from current supplier
+                            revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
+                                need.item_name, affordable_quantity, supplier_price
+                            )
 
-                        # Check if customer can afford this item (at least 1 unit)
-                        if supplier_price > remaining_budget:
-                            continue
+                            if revenue > 0:
+                                # Track customer spending
+                                customer_spending += revenue
+                                fulfilled_needs_count += actual_units_sold
 
-                        # Adjust quantity based on remaining budget
-                        affordable_quantity = min(need.quantity, int(remaining_budget / supplier_price))
+                                # Track sales
+                                daily_sales[current_supplier.name] += revenue
+                                daily_profits[current_supplier.name] += profit
 
-                        # Purchase from current supplier
-                        revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
-                            need.item_name, affordable_quantity, supplier_price
-                        )
+                                # Count customer at this store (only once)
+                                if current_supplier.name not in customer_counted_at_store:
+                                    customers_served[current_supplier.name] += 1
+                                    customer_counted_at_store[current_supplier.name] = True
 
-                        if revenue > 0:
-                            # Track customer spending
-                            customer_spending += revenue
-                            fulfilled_needs_count += actual_units_sold
+                                # Track per-item sales
+                                if need.item_name not in per_item_sales[current_supplier.name]:
+                                    per_item_sales[current_supplier.name][need.item_name] = {
+                                        'units_sold': 0,
+                                        'revenue': 0.0,
+                                        'starting_inventory': 0
+                                    }
+                                per_item_sales[current_supplier.name][need.item_name]['units_sold'] += actual_units_sold
+                                per_item_sales[current_supplier.name][need.item_name]['revenue'] += revenue
 
-                            # Track sales
-                            daily_sales[current_supplier.name] += revenue
-                            daily_profits[current_supplier.name] += profit
+                                customer_bought_anything = True
 
-                            # Count customer at this store (only once)
-                            if current_supplier.name not in customer_counted_at_store:
-                                customers_served[current_supplier.name] += 1
-                                customer_counted_at_store[current_supplier.name] = True
+                                # Update need quantity or mark as purchased
+                                if actual_units_sold >= need.quantity:
+                                    purchased_needs.append(need)
+                                else:
+                                    need.quantity -= actual_units_sold
 
-                            # Track per-item sales
-                            if need.item_name not in per_item_sales[current_supplier.name]:
-                                per_item_sales[current_supplier.name][need.item_name] = {
-                                    'units_sold': 0,
-                                    'revenue': 0.0,
-                                    'starting_inventory': 0
-                                }
-                            per_item_sales[current_supplier.name][need.item_name]['units_sold'] += actual_units_sold
-                            per_item_sales[current_supplier.name][need.item_name]['revenue'] += revenue
-
-                            customer_bought_anything = True
-
-                            # Update need quantity or mark as purchased
-                            if actual_units_sold >= need.quantity:
-                                purchased_needs.append(need)
-                            else:
-                                need.quantity -= actual_units_sold
-
-                            # Check if customer has hit their budget limit
-                            if customer_spending >= customer_budget:
-                                break
+                                # Check if customer has hit their budget limit
+                                if customer_spending >= customer_budget:
+                                    break
 
             # Remove fully purchased items from remaining needs
             for need in purchased_needs:
@@ -2675,12 +2785,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     for player in game_state.players:
         daily_profits[player.name] = daily_sales[player.name] - daily_spending[player.name]
 
-    # Step 5.6: Award XP based on profit (before wages)
+    # Step 5.6: Award XP based on sales (every $5 of sales = 1 XP)
     level_ups = {}
     for player in game_state.players:
-        profit = daily_profits[player.name]
-        if profit > 0:
-            leveled_up = player.add_experience(profit)
+        sales = daily_sales[player.name]
+        if sales > 0:
+            # Every $5 of sales = 1 XP
+            sales_xp = sales / 5.0
+            leveled_up = player.add_experience(sales_xp)
             if leveled_up:
                 level_ups[player.name] = player.store_level
 
@@ -2688,8 +2800,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     for player in game_state.players:
         wages = player.pay_monthly_wages(game_state.day)
         if show_details and wages > 0:
-            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({player.cashiers} cashiers + {player.restockers} restockers)")
-        elif show_details and (player.cashiers > 0 or player.restockers > 0):
+            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({player.restockers} restockers)")
+        elif show_details and player.restockers > 0:
             days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
             print(f"  {player.name}: No payment today ({days_until_payment} days until next wage)")
 
@@ -2701,7 +2813,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             profit = daily_profits[player.name]
             served = customers_served[player.name]
             uncapped_served = uncapped_customers_served[player.name]
-            max_served = player.get_max_customers()
             xp_needed = player.get_xp_for_next_level()
 
             # Calculate total items sold
@@ -2712,7 +2823,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             print(f"  {player.name}:")
             print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | XP: {player.experience:.0f}/{xp_needed:.0f}")
-            customer_info = f"Regular: {served}/{max_served}"
+            customer_info = f"Regular: {served}"
             if uncapped_customer_count > 0:
                 customer_info += f" | 💎 Uncapped: {uncapped_served}"
             print(f"    Customers: {customer_info} | Items Sold: {total_items_sold} | Cash: ${player.cash:.2f}")
@@ -3120,9 +3231,8 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
     print(f"Experience: {player.experience:.0f}/{xp_needed:.0f} XP")
 
     print(f"\nEmployees:")
-    print(f"  Cashiers: {player.cashiers} (Max {player.get_max_customers()} customers/day)")
     print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
-    total_employees = player.cashiers + player.restockers
+    total_employees = player.restockers
     base_wage = 20.0
     wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
     actual_wage = max(0, base_wage - wage_reduction)
@@ -4131,9 +4241,8 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         print("=" * 60)
         print(f"\nYour Cash: ${player.cash:.2f}")
         print(f"\nCurrent Employees:")
-        print(f"  Cashiers: {player.cashiers} (Max {player.get_max_customers()} customers/day)")
         print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
-        total_employees = player.cashiers + player.restockers
+        total_employees = player.restockers
 
         # Calculate actual wage with upgrades
         wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
@@ -4153,27 +4262,16 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         print(f"Note: Wages paid every 30 days for ALL employees (including newly hired)")
 
         print("\nOptions:")
-        print("  1. Hire Cashier (+30 customers/day capacity)")
-        print("  2. Hire Restocker (+200 items/day capacity)")
+        print("  1. Hire Restocker (+200 items/day capacity)")
         print("  0. Back to Main Menu")
 
         try:
-            choice = input("\nSelect option (0-2): ")
+            choice = input("\nSelect option (0-1): ")
             choice_num = int(choice)
 
             if choice_num == 0:
                 break
             elif choice_num == 1:
-                if player.cash < HIRING_COST:
-                    print(f"\n✗ Not enough cash! Need ${HIRING_COST:.2f}, have ${player.cash:.2f}")
-                else:
-                    success = player.hire_employee("cashier")
-                    if success:
-                        print(f"\n✓ Hired 1 cashier for ${HIRING_COST:.2f}")
-                        print(f"  New capacity: {player.get_max_customers()} customers/day")
-                    else:
-                        print("\n✗ Failed to hire cashier")
-            elif choice_num == 2:
                 if player.cash < HIRING_COST:
                     print(f"\n✗ Not enough cash! Need ${HIRING_COST:.2f}, have ${player.cash:.2f}")
                 else:
@@ -4670,7 +4768,7 @@ def main_menu(game_state: GameState) -> bool:
         print(f"MAIN MENU - Day {game_state.day}")
         print("=" * 50)
         print(f"Your Cash: ${player.cash:.2f}")
-        print(f"Employees: {player.cashiers} cashiers, {player.restockers} restockers")
+        print(f"Employees: {player.restockers} restockers")
         print("\nOptions:")
         print("  1. Pass Day (Simulate)")
         print("  2. View Market Prices")
@@ -4796,7 +4894,6 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "inventory": player.inventory,
                 "prices": player.prices,
                 "buy_orders": {k: list(v) for k, v in player.buy_orders.items()},
-                "cashiers": player.cashiers,
                 "restockers": player.restockers,
                 "store_level": player.store_level,
                 "experience": player.experience,
@@ -4920,8 +5017,7 @@ def deserialize_game_state(data: dict) -> GameState:
             inventory=player_data["inventory"],
             prices=player_data["prices"],
             buy_orders=buy_orders,
-            cashiers=player_data["cashiers"],
-            restockers=player_data["restockers"],
+            restockers=player_data.get("restockers", 0),  # Backward compatibility
             store_level=player_data["store_level"],
             experience=player_data["experience"],
             item_costs=player_data["item_costs"],
