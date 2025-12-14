@@ -5467,6 +5467,7 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "min_purchase": vendor.min_purchase,
                 "price_min": vendor.price_min,
                 "price_max": vendor.price_max,
+                "lead_time": vendor.lead_time,
             }
             for vendor in game_state.vendors
         ],
@@ -5542,7 +5543,20 @@ def deserialize_game_state(data: dict) -> GameState:
             category=category
         ))
 
-    # Recreate vendors
+    # Recreate vendors with backward compatibility for lead_time
+    # Map vendor names to their default lead times for backward compatibility
+    default_lead_times = {
+        "Lucky Deal Trader": 4,
+        "Discount Wholesale Co.": 3,
+        "Budget Goods Ltd.": 1,
+        "Premium Select Inc.": 1,
+        "Instant Goods Ltd.": 0,
+        "Universal Supply Corp.": 0,
+        "Bulk Goods Co.": 1,
+        "Cheap Goods Co.": 3,
+        "VIP Goods Co.": 1,
+    }
+
     vendors = [
         Vendor(
             name=vendor_data["name"],
@@ -5554,6 +5568,7 @@ def deserialize_game_state(data: dict) -> GameState:
             min_purchase=vendor_data.get("min_purchase"),
             price_min=vendor_data.get("price_min"),
             price_max=vendor_data.get("price_max"),
+            lead_time=vendor_data.get("lead_time", default_lead_times.get(vendor_data["name"], 0)),
         )
         for vendor_data in data["vendors"]
     ]
