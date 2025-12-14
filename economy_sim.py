@@ -3559,7 +3559,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             player.inventory[item_name] = new_total_qty
 
             if player.is_human and show_details:
-                print(f"\n📦 Delivery arrived: {quantity}x {item_name}")
+                print(f"\n📦 Delivery arrived for {player.name}: {quantity}x {item_name}")
 
         # Update pending deliveries list
         player.pending_deliveries = remaining_deliveries
