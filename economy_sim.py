@@ -5499,6 +5499,7 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "vendor_partnership_expiration": player.vendor_partnership_expiration,
                 "reputation": player.reputation,
                 "average_fulfillment_pct": player.average_fulfillment_pct,
+                "pending_deliveries": player.pending_deliveries,
             }
             for player in game_state.players
         ],
@@ -5612,6 +5613,7 @@ def deserialize_game_state(data: dict) -> GameState:
             vendor_partnership_expiration=player_data.get("vendor_partnership_expiration", {}),
             reputation=player_data.get("reputation", 0.0),
             average_fulfillment_pct=player_data.get("average_fulfillment_pct", 70.0),
+            pending_deliveries=[tuple(delivery) for delivery in player_data.get("pending_deliveries", [])],
         )
         players.append(player)
 
