@@ -84,6 +84,9 @@ PRODUCT_CATALOG = [
     Item("Bread", 2.0, 5.0, "Food & Groceries"),
     Item("Milk", 3.0, 6.0, "Food & Groceries"),
     Item("Eggs", 2.5, 5.5, "Food & Groceries"),
+    Item("Coffee", 6.0, 12.0, "Food & Groceries"),
+    Item("Toilet Paper", 8.0, 15.0, "Household Essentials"),
+    Item("Vitamins", 12.0, 24.0, "Health & Pharmacy"),
     Item("Cheese", 4.0, 8.0, "Food & Groceries"),
     Item("Butter", 3.5, 7.0, "Food & Groceries"),
     Item("Yogurt", 2.0, 4.5, "Food & Groceries"),
@@ -95,7 +98,6 @@ PRODUCT_CATALOG = [
     Item("Ice Cream", 3.5, 7.5, "Food & Groceries"),
     Item("Soda", 1.5, 3.0, "Food & Groceries"),
     Item("Orange Juice", 3.0, 6.0, "Food & Groceries"),
-    Item("Coffee", 6.0, 12.0, "Food & Groceries"),
     Item("Tea Bags", 3.0, 6.5, "Food & Groceries"),
     Item("Sugar", 2.0, 4.5, "Food & Groceries"),
     Item("Flour", 3.0, 6.0, "Food & Groceries"),
@@ -121,7 +123,6 @@ PRODUCT_CATALOG = [
 
     # Household Items
     Item("Paper Towels", 5.0, 10.0, "Household Essentials"),
-    Item("Toilet Paper", 8.0, 15.0, "Household Essentials"),
     Item("Dish Soap", 3.0, 6.5, "Household Essentials"),
     Item("Laundry Detergent", 8.0, 16.0, "Household Essentials"),
     Item("Trash Bags", 5.0, 10.5, "Household Essentials"),
@@ -271,7 +272,6 @@ PRODUCT_CATALOG = [
     Item("Granola Bars", 4.0, 8.0, "Food & Groceries"),
     Item("Energy Bars", 5.0, 10.0, "Food & Groceries"),
     Item("Protein Powder", 25.0, 50.0, "Food & Groceries"),
-    Item("Vitamins", 12.0, 24.0, "Health & Pharmacy"),
     Item("Fish Oil", 15.0, 30.0, "Health & Pharmacy"),
     Item("Canned Tuna", 1.5, 3.5, "Food & Groceries"),
     Item("Canned Beans", 1.5, 3.5, "Food & Groceries"),
@@ -1511,10 +1511,11 @@ class GameState:
 def create_default_items() -> List[Item]:
     """
     Create the starting items for the simulation.
-    Returns first 3 items from product catalog.
+    Returns first 6 items from product catalog.
     """
-    # Start with first 3 items (Bread, Milk, Eggs)
-    return [PRODUCT_CATALOG[0], PRODUCT_CATALOG[1], PRODUCT_CATALOG[2]]
+    # Start with first 6 items (Bread, Milk, Eggs, Coffee, Toilet Paper, Vitamins)
+    return [PRODUCT_CATALOG[0], PRODUCT_CATALOG[1], PRODUCT_CATALOG[2],
+            PRODUCT_CATALOG[3], PRODUCT_CATALOG[4], PRODUCT_CATALOG[5]]
 
 
 def unlock_new_product(game_state: GameState) -> Optional[Item]:
