@@ -4047,6 +4047,8 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                         if vendor_orders:
                             print(f"  2. Remove vendor")
                             print(f"  3. Clear all vendors")
+                        if len(vendor_orders) < 3:
+                            print(f"  4. Add multiple vendors at once")
                         print(f"  0. Back to item list")
 
                         sub_choice = input(f"\nSelect option: ").strip()
@@ -4142,16 +4144,23 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                         status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
                                         print(f"  {i}. {vendor.name}{min_text} - {status}")
 
-                                vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+                                vendor_choice = input(f"\nEnter vendor number and quantity (e.g., '2 100'), or just vendor number (0 to cancel): ").strip()
                                 try:
-                                    vendor_num = int(vendor_choice)
+                                    # Parse input - support both "vendor_num quantity" and just "vendor_num"
+                                    parts = vendor_choice.split()
+                                    vendor_num = int(parts[0])
+
                                     if vendor_num == 0:
                                         continue
                                     elif 1 <= vendor_num <= len(game_state.vendors):
                                         selected_vendor = game_state.vendors[vendor_num - 1]
 
-                                        quantity_str = input(f"Enter quantity to buy: ").strip()
-                                        quantity = int(quantity_str)
+                                        # Get quantity - either from second part or prompt
+                                        if len(parts) >= 2:
+                                            quantity = int(parts[1])
+                                        else:
+                                            quantity_str = input(f"Enter quantity to buy: ").strip()
+                                            quantity = int(quantity_str)
 
                                         if quantity > 0:
                                             # Check minimum purchase
@@ -4223,6 +4232,102 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                             if confirm == 'y':
                                 player.clear_buy_order(item.name)
                                 print(f"\n✓ Cleared all buy orders for {item.name}")
+
+                        elif sub_choice == "4" and len(vendor_orders) < 3:
+                            # Add multiple vendors at once
+                            print("\nAvailable Vendors:")
+                            for i, vendor in enumerate(game_state.vendors, 1):
+                                price = vendor.get_price(item.name)
+                                min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                                # Calculate effective lead time with player's upgrades
+                                lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                                effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                                lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+                                if price:
+                                    discount = player.get_vendor_discount(vendor.name, game_state.day)
+                                    final_price = price * (1 - discount)
+                                    discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
+                                    print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                                else:
+                                    status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
+                                    print(f"  {i}. {vendor.name}{min_text} - {status}")
+
+                            slots_available = 3 - len(vendor_orders)
+                            print(f"\nEnter up to {slots_available} vendor(s) in format: vendor_number quantity")
+                            print(f"One per line, or press Enter to finish")
+
+                            vendors_added = 0
+                            while vendors_added < slots_available:
+                                try:
+                                    vendor_input = input(f"\nVendor {vendors_added + 1} (or Enter to finish): ").strip()
+                                    if not vendor_input:
+                                        break
+
+                                    parts = vendor_input.split()
+                                    if len(parts) != 2:
+                                        print("\n✗ Invalid format! Use: vendor_number quantity (e.g., '2 100')")
+                                        continue
+
+                                    vendor_num = int(parts[0])
+                                    quantity = int(parts[1])
+
+                                    if vendor_num < 1 or vendor_num > len(game_state.vendors):
+                                        print(f"\n✗ Invalid vendor number! Must be 1-{len(game_state.vendors)}")
+                                        continue
+
+                                    selected_vendor = game_state.vendors[vendor_num - 1]
+
+                                    if quantity <= 0:
+                                        print("\n✗ Quantity must be positive!")
+                                        continue
+
+                                    # Check minimum purchase
+                                    if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
+                                        print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
+                                        continue
+
+                                    # Check product limit
+                                    products_with_orders = 0
+                                    for check_item in game_state.items:
+                                        check_orders = player.get_buy_order(check_item.name)
+                                        if check_item.name == item.name:
+                                            # This item will have an order after we add
+                                            if len(check_orders) > 0 or vendors_added > 0:
+                                                products_with_orders += 1
+                                        else:
+                                            if len(check_orders) > 0:
+                                                products_with_orders += 1
+
+                                    max_products = player.get_max_products()
+                                    if products_with_orders > max_products:
+                                        print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
+                                        continue
+
+                                    # Check available capacity
+                                    total_on_order = sum(order[0] for order in player.get_buy_order(item.name))
+                                    remaining_capacity = player.get_max_items() - len(player.inventory)
+                                    if total_on_order + quantity > remaining_capacity:
+                                        print(f"\n✗ Not enough capacity! Can only add {remaining_capacity - total_on_order} more items.")
+                                        continue
+
+                                    success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
+                                    if success:
+                                        print(f"✓ Added: {quantity} {item.name} from {selected_vendor.name}")
+                                        vendors_added += 1
+                                        # Update vendor_orders for current display
+                                        vendor_orders = player.get_buy_order(item.name)
+                                    else:
+                                        print(f"\n✗ Failed to add vendor (limit reached or duplicate)")
+
+                                except ValueError:
+                                    print("\n✗ Invalid input! Use numbers only (e.g., '2 100')")
+                                except Exception as e:
+                                    print(f"\n✗ Error: {e}")
+
+                            if vendors_added > 0:
+                                print(f"\n✓ Successfully added {vendors_added} vendor(s)")
+                                input("Press Enter to continue...")
+
                         else:
                             print("\n✗ Invalid option!")
                 else:
@@ -4420,6 +4525,8 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                     if vendor_orders:
                         print(f"  2. Remove vendor")
                         print(f"  3. Clear all vendors")
+                    if len(vendor_orders) < 3:
+                        print(f"  4. Add multiple vendors at once")
                     print(f"  0. Back to item list")
 
                     sub_choice = input(f"\nSelect option: ").strip()
@@ -4509,16 +4616,23 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                                     status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
                                     print(f"  {i}. {vendor.name}{min_text} - {status}")
 
-                            vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+                            vendor_choice = input(f"\nEnter vendor number and quantity (e.g., '2 100'), or just vendor number (0 to cancel): ").strip()
                             try:
-                                vendor_num = int(vendor_choice)
+                                # Parse input - support both "vendor_num quantity" and just "vendor_num"
+                                parts = vendor_choice.split()
+                                vendor_num = int(parts[0])
+
                                 if vendor_num == 0:
                                     continue
                                 elif 1 <= vendor_num <= len(game_state.vendors):
                                     selected_vendor = game_state.vendors[vendor_num - 1]
 
-                                    quantity_str = input(f"Enter quantity to buy: ").strip()
-                                    quantity = int(quantity_str)
+                                    # Get quantity - either from second part or prompt
+                                    if len(parts) >= 2:
+                                        quantity = int(parts[1])
+                                    else:
+                                        quantity_str = input(f"Enter quantity to buy: ").strip()
+                                        quantity = int(quantity_str)
 
                                     if quantity > 0:
                                         # Check minimum purchase
@@ -4590,6 +4704,99 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                         if confirm == 'y':
                             player.clear_buy_order(item.name)
                             print(f"\n✓ Cleared all buy orders for {item.name}")
+
+                    elif sub_choice == "4" and len(vendor_orders) < 3:
+                        # Add multiple vendors at once
+                        print("\nAvailable Vendors:")
+                        for i, vendor in enumerate(game_state.vendors, 1):
+                            price = vendor.get_price(item.name)
+                            min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                            # Calculate effective lead time with player's upgrades
+                            lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                            effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                            lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+                            if price:
+                                print(f"  {i}. {vendor.name}{min_text} - ${price:.2f} (lead: {lead_time_str})")
+                            else:
+                                status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
+                                print(f"  {i}. {vendor.name}{min_text} - {status}")
+
+                        slots_available = 3 - len(vendor_orders)
+                        print(f"\nEnter up to {slots_available} vendor(s) in format: vendor_number quantity")
+                        print(f"One per line, or press Enter to finish")
+
+                        vendors_added = 0
+                        while vendors_added < slots_available:
+                            try:
+                                vendor_input = input(f"\nVendor {vendors_added + 1} (or Enter to finish): ").strip()
+                                if not vendor_input:
+                                    break
+
+                                parts = vendor_input.split()
+                                if len(parts) != 2:
+                                    print("\n✗ Invalid format! Use: vendor_number quantity (e.g., '2 100')")
+                                    continue
+
+                                vendor_num = int(parts[0])
+                                quantity = int(parts[1])
+
+                                if vendor_num < 1 or vendor_num > len(game_state.vendors):
+                                    print(f"\n✗ Invalid vendor number! Must be 1-{len(game_state.vendors)}")
+                                    continue
+
+                                selected_vendor = game_state.vendors[vendor_num - 1]
+
+                                if quantity <= 0:
+                                    print("\n✗ Quantity must be positive!")
+                                    continue
+
+                                # Check minimum purchase
+                                if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
+                                    print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
+                                    continue
+
+                                # Check product limit
+                                products_with_orders = 0
+                                for check_item in game_state.items:
+                                    check_orders = player.get_buy_order(check_item.name)
+                                    if check_item.name == item.name:
+                                        # This item will have an order after we add
+                                        if len(check_orders) > 0 or vendors_added > 0:
+                                            products_with_orders += 1
+                                    else:
+                                        if len(check_orders) > 0:
+                                            products_with_orders += 1
+
+                                max_products = player.get_max_products()
+                                if products_with_orders > max_products:
+                                    print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
+                                    continue
+
+                                # Check available capacity
+                                total_on_order = sum(order[0] for order in player.get_buy_order(item.name))
+                                remaining_capacity = player.get_max_items() - len(player.inventory)
+                                if total_on_order + quantity > remaining_capacity:
+                                    print(f"\n✗ Not enough capacity! Can only add {remaining_capacity - total_on_order} more items.")
+                                    continue
+
+                                success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
+                                if success:
+                                    print(f"✓ Added: {quantity} {item.name} from {selected_vendor.name}")
+                                    vendors_added += 1
+                                    # Update vendor_orders for current display
+                                    vendor_orders = player.get_buy_order(item.name)
+                                else:
+                                    print(f"\n✗ Failed to add vendor (limit reached or duplicate)")
+
+                            except ValueError:
+                                print("\n✗ Invalid input! Use numbers only (e.g., '2 100')")
+                            except Exception as e:
+                                print(f"\n✗ Error: {e}")
+
+                        if vendors_added > 0:
+                            print(f"\n✓ Successfully added {vendors_added} vendor(s)")
+                            input("Press Enter to continue...")
+
                     else:
                         print("\n✗ Invalid option!")
                         input("Press Enter to continue...")
