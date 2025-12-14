@@ -1,14 +1,4 @@
 # econ_sim.py
-
-"""
-Economic simulation where players compete to capture customers
-by selling items. Each customer has daily item needs that are
-randomly generated. A day counter tracks overall progress.
-
-This file is mostly TODOs to be filled in by an AI code assistant.
-"""
-
-
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 import random
