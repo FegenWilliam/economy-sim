@@ -3996,128 +3996,240 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                 break
             elif choice == 'b':
                 # Configure buy order (multi-vendor support)
-                print("\nSelect item to configure buy order:")
-                for i, item in enumerate(game_state.items, 1):
-                    print(f"  {i}. {item.name}")
-                print("  0. Cancel")
+                # Wrap in a loop so user can configure multiple items without going back to main menu
+                while True:
+                    print("\nSelect item to configure buy order:")
+                    for i, item in enumerate(game_state.items, 1):
+                        print(f"  {i}. {item.name}")
+                    print("  0. Back to main menu")
 
-                item_choice = input(f"\nSelect item (0-{len(game_state.items)}): ")
-                item_num = int(item_choice)
+                    item_choice = input(f"\nSelect item (0-{len(game_state.items)}): ")
+                    try:
+                        item_num = int(item_choice)
+                    except ValueError:
+                        print("\n✗ Invalid input!")
+                        continue
 
-                if item_num == 0:
-                    continue
+                    if item_num == 0:
+                        break
 
-                if 1 <= item_num <= len(game_state.items):
-                    item = game_state.items[item_num - 1]
+                    if 1 <= item_num <= len(game_state.items):
+                        item = game_state.items[item_num - 1]
 
-                    # Item configuration submenu (supports up to 3 vendors)
-                    while True:
-                        print(f"\n{'='*80}")
-                        print(f"Configuring Buy Orders for: {item.name}")
-                        print(f"{'='*80}")
+                        # Item configuration submenu (supports up to 3 vendors)
+                        while True:
+                            print(f"\n{'='*80}")
+                            print(f"Configuring Buy Orders for: {item.name}")
+                            print(f"{'='*80}")
 
-                        vendor_orders = player.get_buy_order(item.name)
-                        print(f"\nCurrent orders ({len(vendor_orders)}/3 vendors):")
-                        if vendor_orders:
-                            for i, (qty, vendor_name) in enumerate(vendor_orders, 1):
-                                # Get vendor price and lead time
-                                vendor = next((v for v in game_state.vendors if v.name == vendor_name), None)
-                                if vendor:
-                                    price = vendor.get_price(item.name)
-                                    # Calculate effective lead time with player's upgrades
-                                    lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
-                                    effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
-                                    lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
-                                    price_str = f"${price:.2f}" if price else "N/A"
-                                    print(f"  {i}. {vendor_name}: {qty} units @ {price_str} (lead: {lead_time_str})")
-                        else:
-                            print("  (no vendors configured)")
-
-                        print(f"\nOptions:")
-                        print(f"  1. Add/update vendor (max 3)")
-                        if vendor_orders:
-                            print(f"  2. Remove vendor")
-                            print(f"  3. Clear all vendors")
-                        if len(vendor_orders) < 3:
-                            print(f"  4. Add multiple vendors at once")
-                        print(f"  0. Back to item list")
-
-                        sub_choice = input(f"\nSelect option: ").strip()
-
-                        if sub_choice == "0":
-                            break
-                        elif sub_choice == "1":
-                            # Add/update vendor
-                            if len(vendor_orders) >= 3:
-                                print(f"\n⚠ Already have 3 vendors. Select a vendor to update:")
+                            vendor_orders = player.get_buy_order(item.name)
+                            print(f"\nCurrent orders ({len(vendor_orders)}/3 vendors):")
+                            if vendor_orders:
                                 for i, (qty, vendor_name) in enumerate(vendor_orders, 1):
-                                    print(f"  {i}. {vendor_name}")
-                                print(f"  0. Cancel")
+                                    # Get vendor price and lead time
+                                    vendor = next((v for v in game_state.vendors if v.name == vendor_name), None)
+                                    if vendor:
+                                        price = vendor.get_price(item.name)
+                                        # Calculate effective lead time with player's upgrades
+                                        lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                                        effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                                        lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+                                        price_str = f"${price:.2f}" if price else "N/A"
+                                        print(f"  {i}. {vendor_name}: {qty} units @ {price_str} (lead: {lead_time_str})")
+                            else:
+                                print("  (no vendors configured)")
 
-                                update_choice = input(f"\nSelect vendor to update (0-{len(vendor_orders)}): ").strip()
-                                try:
-                                    update_num = int(update_choice)
-                                    if update_num == 0:
-                                        continue
-                                    elif 1 <= update_num <= len(vendor_orders):
-                                        # User wants to update this vendor
-                                        qty_to_update, vendor_to_update = vendor_orders[update_num - 1]
-                                        print(f"\nUpdating: {vendor_to_update} (currently {qty_to_update} units)")
+                            print(f"\nOptions:")
+                            print(f"  1. Add/update vendor (max 3)")
+                            if vendor_orders:
+                                print(f"  2. Remove vendor")
+                                print(f"  3. Clear all vendors")
+                            if len(vendor_orders) < 3:
+                                print(f"  4. Add multiple vendors at once")
+                            print(f"  0. Back to item list")
 
-                                        # Show vendor list
-                                        print("\nAvailable Vendors:")
-                                        for i, vendor in enumerate(game_state.vendors, 1):
-                                            price = vendor.get_price(item.name)
-                                            min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
-                                            # Calculate effective lead time with player's upgrades
-                                            lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
-                                            effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
-                                            lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
-                                            if price:
-                                                discount = player.get_vendor_discount(vendor.name, game_state.day)
-                                                final_price = price * (1 - discount)
-                                                discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
-                                                print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
-                                            else:
-                                                status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                                print(f"  {i}. {vendor.name}{min_text} - {status}")
+                            sub_choice = input(f"\nSelect option: ").strip()
 
-                                        vendor_choice = input(f"\nSelect new vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
-                                        vendor_num = int(vendor_choice)
+                            if sub_choice == "0":
+                                break
+                            elif sub_choice == "1":
+                                # Add/update vendor
+                                if len(vendor_orders) >= 3:
+                                    print(f"\n⚠ Already have 3 vendors. Select a vendor to update:")
+                                    for i, (qty, vendor_name) in enumerate(vendor_orders, 1):
+                                        print(f"  {i}. {vendor_name}")
+                                    print(f"  0. Cancel")
+
+                                    update_choice = input(f"\nSelect vendor to update (0-{len(vendor_orders)}): ").strip()
+                                    try:
+                                        update_num = int(update_choice)
+                                        if update_num == 0:
+                                            continue
+                                        elif 1 <= update_num <= len(vendor_orders):
+                                            # User wants to update this vendor
+                                            qty_to_update, vendor_to_update = vendor_orders[update_num - 1]
+                                            print(f"\nUpdating: {vendor_to_update} (currently {qty_to_update} units)")
+
+                                            # Show vendor list
+                                            print("\nAvailable Vendors:")
+                                            for i, vendor in enumerate(game_state.vendors, 1):
+                                                price = vendor.get_price(item.name)
+                                                min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                                                # Calculate effective lead time with player's upgrades
+                                                lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                                                effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                                                lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+                                                if price:
+                                                    discount = player.get_vendor_discount(vendor.name, game_state.day)
+                                                    final_price = price * (1 - discount)
+                                                    discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
+                                                    print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                                                else:
+                                                    status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
+                                                    print(f"  {i}. {vendor.name}{min_text} - {status}")
+
+                                            vendor_choice = input(f"\nSelect new vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+                                            vendor_num = int(vendor_choice)
+                                            if vendor_num == 0:
+                                                continue
+                                            elif 1 <= vendor_num <= len(game_state.vendors):
+                                                selected_vendor = game_state.vendors[vendor_num - 1]
+
+                                                quantity_str = input(f"Enter new quantity (0 to remove): ").strip()
+                                                quantity = int(quantity_str)
+
+                                                if quantity == 0:
+                                                    # Remove this vendor
+                                                    player.remove_vendor_from_buy_order(item.name, vendor_to_update)
+                                                    print(f"\n✓ Removed {vendor_to_update} from buy order")
+                                                elif quantity > 0:
+                                                    # Check minimum purchase
+                                                    if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
+                                                        print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
+                                                        input("Press Enter to continue...")
+                                                        continue
+
+                                                    # Remove old vendor and add new one
+                                                    player.remove_vendor_from_buy_order(item.name, vendor_to_update)
+                                                    player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
+                                                    print(f"\n✓ Updated: {quantity} {item.name} from {selected_vendor.name}")
+                                                else:
+                                                    print("\n✗ Quantity must be non-negative!")
+                                                    input("Press Enter to continue...")
+                                        else:
+                                            print("\n✗ Invalid selection!")
+                                            input("Press Enter to continue...")
+                                    except ValueError:
+                                        print("\n✗ Invalid input!")
+                                        input("Press Enter to continue...")
+                                else:
+                                    # Add new vendor
+                                    print("\nAvailable Vendors:")
+                                    for i, vendor in enumerate(game_state.vendors, 1):
+                                        price = vendor.get_price(item.name)
+                                        min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                                        # Calculate effective lead time with player's upgrades
+                                        lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                                        effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                                        lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+                                        if price:
+                                            discount = player.get_vendor_discount(vendor.name, game_state.day)
+                                            final_price = price * (1 - discount)
+                                            discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
+                                            print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                                        else:
+                                            status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
+                                            print(f"  {i}. {vendor.name}{min_text} - {status}")
+
+                                    vendor_choice = input(f"\nEnter vendor number and quantity (e.g., '2 100'), or just vendor number (0 to cancel): ").strip()
+                                    try:
+                                        # Parse input - support both "vendor_num quantity" and just "vendor_num"
+                                        parts = vendor_choice.split()
+                                        vendor_num = int(parts[0])
+
                                         if vendor_num == 0:
                                             continue
                                         elif 1 <= vendor_num <= len(game_state.vendors):
                                             selected_vendor = game_state.vendors[vendor_num - 1]
 
-                                            quantity_str = input(f"Enter new quantity (0 to remove): ").strip()
-                                            quantity = int(quantity_str)
+                                            # Get quantity - either from second part or prompt
+                                            if len(parts) >= 2:
+                                                quantity = int(parts[1])
+                                            else:
+                                                quantity_str = input(f"Enter quantity to buy: ").strip()
+                                                quantity = int(quantity_str)
 
-                                            if quantity == 0:
-                                                # Remove this vendor
-                                                player.remove_vendor_from_buy_order(item.name, vendor_to_update)
-                                                print(f"\n✓ Removed {vendor_to_update} from buy order")
-                                            elif quantity > 0:
+                                            if quantity > 0:
                                                 # Check minimum purchase
                                                 if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
                                                     print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
                                                     input("Press Enter to continue...")
                                                     continue
 
-                                                # Remove old vendor and add new one
-                                                player.remove_vendor_from_buy_order(item.name, vendor_to_update)
-                                                player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
-                                                print(f"\n✓ Updated: {quantity} {item.name} from {selected_vendor.name}")
+                                                # Check product limit
+                                                products_with_orders = 0
+                                                for check_item in game_state.items:
+                                                    check_orders = player.get_buy_order(check_item.name)
+                                                    if check_item.name == item.name:
+                                                        # This item will have an order after we add
+                                                        if len(check_orders) > 0 or quantity > 0:
+                                                            products_with_orders += 1
+                                                    else:
+                                                        if len(check_orders) > 0:
+                                                            products_with_orders += 1
+
+                                                max_products = player.get_max_products()
+                                                if products_with_orders > max_products:
+                                                    print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
+                                                    input("Press Enter to continue...")
+                                                    continue
+
+                                                success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
+                                                if success:
+                                                    print(f"\n✓ Added: {quantity} {item.name} from {selected_vendor.name}")
+                                                else:
+                                                    print(f"\n✗ Failed to add vendor (limit reached or duplicate)")
+                                                    input("Press Enter to continue...")
                                             else:
-                                                print("\n✗ Quantity must be non-negative!")
+                                                print("\n✗ Quantity must be positive!")
                                                 input("Press Enter to continue...")
+                                        else:
+                                            print("\n✗ Invalid vendor selection!")
+                                            input("Press Enter to continue...")
+                                    except ValueError:
+                                        print("\n✗ Invalid input!")
+                                        input("Press Enter to continue...")
+
+                            elif sub_choice == "2" and vendor_orders:
+                                # Remove vendor
+                                print("\nSelect vendor to remove:")
+                                for i, (qty, vendor_name) in enumerate(vendor_orders, 1):
+                                    print(f"  {i}. {vendor_name} ({qty} units)")
+                                print(f"  0. Cancel")
+
+                                remove_choice = input(f"\nSelect vendor (0-{len(vendor_orders)}): ").strip()
+                                try:
+                                    remove_num = int(remove_choice)
+                                    if remove_num == 0:
+                                        continue
+                                    elif 1 <= remove_num <= len(vendor_orders):
+                                        qty, vendor_name = vendor_orders[remove_num - 1]
+                                        player.remove_vendor_from_buy_order(item.name, vendor_name)
+                                        print(f"\n✓ Removed {vendor_name} from buy order")
                                     else:
                                         print("\n✗ Invalid selection!")
                                         input("Press Enter to continue...")
                                 except ValueError:
                                     print("\n✗ Invalid input!")
                                     input("Press Enter to continue...")
-                            else:
-                                # Add new vendor
+
+                            elif sub_choice == "3" and vendor_orders:
+                                # Clear all vendors
+                                player.clear_buy_order(item.name)
+                                print(f"\n✓ Cleared all buy orders for {item.name}")
+
+                            elif sub_choice == "4" and len(vendor_orders) < 3:
+                                # Add multiple vendors at once
                                 print("\nAvailable Vendors:")
                                 for i, vendor in enumerate(game_state.vendors, 1):
                                     price = vendor.get_price(item.name)
@@ -4135,185 +4247,77 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                         status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
                                         print(f"  {i}. {vendor.name}{min_text} - {status}")
 
-                                vendor_choice = input(f"\nEnter vendor number and quantity (e.g., '2 100'), or just vendor number (0 to cancel): ").strip()
-                                try:
-                                    # Parse input - support both "vendor_num quantity" and just "vendor_num"
-                                    parts = vendor_choice.split()
-                                    vendor_num = int(parts[0])
+                                slots_available = 3 - len(vendor_orders)
+                                print(f"\nEnter up to {slots_available} vendor(s) in format: vendor_number quantity")
+                                print(f"One per line, or press Enter to finish")
 
-                                    if vendor_num == 0:
-                                        continue
-                                    elif 1 <= vendor_num <= len(game_state.vendors):
+                                vendors_added = 0
+                                while vendors_added < slots_available:
+                                    try:
+                                        vendor_input = input(f"\nVendor {vendors_added + 1} (or Enter to finish): ").strip()
+                                        if not vendor_input:
+                                            break
+
+                                        parts = vendor_input.split()
+                                        if len(parts) != 2:
+                                            print("\n✗ Invalid format! Use: vendor_number quantity (e.g., '2 100')")
+                                            continue
+
+                                        vendor_num = int(parts[0])
+                                        quantity = int(parts[1])
+
+                                        if vendor_num < 1 or vendor_num > len(game_state.vendors):
+                                            print(f"\n✗ Invalid vendor number! Must be 1-{len(game_state.vendors)}")
+                                            continue
+
                                         selected_vendor = game_state.vendors[vendor_num - 1]
 
-                                        # Get quantity - either from second part or prompt
-                                        if len(parts) >= 2:
-                                            quantity = int(parts[1])
-                                        else:
-                                            quantity_str = input(f"Enter quantity to buy: ").strip()
-                                            quantity = int(quantity_str)
-
-                                        if quantity > 0:
-                                            # Check minimum purchase
-                                            if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
-                                                print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
-                                                input("Press Enter to continue...")
-                                                continue
-
-                                            # Check product limit
-                                            products_with_orders = 0
-                                            for check_item in game_state.items:
-                                                check_orders = player.get_buy_order(check_item.name)
-                                                if check_item.name == item.name:
-                                                    # This item will have an order after we add
-                                                    if len(check_orders) > 0 or quantity > 0:
-                                                        products_with_orders += 1
-                                                else:
-                                                    if len(check_orders) > 0:
-                                                        products_with_orders += 1
-
-                                            max_products = player.get_max_products()
-                                            if products_with_orders > max_products:
-                                                print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
-                                                input("Press Enter to continue...")
-                                                continue
-
-                                            success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
-                                            if success:
-                                                print(f"\n✓ Added: {quantity} {item.name} from {selected_vendor.name}")
-                                            else:
-                                                print(f"\n✗ Failed to add vendor (limit reached or duplicate)")
-                                                input("Press Enter to continue...")
-                                        else:
+                                        if quantity <= 0:
                                             print("\n✗ Quantity must be positive!")
-                                            input("Press Enter to continue...")
-                                    else:
-                                        print("\n✗ Invalid vendor selection!")
-                                        input("Press Enter to continue...")
-                                except ValueError:
-                                    print("\n✗ Invalid input!")
-                                    input("Press Enter to continue...")
+                                            continue
 
-                        elif sub_choice == "2" and vendor_orders:
-                            # Remove vendor
-                            print("\nSelect vendor to remove:")
-                            for i, (qty, vendor_name) in enumerate(vendor_orders, 1):
-                                print(f"  {i}. {vendor_name} ({qty} units)")
-                            print(f"  0. Cancel")
+                                        # Check minimum purchase
+                                        if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
+                                            print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
+                                            continue
 
-                            remove_choice = input(f"\nSelect vendor (0-{len(vendor_orders)}): ").strip()
-                            try:
-                                remove_num = int(remove_choice)
-                                if remove_num == 0:
-                                    continue
-                                elif 1 <= remove_num <= len(vendor_orders):
-                                    qty, vendor_name = vendor_orders[remove_num - 1]
-                                    player.remove_vendor_from_buy_order(item.name, vendor_name)
-                                    print(f"\n✓ Removed {vendor_name} from buy order")
-                                else:
-                                    print("\n✗ Invalid selection!")
-                                    input("Press Enter to continue...")
-                            except ValueError:
-                                print("\n✗ Invalid input!")
-                                input("Press Enter to continue...")
+                                        # Check product limit
+                                        products_with_orders = 0
+                                        for check_item in game_state.items:
+                                            check_orders = player.get_buy_order(check_item.name)
+                                            if check_item.name == item.name:
+                                                # This item will have an order after we add
+                                                if len(check_orders) > 0 or vendors_added > 0:
+                                                    products_with_orders += 1
+                                            else:
+                                                if len(check_orders) > 0:
+                                                    products_with_orders += 1
 
-                        elif sub_choice == "3" and vendor_orders:
-                            # Clear all vendors
-                            confirm = input(f"\nClear all vendors for {item.name}? (y/n): ").strip().lower()
-                            if confirm == 'y':
-                                player.clear_buy_order(item.name)
-                                print(f"\n✓ Cleared all buy orders for {item.name}")
+                                        max_products = player.get_max_products()
+                                        if products_with_orders > max_products:
+                                            print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
+                                            continue
 
-                        elif sub_choice == "4" and len(vendor_orders) < 3:
-                            # Add multiple vendors at once
-                            print("\nAvailable Vendors:")
-                            for i, vendor in enumerate(game_state.vendors, 1):
-                                price = vendor.get_price(item.name)
-                                min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
-                                # Calculate effective lead time with player's upgrades
-                                lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
-                                effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
-                                lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
-                                if price:
-                                    discount = player.get_vendor_discount(vendor.name, game_state.day)
-                                    final_price = price * (1 - discount)
-                                    discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
-                                    print(f"  {i}. {vendor.name}{min_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
-                                else:
-                                    status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                    print(f"  {i}. {vendor.name}{min_text} - {status}")
-
-                            slots_available = 3 - len(vendor_orders)
-                            print(f"\nEnter up to {slots_available} vendor(s) in format: vendor_number quantity")
-                            print(f"One per line, or press Enter to finish")
-
-                            vendors_added = 0
-                            while vendors_added < slots_available:
-                                try:
-                                    vendor_input = input(f"\nVendor {vendors_added + 1} (or Enter to finish): ").strip()
-                                    if not vendor_input:
-                                        break
-
-                                    parts = vendor_input.split()
-                                    if len(parts) != 2:
-                                        print("\n✗ Invalid format! Use: vendor_number quantity (e.g., '2 100')")
-                                        continue
-
-                                    vendor_num = int(parts[0])
-                                    quantity = int(parts[1])
-
-                                    if vendor_num < 1 or vendor_num > len(game_state.vendors):
-                                        print(f"\n✗ Invalid vendor number! Must be 1-{len(game_state.vendors)}")
-                                        continue
-
-                                    selected_vendor = game_state.vendors[vendor_num - 1]
-
-                                    if quantity <= 0:
-                                        print("\n✗ Quantity must be positive!")
-                                        continue
-
-                                    # Check minimum purchase
-                                    if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
-                                        print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
-                                        continue
-
-                                    # Check product limit
-                                    products_with_orders = 0
-                                    for check_item in game_state.items:
-                                        check_orders = player.get_buy_order(check_item.name)
-                                        if check_item.name == item.name:
-                                            # This item will have an order after we add
-                                            if len(check_orders) > 0 or vendors_added > 0:
-                                                products_with_orders += 1
+                                        success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
+                                        if success:
+                                            print(f"✓ Added: {quantity} {item.name} from {selected_vendor.name}")
+                                            vendors_added += 1
+                                            # Update vendor_orders for current display
+                                            vendor_orders = player.get_buy_order(item.name)
                                         else:
-                                            if len(check_orders) > 0:
-                                                products_with_orders += 1
+                                            print(f"\n✗ Failed to add vendor (limit reached or duplicate)")
 
-                                    max_products = player.get_max_products()
-                                    if products_with_orders > max_products:
-                                        print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
-                                        continue
+                                    except ValueError:
+                                        print("\n✗ Invalid input! Use numbers only (e.g., '2 100')")
+                                    except Exception as e:
+                                        print(f"\n✗ Error: {e}")
 
-                                    success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
-                                    if success:
-                                        print(f"✓ Added: {quantity} {item.name} from {selected_vendor.name}")
-                                        vendors_added += 1
-                                        # Update vendor_orders for current display
-                                        vendor_orders = player.get_buy_order(item.name)
-                                    else:
-                                        print(f"\n✗ Failed to add vendor (limit reached or duplicate)")
+                                if vendors_added > 0:
+                                    print(f"\n✓ Successfully added {vendors_added} vendor(s)")
+                                    input("Press Enter to continue...")
 
-                                except ValueError:
-                                    print("\n✗ Invalid input! Use numbers only (e.g., '2 100')")
-                                except Exception as e:
-                                    print(f"\n✗ Error: {e}")
-
-                            if vendors_added > 0:
-                                print(f"\n✓ Successfully added {vendors_added} vendor(s)")
-                                input("Press Enter to continue...")
-
-                        else:
-                            print("\n✗ Invalid option!")
+                            else:
+                                print("\n✗ Invalid option!")
                 else:
                     print("\n✗ Invalid item selection!")
 
