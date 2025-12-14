@@ -446,7 +446,7 @@ class Upgrade:
     """An upgrade that players can purchase once."""
     name: str
     cost: float
-    effect_type: str  # "max_customers", "max_items", "max_products", "xp_gain", "vendor_discount"
+    effect_type: str  # "max_customers", "max_items", "max_products", "xp_gain", "vendor_discount", "lead_time_reduction", "wage_reduction", "production_line"
     effect_value: float  # Amount of the effect
     vendor_name: str = ""  # Only used for vendor_discount type
     duration_days: int = 0  # Duration in days (0 = permanent, >0 = temporary)
@@ -814,9 +814,26 @@ class Player:
 
         # Check if vendor has lead time
         if vendor.lead_time > 0 and game_state is not None:
-            # Add to pending deliveries instead of inventory
-            delivery_day = game_state.day + vendor.lead_time
-            self.pending_deliveries.append((item_name, quantity, final_price, delivery_day))
+            # Calculate effective lead time with any reductions from upgrades
+            lead_time_reduction = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "lead_time_reduction")
+            effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+
+            # Add to pending deliveries instead of inventory (or immediate if lead time reduced to 0)
+            if effective_lead_time > 0:
+                delivery_day = game_state.day + effective_lead_time
+                self.pending_deliveries.append((item_name, quantity, final_price, delivery_day))
+            else:
+                # Lead time reduced to 0, deliver immediately
+                current_inventory = self.inventory.get(item_name, 0)
+                current_cost = self.item_costs.get(item_name, 0)
+
+                # Weighted average: (old_qty * old_cost + new_qty * new_cost) / total_qty
+                new_total_qty = current_inventory + quantity
+                if new_total_qty > 0:
+                    weighted_cost = ((current_inventory * current_cost) + (quantity * final_price)) / new_total_qty
+                    self.item_costs[item_name] = weighted_cost
+
+                self.inventory[item_name] = new_total_qty
         else:
             # Immediate delivery - update inventory and weighted average cost
             current_inventory = self.inventory.get(item_name, 0)
@@ -1441,7 +1458,7 @@ class Customer:
 @dataclass
 class GameConfig:
     """Configuration for the economic simulation."""
-    starting_cash: float = 2500.0
+    starting_cash: float = 3000.0
     num_days: int = 30
     customers_per_day: int = 10
     # TODO: add more config options if needed (e.g. random seed, max inventory, etc.)
@@ -1588,23 +1605,23 @@ def create_vendors() -> List[Vendor]:
     """
     vendors = []
 
-    # Vendor 1: 70% of market price, 1 random item per day, max 100 per item per player, 4 day lead time
+    # Vendor 1: 70% of market price, 1 random item per day, max 200 per item per player, 4 day lead time
     vendors.append(Vendor(
         name="Lucky Deal Trader",
         pricing_multiplier=0.70,
         selection_type="random_daily",
         selection_params=1,  # 1 item
-        max_per_item_per_player=100,
+        max_per_item_per_player=200,
         lead_time=4
     ))
 
-    # Vendor 2: 80% of market price, 5 random items per day, max 100 per item per player, 3 day lead time
+    # Vendor 2: 80% of market price, 5 random items per day, max 200 per item per player, 3 day lead time
     vendors.append(Vendor(
         name="Discount Wholesale Co.",
         pricing_multiplier=0.80,
         selection_type="random_daily",
         selection_params=5,  # 5 items
-        max_per_item_per_player=100,
+        max_per_item_per_player=200,
         lead_time=3
     ))
 
@@ -1888,6 +1905,9 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
 
         # Wage reduction upgrade
         Upgrade(name="Employee Benefits Package", cost=20000, effect_type="wage_reduction", effect_value=100),
+
+        # Lead time reduction upgrade
+        Upgrade(name="Distribution Network", cost=150000, effect_type="lead_time_reduction", effect_value=1),
     ]
 
     # Add vendor discount upgrades for each vendor (30-day duration, tier-based pricing)
@@ -2579,6 +2599,12 @@ def auto_purchase_upgrades(player: Player, game_state: GameState) -> None:
         elif upgrade.effect_type == "vendor_discount":
             # Estimate value based on typical daily spending
             score = 60 + (upgrade.effect_value / upgrade.cost * 800)
+
+        # Lead time reduction - valuable for improving vendor efficiency
+        elif upgrade.effect_type == "lead_time_reduction":
+            # High priority upgrade that reduces lead time across all vendors
+            # Valuable for improving inventory management and responsiveness
+            score = 70 + (upgrade.effect_value / upgrade.cost * 100000)
 
         # Production lines - late-game investment for high-volume items
         elif upgrade.effect_type == "production_line":
@@ -4235,7 +4261,10 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                             vendor = game_state.get_vendor(vendor_name)
                             if vendor:
                                 price = vendor.get_price(item.name)
-                                lead_time_str = f"{vendor.lead_time}d" if vendor.lead_time > 0 else "instant"
+                                # Calculate effective lead time with player's upgrades
+                                lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                                effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                                lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
                                 price_str = f"${price:.2f}" if price else "N/A"
                                 print(f"  {i}. {vendor_name}: {qty} units @ {price_str} (lead: {lead_time_str})")
                     else:
@@ -4275,7 +4304,10 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                                     for i, vendor in enumerate(game_state.vendors, 1):
                                         price = vendor.get_price(item.name)
                                         min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
-                                        lead_time_str = f"{vendor.lead_time}d" if vendor.lead_time > 0 else "instant"
+                                        # Calculate effective lead time with player's upgrades
+                                        lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                                        effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                                        lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
                                         if price:
                                             print(f"  {i}. {vendor.name}{min_text} - ${price:.2f} (lead: {lead_time_str})")
                                         else:
@@ -4322,7 +4354,10 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                             for i, vendor in enumerate(game_state.vendors, 1):
                                 price = vendor.get_price(item.name)
                                 min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
-                                lead_time_str = f"{vendor.lead_time}d" if vendor.lead_time > 0 else "instant"
+                                # Calculate effective lead time with player's upgrades
+                                lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                                effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                                lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
                                 if price:
                                     print(f"  {i}. {vendor.name}{min_text} - ${price:.2f} (lead: {lead_time_str})")
                                 else:
@@ -4767,6 +4802,8 @@ def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
         return f"+{int(upgrade.effect_value)}% discount at {upgrade.vendor_name}"
     elif upgrade.effect_type == "wage_reduction":
         return f"-${int(upgrade.effect_value)} monthly wage per employee (from $500 to $400)"
+    elif upgrade.effect_type == "lead_time_reduction":
+        return f"-{int(upgrade.effect_value)} day lead time for all vendors"
     elif upgrade.effect_type == "production_line":
         return f"Own production for {upgrade.vendor_name} (50% market price)"
     return "Unknown effect"
