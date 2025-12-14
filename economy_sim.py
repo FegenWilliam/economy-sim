@@ -450,7 +450,8 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, List[tuple]] = field(default_factory=dict)  # item_name -> [(quantity, vendor_name), ...] (up to 3 vendors)
-    restockers: int = 0  # Each restocker adds 200 items per day capacity
+    restockers: int = 0  # Each restocker adds 500 items per day capacity
+    marketing_agents: int = 0  # Marketing agents boost customer attraction
     store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
     experience: float = 0.0  # XP gained from profits
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
@@ -534,7 +535,8 @@ class Player:
         """Get max number of items that can be bought per day (buy order limit)."""
         base = 300 + ((self.store_level - 1) * 100)  # Base 300 items + 100 per level
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
-        return int(base + bonus)
+        restocker_bonus = self.restockers * 500  # Each restocker adds 500 items per day
+        return int(base + bonus + restocker_bonus)
 
     def get_xp_multiplier(self) -> float:
         """Get XP gain multiplier from upgrades."""
@@ -625,25 +627,35 @@ class Player:
 
     def hire_employee(self, employee_type: str) -> bool:
         """
-        Hire an employee (restocker).
-        Costs $500. Returns True if successful, False if not enough cash.
+        Hire an employee.
+        - Restocker: $1000 upfront, $1000/month
+        - Marketing Agent: 5x scaling cost (1k, 5k, 25k...), $1000/month, requires level 5+
+        Returns True if successful, False if not enough cash or requirements not met.
         """
-        HIRING_COST = 500.0
-
-        if self.cash < HIRING_COST:
-            return False
-
-        self.cash -= HIRING_COST
         if employee_type == "restocker":
+            HIRING_COST = 1000.0
+            if self.cash < HIRING_COST:
+                return False
+            self.cash -= HIRING_COST
             self.restockers += 1
+            return True
+        elif employee_type == "marketing_agent":
+            # Level 5+ required
+            if self.store_level < 5:
+                return False
+            # Scaling cost: 1k * (5 ^ current_count)
+            HIRING_COST = 1000.0 * (5 ** self.marketing_agents)
+            if self.cash < HIRING_COST:
+                return False
+            self.cash -= HIRING_COST
+            self.marketing_agents += 1
+            return True
         else:
             return False
 
-        return True
-
     def pay_monthly_wages(self, current_day: int) -> float:
         """
-        Pay monthly wages for all employees ($500 per employee every 30 days).
+        Pay monthly wages for all employees ($1000 per employee every 30 days).
         Only pays if 30 days have passed since last payment.
         Returns total wages paid (0 if not a payment day).
         """
@@ -651,13 +663,13 @@ class Player:
         if current_day - self.last_wage_payment_day < 30:
             return 0.0
 
-        total_employees = self.restockers
+        total_employees = self.restockers + self.marketing_agents
 
         # No wages if no employees
         if total_employees == 0:
             return 0.0
 
-        monthly_wage_per_employee = 500.0
+        monthly_wage_per_employee = 1000.0
 
         # Apply wage reduction upgrades (still applies to monthly wage)
         wage_reduction = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "wage_reduction")
@@ -1244,8 +1256,11 @@ class Customer:
             # Calculate item stability score
             item_stability = calculate_item_stability(player, market_prices, items_by_name)
 
-            # Calculate final score
-            final_score = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+            # Calculate marketing effect (adds to both discount and stability)
+            marketing_effect = calculate_marketing_effect(player, market_prices)
+
+            # Calculate final score (marketing effect boosts both components)
+            final_score = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
 
             player_scores.append((player, final_score))
 
@@ -2256,8 +2271,11 @@ def calculate_player_cas(
     # Calculate item stability
     item_stability = calculate_item_stability(player, market_prices, items_by_name)
 
-    # Calculate final CAS
-    cas = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+    # Calculate marketing effect (adds to both discount and stability)
+    marketing_effect = calculate_marketing_effect(player, market_prices)
+
+    # Calculate final CAS (marketing effect boosts both components)
+    cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
 
     return cas
 
@@ -2799,9 +2817,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 6: Pay employee wages (monthly - every 30 days)
     for player in game_state.players:
         wages = player.pay_monthly_wages(game_state.day)
+        total_employees = player.restockers + player.marketing_agents
         if show_details and wages > 0:
-            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({player.restockers} restockers)")
-        elif show_details and player.restockers > 0:
+            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({player.restockers} restockers, {player.marketing_agents} marketing agents)")
+        elif show_details and total_employees > 0:
             days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
             print(f"  {player.name}: No payment today ({days_until_payment} days until next wage)")
 
@@ -3086,6 +3105,37 @@ def calculate_item_stability(player: Player, market_prices: Dict[str, float], it
     return total_stability
 
 
+def calculate_marketing_effect(player: Player, market_prices: Dict[str, float]) -> float:
+    """
+    Calculate marketing effect from Marketing Agents.
+
+    Formula:
+    - Base effect: +1 for every 2 reputation (max +50 at reputation 100)
+    - Item price scaling: + (highest_market_price_in_stock / 10), rounded down
+
+    Marketing effect is only active if player has marketing agents.
+    Returns: Marketing effect bonus (0 if no marketing agents)
+    """
+    if player.marketing_agents <= 0:
+        return 0.0
+
+    # Reputation bonus: +1 per 2 reputation, max 50
+    reputation_bonus = min(50, player.reputation / 2)
+
+    # Find highest market price among items in stock
+    highest_price = 0.0
+    for item_name, qty in player.inventory.items():
+        if qty > 0:
+            market_price = market_prices.get(item_name, 0)
+            if market_price > highest_price:
+                highest_price = market_price
+
+    # Price scaling bonus: highest_price / 10, rounded down
+    price_bonus = int(highest_price / 10)
+
+    return reputation_bonus + price_bonus
+
+
 def display_cas_breakdown(player: Player, game_state: GameState) -> None:
     """Display Customer Attraction Score (CAS) breakdown for a player."""
     print(f"\n🎯 {player.name} - Customer Attraction Score (CAS):")
@@ -3152,13 +3202,18 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
     else:
         fulfillment_multiplier = 0.5
 
-    # Calculate final CAS
-    final_cas = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+    # Calculate marketing effect
+    marketing_effect = calculate_marketing_effect(player, game_state.market_prices)
+
+    # Calculate final CAS (marketing effect boosts both components)
+    final_cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
 
     # Display compact breakdown
     print(f"   Reputation:              {player.reputation:.0f}")
     print(f"   Discount Score:          {total_discount_pct:.1f}% total across {items_counted} items (importance: {discount_score:.2f})")
     print(f"   Item Stability:          {item_stability:.2f}")
+    if marketing_effect > 0:
+        print(f"   Marketing Effect:        {marketing_effect:.2f} ({player.marketing_agents} agents)")
     print(f"   Availability Multiplier: {availability_multiplier:6.2f}x  ({items_in_stock}/{total_catalog_items} = {availability_pct:.0f}%)")
     print(f"   Fulfillment Multiplier:  {fulfillment_multiplier:6.2f}x  ({fulfillment_pct:.0f}% avg)")
     print(f"   ─────────────────────────────────────────")
@@ -3232,11 +3287,12 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
 
     print(f"\nEmployees:")
     print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
-    total_employees = player.restockers
-    base_wage = 20.0
+    print(f"  Marketing Agents: {player.marketing_agents} (Boost customer attraction)")
+    total_employees = player.restockers + player.marketing_agents
+    monthly_wage = 1000.0
     wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
-    actual_wage = max(0, base_wage - wage_reduction)
-    print(f"  Daily wages: ${total_employees * actual_wage:.2f} (${actual_wage:.2f}/employee)")
+    actual_wage = max(0, monthly_wage - wage_reduction)
+    print(f"  Monthly wages: ${total_employees * actual_wage:.2f} (${actual_wage:.2f}/employee)")
 
     print(f"\nInventory ({len([i for i, q in player.inventory.items() if q > 0])}/{player.get_max_products()} products):")
     if player.inventory:
@@ -4232,28 +4288,29 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
 
 def employee_menu(game_state: GameState, player: Player) -> None:
     """Menu for hiring employees."""
-    HIRING_COST = 500.0
-    BASE_MONTHLY_WAGE = 500.0
+    RESTOCKER_COST = 1000.0
+    BASE_MONTHLY_WAGE = 1000.0
 
     while True:
         print("\n" + "=" * 60)
         print("EMPLOYEE MENU - Hire Staff")
         print("=" * 60)
         print(f"\nYour Cash: ${player.cash:.2f}")
+        print(f"Store Level: {player.store_level}")
         print(f"\nCurrent Employees:")
         print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
-        total_employees = player.restockers
+        print(f"  Marketing Agents: {player.marketing_agents} (Boost customer attraction)")
+        total_employees = player.restockers + player.marketing_agents
 
         # Calculate actual wage with upgrades
         wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
         actual_wage = max(0, BASE_MONTHLY_WAGE - wage_reduction)
         print(f"  Total monthly wages: ${total_employees * actual_wage:.2f}")
 
-        print(f"\nHiring Cost: ${HIRING_COST:.2f} per employee")
         if wage_reduction > 0:
-            print(f"Monthly Wage: ${actual_wage:.2f} per employee (reduced from ${BASE_MONTHLY_WAGE:.2f})")
+            print(f"\nMonthly Wage: ${actual_wage:.2f} per employee (reduced from ${BASE_MONTHLY_WAGE:.2f})")
         else:
-            print(f"Monthly Wage: ${actual_wage:.2f} per employee")
+            print(f"\nMonthly Wage: ${actual_wage:.2f} per employee")
 
         # Show days until next wage payment
         days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
@@ -4261,26 +4318,46 @@ def employee_menu(game_state: GameState, player: Player) -> None:
             print(f"Next wage payment: Day {player.last_wage_payment_day + 30} ({days_until_payment} days)")
         print(f"Note: Wages paid every 30 days for ALL employees (including newly hired)")
 
+        # Calculate marketing agent cost
+        marketing_cost = 1000.0 * (5 ** player.marketing_agents)
+
         print("\nOptions:")
-        print("  1. Hire Restocker (+200 items/day capacity)")
+        print(f"  1. Hire Restocker (+500 items/day capacity) - ${RESTOCKER_COST:.2f}")
+        if player.store_level >= 5:
+            print(f"  2. Hire Marketing Agent (Boost CAS) - ${marketing_cost:.2f}")
+        else:
+            print(f"  2. Hire Marketing Agent (Requires Level 5+)")
         print("  0. Back to Main Menu")
 
         try:
-            choice = input("\nSelect option (0-1): ")
+            choice = input("\nSelect option (0-2): ")
             choice_num = int(choice)
 
             if choice_num == 0:
                 break
             elif choice_num == 1:
-                if player.cash < HIRING_COST:
-                    print(f"\n✗ Not enough cash! Need ${HIRING_COST:.2f}, have ${player.cash:.2f}")
+                if player.cash < RESTOCKER_COST:
+                    print(f"\n✗ Not enough cash! Need ${RESTOCKER_COST:.2f}, have ${player.cash:.2f}")
                 else:
                     success = player.hire_employee("restocker")
                     if success:
-                        print(f"\n✓ Hired 1 restocker for ${HIRING_COST:.2f}")
+                        print(f"\n✓ Hired 1 restocker for ${RESTOCKER_COST:.2f}")
                         print(f"  New capacity: {player.get_max_items_per_day()} items/day")
                     else:
                         print("\n✗ Failed to hire restocker")
+            elif choice_num == 2:
+                if player.store_level < 5:
+                    print(f"\n✗ Requires Store Level 5+! (Current: {player.store_level})")
+                elif player.cash < marketing_cost:
+                    print(f"\n✗ Not enough cash! Need ${marketing_cost:.2f}, have ${player.cash:.2f}")
+                else:
+                    success = player.hire_employee("marketing_agent")
+                    if success:
+                        print(f"\n✓ Hired Marketing Agent for ${marketing_cost:.2f}")
+                        next_cost = 1000.0 * (5 ** player.marketing_agents)
+                        print(f"  Next Marketing Agent will cost: ${next_cost:.2f}")
+                    else:
+                        print("\n✗ Failed to hire Marketing Agent")
             else:
                 print("\n✗ Invalid option!")
 
@@ -4564,7 +4641,7 @@ def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
     elif upgrade.effect_type == "vendor_discount":
         return f"+{int(upgrade.effect_value)}% discount at {upgrade.vendor_name}"
     elif upgrade.effect_type == "wage_reduction":
-        return f"-${int(upgrade.effect_value)} monthly wage per employee (from $500 to $400)"
+        return f"-${int(upgrade.effect_value)} monthly wage per employee (from $1000 to $900)"
     elif upgrade.effect_type == "lead_time_reduction":
         return f"-{int(upgrade.effect_value)} day lead time for all vendors"
     elif upgrade.effect_type == "production_line":
@@ -4895,6 +4972,7 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "prices": player.prices,
                 "buy_orders": {k: list(v) for k, v in player.buy_orders.items()},
                 "restockers": player.restockers,
+                "marketing_agents": player.marketing_agents,
                 "store_level": player.store_level,
                 "experience": player.experience,
                 "item_costs": player.item_costs,
@@ -5018,6 +5096,7 @@ def deserialize_game_state(data: dict) -> GameState:
             prices=player_data["prices"],
             buy_orders=buy_orders,
             restockers=player_data.get("restockers", 0),  # Backward compatibility
+            marketing_agents=player_data.get("marketing_agents", 0),  # Backward compatibility
             store_level=player_data["store_level"],
             experience=player_data["experience"],
             item_costs=player_data["item_costs"],
