@@ -28,12 +28,18 @@ def test_record_store_visit_metrics_counts_zero_needs_and_records_partial():
     daily_fulfillment_data = {"StoreA": {"allocated": [], "overflow": []}}
     fulfillment_visit_counts = {"StoreA": {"allocated": 0, "overflow": 0}}
     daily_reputation_changes = {"StoreA": 0}
+    routed_no_need_counts = {"StoreA": {"allocated": 0, "overflow": 0}}
 
     sim.record_store_visit_metrics(
-        visit_data, daily_fulfillment_data, fulfillment_visit_counts, daily_reputation_changes
+        visit_data,
+        daily_fulfillment_data,
+        fulfillment_visit_counts,
+        daily_reputation_changes,
+        routed_no_need_counts,
     )
 
-    assert fulfillment_visit_counts == {"StoreA": {"allocated": 1, "overflow": 1}}
-    assert daily_fulfillment_data["StoreA"]["allocated"] == [0.0]
+    assert fulfillment_visit_counts == {"StoreA": {"allocated": 0, "overflow": 1}}
+    assert routed_no_need_counts == {"StoreA": {"allocated": 1, "overflow": 0}}
+    assert daily_fulfillment_data["StoreA"]["allocated"] == []
     assert daily_fulfillment_data["StoreA"]["overflow"] == [40.0]
     assert daily_reputation_changes["StoreA"] == 0
