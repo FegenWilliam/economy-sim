@@ -2496,7 +2496,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Track fulfillment percentages per player (to calculate average at end of day)
     daily_fulfillment_data = {player.name: [] for player in game_state.players}  # List of fulfillment % per customer
-    daily_fulfillment_counts = {
+    fulfillment_visit_counts = {
         player.name: {"allocated": 0, "overflow": 0}
         for player in game_state.players
     }
@@ -2731,10 +2731,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 # Track fulfillment percentage for this customer visit
                 daily_fulfillment_data[store_name].append(fulfillment_percentage)
 
-                if visit_type in daily_fulfillment_counts[store_name]:
-                    daily_fulfillment_counts[store_name][visit_type] += 1
+                if visit_type == "overflow":
+                    fulfillment_visit_counts[store_name]["overflow"] += 1
                 else:
-                    daily_fulfillment_counts[store_name]['allocated'] += 1
+                    fulfillment_visit_counts[store_name]["allocated"] += 1
 
                 # Track reputation changes based on fulfillment for this store visit
                 if fulfillment_percentage <= 30:
@@ -3102,8 +3102,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             change_text = f" (change: {rep_change:+d}{decay_text})" if (rep_change != 0 or decay_amount > 0) else ""
             print(f"\n📊 {player.name} Reputation: {player.reputation:.0f}{change_text}")
             if daily_fulfillment_data[player.name]:
-                allocated_fulfillments = daily_fulfillment_counts[player.name]['allocated']
-                overflow_fulfillments = daily_fulfillment_counts[player.name]['overflow']
+                allocated_fulfillments = fulfillment_visit_counts[player.name]['allocated']
+                overflow_fulfillments = fulfillment_visit_counts[player.name]['overflow']
                 total_fulfillment_customers = allocated_fulfillments + overflow_fulfillments
 
                 fulfillment_breakdown = (
