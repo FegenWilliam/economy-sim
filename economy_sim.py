@@ -2573,6 +2573,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             remaining_needs = list(needs)
 
+            # Track whether this customer has already been counted in daily stats
+            customer_stat_recorded = False
+            had_needs = bool(needs)
+
             # Customer will shop at their assigned player's store
             current_supplier = player
 
@@ -2656,6 +2660,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
                                 customer_bought_anything = True
 
+                                # Mark customer as having bought something for daily stats
+                                if (customer.customer_type in customer_type_stats['bought_something']
+                                        and not customer_stat_recorded):
+                                    customer_type_stats['bought_something'][customer.customer_type] += 1
+                                    customers_counted_in_stats.add(customer.name)
+                                    customer_stat_recorded = True
+
                                 # Update need quantity or mark as purchased
                                 if actual_units_sold >= need.quantity:
                                     purchased_needs.append(need)
@@ -2728,12 +2739,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                         daily_reputation_changes[store_name] += 1
                 # 50-79%: no change
 
-        # Track customer type statistics
+        # Track customer type statistics for customers who never bought anything
         if (customer.customer_type in customer_type_stats['bought_something']
-                and customer.name not in customers_counted_in_stats):
+                and not customer_stat_recorded):
             if customer_bought_anything:
                 customer_type_stats['bought_something'][customer.customer_type] += 1
-            elif needs:
+            elif had_needs:
                 # Only count as found nothing if they actually had needs
                 customer_type_stats['found_nothing'][customer.customer_type] += 1
             customers_counted_in_stats.add(customer.name)
