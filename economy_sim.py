@@ -2712,7 +2712,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 if visit.get('recorded'):
                     return
 
-                visit['recorded'] = True
                 visit['only_store'] = (
                     only_store_flag if only_store_flag is not None else len(store_visit_data) == 1
                 )
@@ -2723,6 +2722,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     daily_reputation_changes,
                     routed_no_need_counts,
                 )
+                visit['recorded'] = True
 
             start_store_visit(current_supplier, remaining_needs, visit_type="allocated")
 
