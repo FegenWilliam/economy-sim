@@ -8,20 +8,23 @@ def test_vendors():
     vendors = create_vendors()
 
     print("Testing vendor changes...")
-    print(f"Total vendors: {len(vendors)} (expected: 9)")
-    assert len(vendors) == 9, f"Expected 9 vendors, got {len(vendors)}"
+    print(f"Total vendors: {len(vendors)} (expected: 7)")
+    assert len(vendors) == 7, f"Expected 7 vendors, got {len(vendors)}"
 
     # Check each vendor
     vendor_specs = {
-        "Lucky Deal Trader": {"pricing": 0.70, "lead_time": 4},
-        "Discount Wholesale Co.": {"pricing": 0.80, "lead_time": 3},
-        "Budget Goods Ltd.": {"pricing": 0.90, "lead_time": 1},
-        "Premium Select Inc.": {"pricing": 0.95, "lead_time": 1},
-        "Instant Goods Ltd.": {"pricing": 0.98, "lead_time": 0},
-        "Universal Supply Corp.": {"pricing": 1.05, "lead_time": 0},
         "Bulk Goods Co.": {"pricing": 0.85, "lead_time": 1},
-        "Cheap Goods Co.": {"pricing": 0.80, "lead_time": 3},
-        "VIP Goods Co.": {"pricing": 0.95, "lead_time": 1}
+        "Instant Goods Ltd.": {
+            "pricing": 0.98,
+            "lead_time": 0,
+            "selection_type": "price_threshold",
+            "selection_params": 40.0,
+        },
+        "Universal Supply Corp.": {"pricing": 1.05, "lead_time": 0},
+        "Bulk Master Co.": {"pricing": 1.10, "lead_time": 1},
+        "Stock Masters Ltd": {"pricing": 0.80, "lead_time": 2},
+        "Luxury House Co.": {"pricing": 0.98, "lead_time": 1},
+        "Daily Essentials Co.": {"pricing": 0.90, "lead_time": 1},
     }
 
     for vendor in vendors:
@@ -36,21 +39,13 @@ def test_vendors():
             assert vendor.lead_time == specs["lead_time"], \
                 f"{vendor.name}: expected lead_time {specs['lead_time']}, got {vendor.lead_time}"
 
-    # Check Instant Goods Ltd specifically
-    instant_goods = next((v for v in vendors if v.name == "Instant Goods Ltd."), None)
-    assert instant_goods is not None, "Instant Goods Ltd. not found"
-    assert instant_goods.selection_type == "price_threshold", \
-        f"Instant Goods Ltd: expected selection_type 'price_threshold', got {instant_goods.selection_type}"
-    assert instant_goods.selection_params == 40.0, \
-        f"Instant Goods Ltd: expected selection_params 40.0, got {instant_goods.selection_params}"
-
-    # Check order: Instant Goods Ltd should be after Premium Select Inc (index 4 after index 3)
-    vendor_names = [v.name for v in vendors]
-    premium_idx = vendor_names.index("Premium Select Inc.")
-    instant_idx = vendor_names.index("Instant Goods Ltd.")
-    print(f"\n✓ Vendor order: Premium Select Inc. at index {premium_idx}, Instant Goods Ltd. at index {instant_idx}")
-    assert instant_idx == premium_idx + 1, \
-        f"Instant Goods Ltd should be right after Premium Select Inc."
+            # Optional selection settings when provided
+            if "selection_type" in specs:
+                assert vendor.selection_type == specs["selection_type"], \
+                    f"{vendor.name}: expected selection_type {specs['selection_type']}, got {vendor.selection_type}"
+            if "selection_params" in specs:
+                assert vendor.selection_params == specs["selection_params"], \
+                    f"{vendor.name}: expected selection_params {specs['selection_params']}, got {vendor.selection_params}"
 
     print("\n" + "=" * 60)
     print("✅ All vendor tests passed!")
