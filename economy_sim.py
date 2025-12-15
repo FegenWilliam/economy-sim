@@ -2484,6 +2484,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     daily_sales = {player.name: 0.0 for player in game_state.players}
     daily_profits = {player.name: 0.0 for player in game_state.players}
     customers_served = {player.name: 0 for player in game_state.players}
+    allocated_customers_served = {player.name: 0 for player in game_state.players}
+    overflow_customers_served = {player.name: 0 for player in game_state.players}
     uncapped_customers_served = {player.name: 0 for player in game_state.players}
     unmet_demand = 0
     unmet_uncapped_demand = 0
@@ -2563,28 +2565,29 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             # Track original needs for reputation calculation
             original_needs_count = sum(need.quantity for need in needs)
-            fulfilled_needs_count = 0
 
             remaining_needs = list(needs)
 
             # Customer will shop at their assigned player's store
             current_supplier = player
-            visited_stores = [player.name]  # Track which stores this customer shopped at
 
-            # Safety guard to prevent infinite loops if needs never resolve
-            max_iterations = max(10, len(remaining_needs) * 10)
-            iterations = 0
+            # Track fulfillment per store visit (based on remaining needs when entering)
+            store_visit_data = []
+
+            def start_store_visit(supplier, current_needs, visit_type: str):
+                store_visit_data.append({
+                    'store_name': supplier.name,
+                    'starting_needs': sum(need.quantity for need in current_needs),
+                    'fulfilled': 0,
+                    'visit_type': visit_type,
+                })
+
+            start_store_visit(current_supplier, remaining_needs, visit_type="allocated")
+
+            # Track visited stores to avoid bouncing between the same shops
+            visited_stores: Set[str] = {current_supplier.name}
 
             while remaining_needs and customer_spending < customer_budget:
-                iterations += 1
-                if iterations > max_iterations:
-                    # If we've looped too many times without clearing needs, mark remaining as unmet
-                    for need in remaining_needs:
-                        unmet_demand += need.quantity
-                        unmet_demand_per_item[need.item_name] = (
-                            unmet_demand_per_item.get(need.item_name, 0) + need.quantity
-                        )
-                    break
 
                 # Try to purchase items from assigned supplier
                 purchased_needs = []
@@ -2617,7 +2620,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                             if revenue > 0:
                                 # Track customer spending
                                 customer_spending += revenue
-                                fulfilled_needs_count += actual_units_sold
+
+                                # Track fulfillment for the current store visit
+                                if store_visit_data:
+                                    store_visit_data[-1]['fulfilled'] += actual_units_sold
 
                                 # Track sales
                                 daily_sales[current_supplier.name] += revenue
@@ -2626,6 +2632,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                                 # Count customer at this store (only once)
                                 if current_supplier.name not in customer_counted_at_store:
                                     customers_served[current_supplier.name] += 1
+                                    visit_type = store_visit_data[-1]['visit_type'] if store_visit_data else "allocated"
+                                    if visit_type == "allocated":
+                                        allocated_customers_served[current_supplier.name] += 1
+                                    else:
+                                        overflow_customers_served[current_supplier.name] += 1
                                     customer_counted_at_store[current_supplier.name] = True
 
                                 # Track per-item sales
@@ -2650,30 +2661,32 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                                 if customer_spending >= customer_budget:
                                     break
 
-            # Remove fully purchased items from remaining needs
-            for need in purchased_needs:
-                remaining_needs.remove(need)
+                # Remove fully purchased items from remaining needs
+                for need in purchased_needs:
+                    remaining_needs.remove(need)
 
-            # If the assigned supplier couldn't fulfill anything, try other stores before
-            # giving up on the remaining needs. This prevents customers from immediately
-            # abandoning their carts when another player actually has the item.
-            if remaining_needs and not purchased_needs:
-                switched_store = False
+                # Stop if basket is empty or budget is exhausted
+                if not remaining_needs or customer_spending >= customer_budget:
+                    break
+
+                # Attempt to visit another store for remaining needs
+                next_supplier = None
                 for need in list(remaining_needs):
                     alternative_supplier = customer.choose_supplier(
-                        game_state.players, need.item_name, need.quantity, game_state.market_prices
+                        [p for p in game_state.players if p.name not in visited_stores],
+                        need.item_name,
+                        need.quantity,
+                        game_state.market_prices
                     )
 
-                    # Only switch if we find a different supplier with acceptable pricing/stock
                     if alternative_supplier and alternative_supplier != current_supplier:
-                        current_supplier = alternative_supplier
-                        if alternative_supplier.name not in visited_stores:
-                            visited_stores.append(alternative_supplier.name)
-                        switched_store = True
+                        next_supplier = alternative_supplier
                         break
 
-                if switched_store:
-                    # Try again with the new store
+                if next_supplier:
+                    current_supplier = next_supplier
+                    visited_stores.add(current_supplier.name)
+                    start_store_visit(current_supplier, remaining_needs, visit_type="overflow")
                     continue
 
                 # No alternative store could fulfill the remaining needs, mark as unmet
@@ -2684,20 +2697,20 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     )
                 break
 
-            # Continue shopping at same store if we made purchases
-            if not remaining_needs or customer_spending >= customer_budget:
-                break
-
         # Track reputation changes and fulfillment for all stores this customer visited
         # (Will be applied at end of day with limits)
         if original_needs_count > 0:
-            fulfillment_percentage = (fulfilled_needs_count / original_needs_count) * 100  # Convert to percentage
+            for visit in store_visit_data:
+                if visit['starting_needs'] <= 0:
+                    continue
 
-            for store_name in visited_stores:
+                fulfillment_percentage = (visit['fulfilled'] / visit['starting_needs']) * 100
+                store_name = visit['store_name']
+
                 # Track fulfillment percentage for this customer visit
                 daily_fulfillment_data[store_name].append(fulfillment_percentage)
 
-                # Track reputation changes based on fulfillment
+                # Track reputation changes based on fulfillment for this store visit
                 if fulfillment_percentage <= 30:
                     # 30% or less: -1 reputation
                     daily_reputation_changes[store_name] -= 1
@@ -2706,7 +2719,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     daily_reputation_changes[store_name] += 1
 
                     # If 100% fulfilled at exactly one store, +2 total (so +1 additional)
-                    if fulfillment_percentage >= 99.9 and len(visited_stores) == 1:
+                    if fulfillment_percentage >= 99.9 and len(store_visit_data) == 1:
                         daily_reputation_changes[store_name] += 1
                 # 50-79%: no change
 
@@ -2911,6 +2924,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             sales = daily_sales[player.name]
             profit = daily_profits[player.name]
             served = customers_served[player.name]
+            allocated_served = allocated_customers_served[player.name]
+            overflow_served = overflow_customers_served[player.name]
             uncapped_served = uncapped_customers_served[player.name]
             xp_needed = player.get_xp_for_next_level()
 
@@ -2922,7 +2937,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             print(f"  {player.name}:")
             print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | Level: {player.store_level} | XP: {player.experience:.0f}/{xp_needed:.0f}")
-            customer_info = f"Regular: {served}"
+            customer_info = f"Regular: {served} (Allocated: {allocated_served} | Overflow: {overflow_served})"
             if uncapped_customer_count > 0:
                 customer_info += f" | 💎 Uncapped: {uncapped_served}"
             print(f"    Customers: {customer_info} | Items Sold: {total_items_sold} | Cash: ${player.cash:.2f}")
