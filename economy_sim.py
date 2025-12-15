@@ -2374,8 +2374,11 @@ def assign_customers_by_cas(
                 selected_player = player
                 break
 
-        if selected_player is not None:
-            assignments[selected_player.name].append(customer)
+        if selected_player is None:
+            # Fallback to first player if something goes wrong
+            selected_player = players[0]
+
+        assignments[selected_player.name].append(customer)
 
     return assignments
 
@@ -2428,9 +2431,17 @@ def record_single_store_visit(
 ) -> None:
     """Record fulfillment stats and reputation impact for a single store visit."""
 
-    store_name = visit["store_name"]
-    visit_type = visit.get("visit_type", "allocated")
+    store_name = visit.get("store_name")
+    visit_type = visit.get("visit_type") or "allocated"
     starting_needs = visit.get("starting_needs", 0)
+
+    if (not store_name or store_name not in daily_fulfillment_data
+            or store_name not in fulfillment_visit_counts
+            or store_name not in daily_reputation_changes):
+        return
+
+    if visit_type not in daily_fulfillment_data[store_name]:
+        visit_type = "allocated"
 
     if starting_needs <= 0:
         if routed_no_need_counts is not None:
@@ -2690,6 +2701,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     'recorded': False,
                 })
 
+            def has_remaining_quantity(current_needs: List[Need]) -> bool:
+                return any(need.quantity > 0 for need in current_needs)
+
             def finalize_latest_visit(only_store_flag: Optional[bool] = None):
                 if not store_visit_data:
                     return
@@ -2715,7 +2729,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             # Track visited stores to avoid bouncing between the same shops
             visited_stores: Set[str] = {current_supplier.name}
 
-            while remaining_needs and customer_spending < customer_budget:
+            while has_remaining_quantity(remaining_needs) and customer_spending < customer_budget:
 
                 # Try to purchase items from assigned supplier
                 purchased_needs = []
@@ -2801,7 +2815,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     remaining_needs.remove(need)
 
                 # Stop if basket is empty or budget is exhausted
-                if not remaining_needs or customer_spending >= customer_budget:
+                if not remaining_needs or customer_spending >= customer_budget or not has_remaining_quantity(remaining_needs):
                     break
 
                 # Attempt to visit another store for remaining needs
