@@ -3204,6 +3204,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         player.reputation = max(-100, min(100, player.reputation))
 
         fulfillment_data = daily_fulfillment_data[player.name]
+        visit_counts = {
+            "allocated": len(fulfillment_data.get("allocated", [])),
+            "overflow": len(fulfillment_data.get("overflow", [])),
+        }
 
         # Update fulfillment averages based on today's data
         update_player_fulfillment_averages(player, fulfillment_data)
@@ -3218,7 +3222,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"\n📊 {player.name} Reputation: {player.reputation:.0f}{change_text}")
             if has_fulfillment_data:
                 fulfillment_summary = format_fulfillment_summary(
-                    player, fulfillment_visit_counts[player.name]
+                    player, visit_counts
                 )
                 print(fulfillment_summary)
 
