@@ -2496,6 +2496,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Track fulfillment percentages per player (to calculate average at end of day)
     daily_fulfillment_data = {player.name: [] for player in game_state.players}  # List of fulfillment % per customer
+    daily_fulfillment_counts = {
+        player.name: {"allocated": 0, "overflow": 0}
+        for player in game_state.players
+    }
 
     # Track customer types for daily summary
     customer_type_stats = {
@@ -2722,9 +2726,15 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
                 fulfillment_percentage = (visit['fulfilled'] / visit['starting_needs']) * 100
                 store_name = visit['store_name']
+                visit_type = visit.get('visit_type', 'allocated')
 
                 # Track fulfillment percentage for this customer visit
                 daily_fulfillment_data[store_name].append(fulfillment_percentage)
+
+                if visit_type in daily_fulfillment_counts[store_name]:
+                    daily_fulfillment_counts[store_name][visit_type] += 1
+                else:
+                    daily_fulfillment_counts[store_name]['allocated'] += 1
 
                 # Track reputation changes based on fulfillment for this store visit
                 if fulfillment_percentage <= 30:
@@ -3092,7 +3102,20 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             change_text = f" (change: {rep_change:+d}{decay_text})" if (rep_change != 0 or decay_amount > 0) else ""
             print(f"\n📊 {player.name} Reputation: {player.reputation:.0f}{change_text}")
             if daily_fulfillment_data[player.name]:
-                print(f"   Average Fulfillment: {player.average_fulfillment_pct:.1f}% (from {len(daily_fulfillment_data[player.name])} customers)")
+                allocated_fulfillments = daily_fulfillment_counts[player.name]['allocated']
+                overflow_fulfillments = daily_fulfillment_counts[player.name]['overflow']
+                total_fulfillment_customers = allocated_fulfillments + overflow_fulfillments
+
+                fulfillment_breakdown = (
+                    f"(from {total_fulfillment_customers} customers"
+                    f" | Allocated: {allocated_fulfillments}"
+                    f" | Overflow: {overflow_fulfillments})"
+                )
+
+                print(
+                    f"   Average Fulfillment: {player.average_fulfillment_pct:.1f}% "
+                    f"{fulfillment_breakdown}"
+                )
 
             # Display CAS breakdown for this player
             display_cas_breakdown(player, game_state)
