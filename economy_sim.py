@@ -486,6 +486,7 @@ class Player:
     last_wage_payment_day: int = 0  # Track when wages were last paid (for 30-day wage cycle)
     vendor_partnership_expiration: Dict[str, int] = field(default_factory=dict)  # upgrade_name -> expiration_day (for temporary vendor partnerships)
     price_history: Dict[str, float] = field(default_factory=dict)  # item_name -> previous_price (for consistency tracking)
+    daily_sales_data: Dict[str, Dict[str, float]] = field(default_factory=dict)  # item_name -> sales metrics for pricing
     pending_deliveries: List[tuple] = field(default_factory=list)  # List of (item_name, quantity, cost_per_item, delivery_day) for orders with lead time
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
@@ -1627,102 +1628,86 @@ def create_customers(num_customers: int) -> List[Customer]:
 
 def create_vendors() -> List[Vendor]:
     """
-    Create 7 vendors with different pricing and selection strategies.
+    Create 9 vendors with different pricing and selection strategies.
 
     Vendor inventory is refreshed daily based on their selection type.
     """
-    vendors = []
-
-    # Vendor 1: Bulk Goods Co. - 85% of market price, min 100 per purchase, items $30 or less, 1 day lead time
-    vendors.append(Vendor(
-        name="Bulk Goods Co.",
-        pricing_multiplier=0.85,
-        selection_type="price_range",
-        selection_params=0,
-        min_purchase=100,
-        price_max=30.0,
-        lead_time=1
-    ))
-
-    # Vendor 2: Instant Goods Ltd. - 98% of market price, all items under $40, instant delivery (no lead time)
-    vendors.append(Vendor(
-        name="Instant Goods Ltd.",
-        pricing_multiplier=0.98,
-        selection_type="price_threshold",
-        selection_params=40.0,  # $40 threshold
-        lead_time=0
-    ))
-
-    # Vendor 3: Universal Supply Corp. - 105% of market price, all items available, instant delivery (no lead time)
-    vendors.append(Vendor(
-        name="Universal Supply Corp.",
-        pricing_multiplier=1.05,
-        selection_type="all",
-        selection_params=0,  # No limit
-        lead_time=0
-    ))
-
-    # Vendor 4: Bulk Master Co. - Volume-based pricing, items under $100, 1 day lead time
-    # Base: 110% market, scales down with volume
-    # Tiers (sorted descending): 10000->70%, 5000->75%, 2500->80%, 1000->85%, 500->90%, 300->95%, 100->100%
-    vendors.append(Vendor(
-        name="Bulk Master Co.",
-        pricing_multiplier=1.10,  # Base pricing
-        selection_type="price_threshold",
-        selection_params=100.0,  # Items under $100
-        lead_time=1,
-        volume_pricing_tiers=[
-            (10000, 0.70),
-            (5000, 0.75),
-            (2500, 0.80),
-            (1000, 0.85),
-            (500, 0.90),
-            (300, 0.95),
-            (100, 1.00)
-        ]
-    ))
-
-    # Vendor 5: Stock Masters Ltd - 80% market price, requires 100 reputation, level 10, max 500 per item, 2 day lead time, all items
-    vendors.append(Vendor(
-        name="Stock Masters Ltd",
-        pricing_multiplier=0.80,
-        selection_type="all",
-        selection_params=0,
-        max_per_item_per_player=500,
-        lead_time=2,
-        required_reputation=100.0,
-        required_level=10
-    ))
-
-    # Vendor 6: Luxury House Co. - Only Gaming and Luxury categories
-    # Base: 98% market, 90% at 50+ items
-    vendors.append(Vendor(
-        name="Luxury House Co.",
-        pricing_multiplier=0.98,
-        selection_type="category",
-        selection_params=0,
-        allowed_categories=["Gaming", "Luxury"],
-        lead_time=1,
-        volume_pricing_tiers=[
-            (50, 0.90)
-        ]
-    ))
-
-    # Vendor 7: Daily Essentials Co. - Only Food & Groceries and Fresh Produce categories
-    # Base: 90% market, 80% at 1000+ items
-    vendors.append(Vendor(
-        name="Daily Essentials Co.",
-        pricing_multiplier=0.90,
-        selection_type="category",
-        selection_params=0,
-        allowed_categories=["Food & Groceries", "Fresh Produce"],
-        lead_time=1,
-        volume_pricing_tiers=[
-            (1000, 0.80)
-        ]
-    ))
-
-    return vendors
+    return [
+        # Value-focused vendors
+        Vendor(
+            name="Lucky Deal Trader",
+            pricing_multiplier=0.70,
+            selection_type="random_daily",
+            selection_params=15,  # Rotate through a handful of products
+            lead_time=4
+        ),
+        Vendor(
+            name="Discount Wholesale Co.",
+            pricing_multiplier=0.80,
+            selection_type="price_threshold",
+            selection_params=25.0,
+            lead_time=3
+        ),
+        Vendor(
+            name="Budget Goods Ltd.",
+            pricing_multiplier=0.90,
+            selection_type="price_threshold",
+            selection_params=60.0,
+            lead_time=1
+        ),
+        Vendor(
+            name="Premium Select Inc.",
+            pricing_multiplier=0.95,
+            selection_type="price_range",
+            selection_params=0,
+            price_min=10.0,
+            price_max=200.0,
+            lead_time=1
+        ),
+        # Immediate fulfillment
+        Vendor(
+            name="Instant Goods Ltd.",
+            pricing_multiplier=0.98,
+            selection_type="price_threshold",
+            selection_params=40.0,  # $40 threshold
+            lead_time=0
+        ),
+        Vendor(
+            name="Universal Supply Corp.",
+            pricing_multiplier=1.05,
+            selection_type="all",
+            selection_params=0,
+            lead_time=0
+        ),
+        # Bulk/limited vendors
+        Vendor(
+            name="Bulk Goods Co.",
+            pricing_multiplier=0.85,
+            selection_type="price_range",
+            selection_params=0,
+            min_purchase=100,
+            price_max=30.0,
+            lead_time=1
+        ),
+        Vendor(
+            name="Cheap Goods Co.",
+            pricing_multiplier=0.80,
+            selection_type="category",
+            selection_params=0,
+            allowed_categories=["Food & Groceries", "Fresh Produce", "Household Essentials"],
+            lead_time=3
+        ),
+        Vendor(
+            name="VIP Goods Co.",
+            pricing_multiplier=0.95,
+            selection_type="category",
+            selection_params=0,
+            allowed_categories=["Luxury", "Electronics", "Gaming"],
+            max_per_item_per_player=50,
+            required_reputation=50.0,
+            lead_time=1
+        ),
+    ]
 
 
 def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_prices: Dict[str, float]) -> None:
@@ -1788,6 +1773,61 @@ def initialize_market_prices(items: List[Item]) -> Dict[str, float]:
     for item in items:
         market_prices[item.name] = item.base_price
     return market_prices
+
+
+def auto_pricing_strategy(player: Player, market_prices: Dict[str, float], items: List[Item]) -> Dict[str, float]:
+    """
+    Adjust player prices using simple heuristics informed by prior-day sales.
+
+    Rules of thumb:
+    - Ensure prices stay above cost with a small margin.
+    - Raise prices modestly if an item sold out or had unmet demand.
+    - Reduce prices if nothing sold; otherwise, make gentle adjustments based on sell-through.
+    - Keep prices near market rates to avoid falling outside the 15% customer tolerance window.
+    Returns a mapping of item names to their updated prices.
+    """
+    new_prices: Dict[str, float] = {}
+    sales_data = getattr(player, "daily_sales_data", {}) or {}
+
+    for item in items:
+        market_price = market_prices.get(item.name, item.base_price)
+        cost = player.item_costs.get(item.name, item.base_cost)
+        previous_price = player.prices.get(item.name, market_price)
+
+        # Baseline targets: stay above cost and near market rate
+        baseline_price = max(cost * 1.05, market_price * 0.95)
+        price = max(previous_price, baseline_price)
+
+        sales = sales_data.get(item.name)
+        if sales:
+            units_sold = sales.get('units_sold', 0) or 0
+            sold_out = bool(sales.get('sold_out'))
+            unmet_demand = sales.get('unmet_demand', 0) or 0
+            starting_inventory = sales.get('starting_inventory', units_sold + unmet_demand)
+            demand_ratio = (units_sold + unmet_demand) / starting_inventory if starting_inventory else 0.0
+
+            if sold_out or unmet_demand > 0:
+                price = previous_price * 1.05
+            elif units_sold == 0:
+                price = max(baseline_price, previous_price * 0.95)
+            else:
+                if demand_ratio >= 0.8:
+                    price = previous_price * 1.03
+                elif demand_ratio <= 0.2:
+                    price = max(baseline_price, previous_price * 0.97)
+                else:
+                    price = previous_price
+        else:
+            price = max(price, baseline_price)
+
+        # Keep prices within a reasonable band of market to avoid pricing out customers
+        price = min(max(price, baseline_price), market_price * 1.20)
+        price = round(price, 2)
+
+        player.set_price(item.name, price)
+        new_prices[item.name] = price
+
+    return new_prices
 
 
 def initialize_item_demand(items: List[Item]) -> Dict[str, float]:
@@ -2950,6 +2990,20 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             sorted_demand = sorted(daily_demand_per_item.items(), key=lambda x: (-x[1], x[0]))
             for item_name, quantity in sorted_demand:
                 print(f"  {item_name}: {quantity} units")
+
+    # Persist per-item sales metrics for next-day pricing strategies
+    for player in game_state.players:
+        player.daily_sales_data = {}
+        for item_name, data in per_item_sales[player.name].items():
+            starting_inventory = data.get('starting_inventory', 0)
+            remaining_inventory = player.inventory.get(item_name, 0)
+            player.daily_sales_data[item_name] = {
+                'units_sold': data.get('units_sold', 0),
+                'revenue': data.get('revenue', 0.0),
+                'sold_out': starting_inventory > 0 and remaining_inventory == 0,
+                'unmet_demand': unmet_demand_per_item.get(item_name, 0),
+                'starting_inventory': starting_inventory,
+            }
 
     # Update item demand for next day (after everything has sold)
     updated_items = update_item_demand(game_state)
