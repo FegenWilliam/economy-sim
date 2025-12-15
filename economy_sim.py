@@ -485,6 +485,8 @@ class Player:
     is_human: bool = False  # Whether this is a human-controlled player
     reputation: float = 0.0  # Store reputation from -100 to 100, affects customer choice
     average_fulfillment_pct: float = 70.0  # Average % of customer needs fulfilled (used for scoring)
+    allocated_average_fulfillment_pct: float = 70.0  # Avg fulfillment for initially assigned customers
+    overflow_average_fulfillment_pct: float = 70.0  # Avg fulfillment for overflow customers
     last_wage_payment_day: int = 0  # Track when wages were last paid (for 30-day wage cycle)
     vendor_partnership_expiration: Dict[str, int] = field(default_factory=dict)  # upgrade_name -> expiration_day (for temporary vendor partnerships)
     price_history: Dict[str, float] = field(default_factory=dict)  # item_name -> previous_price (for consistency tracking)
@@ -2381,6 +2383,36 @@ def assign_customers_by_cas(
     return assignments
 
 
+def update_player_fulfillment_averages(player: Player, fulfillment_data: Dict[str, List[float]]) -> None:
+    """Update a player's overall, allocated, and overflow fulfillment averages."""
+    allocated_data = fulfillment_data.get("allocated", [])
+    overflow_data = fulfillment_data.get("overflow", [])
+    combined_data = allocated_data + overflow_data
+
+    if combined_data:
+        player.average_fulfillment_pct = sum(combined_data) / len(combined_data)
+
+    if allocated_data:
+        player.allocated_average_fulfillment_pct = sum(allocated_data) / len(allocated_data)
+
+    if overflow_data:
+        player.overflow_average_fulfillment_pct = sum(overflow_data) / len(overflow_data)
+
+
+def format_fulfillment_summary(player: Player, visit_counts: Dict[str, int]) -> str:
+    """Generate a formatted fulfillment summary for display."""
+    allocated_visits = visit_counts.get("allocated", 0)
+    overflow_visits = visit_counts.get("overflow", 0)
+    total_visits = allocated_visits + overflow_visits
+
+    return (
+        f"   Average Fulfillment: {player.average_fulfillment_pct:.1f}% "
+        f"(from {total_visits} customers"
+        f" | Allocated Avg: {player.allocated_average_fulfillment_pct:.1f}% ({allocated_visits})"
+        f" | Overflow Avg: {player.overflow_average_fulfillment_pct:.1f}% ({overflow_visits}))"
+    )
+
+
 def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float]:
     """
     Simulate a single day in the economic game.
@@ -2495,11 +2527,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     daily_reputation_changes = {player.name: 0 for player in game_state.players}
 
     # Track fulfillment percentages per player (to calculate average at end of day)
-    daily_fulfillment_data = {player.name: [] for player in game_state.players}  # List of fulfillment % per customer
-    fulfillment_visit_counts = {
-        player.name: {"allocated": 0, "overflow": 0}
+    daily_fulfillment_data = {
+        player.name: {"allocated": [], "overflow": []}
         for player in game_state.players
     }
+    fulfillment_visit_counts = {player.name: {"allocated": 0, "overflow": 0} for player in game_state.players}
 
     # Track customer types for daily summary
     customer_type_stats = {
@@ -2729,7 +2761,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 visit_type = visit.get('visit_type', 'allocated')
 
                 # Track fulfillment percentage for this customer visit
-                daily_fulfillment_data[store_name].append(fulfillment_percentage)
+                daily_fulfillment_data[store_name][visit_type].append(fulfillment_percentage)
 
                 if visit_type == "overflow":
                     fulfillment_visit_counts[store_name]["overflow"] += 1
@@ -3089,33 +3121,24 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Ensure reputation stays within bounds [-100, 100]
         player.reputation = max(-100, min(100, player.reputation))
 
-        # Update average fulfillment percentage based on today's data
-        if daily_fulfillment_data[player.name]:
-            # Calculate average of today's fulfillment percentages
-            today_avg = sum(daily_fulfillment_data[player.name]) / len(daily_fulfillment_data[player.name])
-            player.average_fulfillment_pct = today_avg
-        # If no customers visited today, keep previous average
+        fulfillment_data = daily_fulfillment_data[player.name]
+
+        # Update fulfillment averages based on today's data
+        update_player_fulfillment_averages(player, fulfillment_data)
+        has_fulfillment_data = bool(
+            fulfillment_data["allocated"] or fulfillment_data["overflow"]
+        )
 
         # Show reputation changes for all players
         if show_details:
             decay_text = f" (decay: -{decay_amount})" if decay_amount > 0 else ""
             change_text = f" (change: {rep_change:+d}{decay_text})" if (rep_change != 0 or decay_amount > 0) else ""
             print(f"\n📊 {player.name} Reputation: {player.reputation:.0f}{change_text}")
-            if daily_fulfillment_data[player.name]:
-                allocated_fulfillments = fulfillment_visit_counts[player.name]['allocated']
-                overflow_fulfillments = fulfillment_visit_counts[player.name]['overflow']
-                total_fulfillment_customers = allocated_fulfillments + overflow_fulfillments
-
-                fulfillment_breakdown = (
-                    f"(from {total_fulfillment_customers} customers"
-                    f" | Allocated: {allocated_fulfillments}"
-                    f" | Overflow: {overflow_fulfillments})"
+            if has_fulfillment_data:
+                fulfillment_summary = format_fulfillment_summary(
+                    player, fulfillment_visit_counts[player.name]
                 )
-
-                print(
-                    f"   Average Fulfillment: {player.average_fulfillment_pct:.1f}% "
-                    f"{fulfillment_breakdown}"
-                )
+                print(fulfillment_summary)
 
             # Display CAS breakdown for this player
             display_cas_breakdown(player, game_state)
@@ -5225,6 +5248,8 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "vendor_partnership_expiration": player.vendor_partnership_expiration,
                 "reputation": player.reputation,
                 "average_fulfillment_pct": player.average_fulfillment_pct,
+                "allocated_average_fulfillment_pct": player.allocated_average_fulfillment_pct,
+                "overflow_average_fulfillment_pct": player.overflow_average_fulfillment_pct,
                 "pending_deliveries": player.pending_deliveries,
             }
             for player in game_state.players
@@ -5343,6 +5368,8 @@ def deserialize_game_state(data: dict) -> GameState:
             vendor_partnership_expiration=player_data.get("vendor_partnership_expiration", {}),
             reputation=player_data.get("reputation", 0.0),
             average_fulfillment_pct=player_data.get("average_fulfillment_pct", 70.0),
+            allocated_average_fulfillment_pct=player_data.get("allocated_average_fulfillment_pct", 70.0),
+            overflow_average_fulfillment_pct=player_data.get("overflow_average_fulfillment_pct", 70.0),
             pending_deliveries=[tuple(delivery) for delivery in player_data.get("pending_deliveries", [])],
         )
         players.append(player)
