@@ -2701,7 +2701,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     'recorded': False,
                 })
 
-            def has_remaining_quantity(current_needs: List[Need]) -> bool:
+            def has_remaining_quantity(current_needs: List[CustomerNeed]) -> bool:
                 return any(need.quantity > 0 for need in current_needs)
 
             def finalize_latest_visit(only_store_flag: Optional[bool] = None):
