@@ -2374,8 +2374,8 @@ def assign_customers_by_cas(
                 selected_player = player
                 break
 
-        # Fallback to first player if something goes wrong
         if selected_player is None:
+            # Fallback to first player if something goes wrong
             selected_player = players[0]
 
         assignments[selected_player.name].append(customer)
@@ -2404,43 +2404,71 @@ def record_store_visit_metrics(
     daily_fulfillment_data: Dict[str, Dict[str, List[float]]],
     fulfillment_visit_counts: Dict[str, Dict[str, int]],
     daily_reputation_changes: Dict[str, int],
+    routed_no_need_counts: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> None:
-    """Track fulfillment and reputation for every store visit (including zero-need visits)."""
+    """Track fulfillment and reputation for every store visit.
+
+    Zero-need visits are ignored for fulfillment and reputation but can be counted
+    separately through ``routed_no_need_counts`` if provided.
+    """
 
     for visit in store_visit_data:
-        store_name = visit["store_name"]
-        visit_type = visit.get("visit_type", "allocated")
-        starting_needs = visit.get("starting_needs", 0)
+        record_single_store_visit(
+            visit,
+            daily_fulfillment_data,
+            fulfillment_visit_counts,
+            daily_reputation_changes,
+            routed_no_need_counts,
+        )
 
-        if starting_needs <= 0:
-            # Count the visit so summaries match the number of customers routed to the store,
-            # but avoid reputation swings when there were no needs to fulfill. Use 0% so these
-            # visits do not inflate fulfillment averages.
-            daily_fulfillment_data[store_name][visit_type].append(0.0)
-            fulfillment_visit_counts[store_name][visit_type] += 1
-            continue
 
-        fulfillment_percentage = (visit["fulfilled"] / starting_needs) * 100
+def record_single_store_visit(
+    visit: Dict[str, Any],
+    daily_fulfillment_data: Dict[str, Dict[str, List[float]]],
+    fulfillment_visit_counts: Dict[str, Dict[str, int]],
+    daily_reputation_changes: Dict[str, int],
+    routed_no_need_counts: Optional[Dict[str, Dict[str, int]]] = None,
+) -> None:
+    """Record fulfillment stats and reputation impact for a single store visit."""
 
-        # Track fulfillment percentage for this customer visit
-        daily_fulfillment_data[store_name][visit_type].append(fulfillment_percentage)
+    store_name = visit.get("store_name")
+    visit_type = visit.get("visit_type") or "allocated"
+    starting_needs = visit.get("starting_needs", 0)
 
-        if visit_type == "overflow":
-            fulfillment_visit_counts[store_name]["overflow"] += 1
-        else:
-            fulfillment_visit_counts[store_name]["allocated"] += 1
+    if (not store_name or store_name not in daily_fulfillment_data
+            or store_name not in fulfillment_visit_counts
+            or store_name not in daily_reputation_changes):
+        return
 
-        # Track reputation changes based on fulfillment for this store visit
-        if fulfillment_percentage <= 30:
-            # 30% or less: -1 reputation
-            daily_reputation_changes[store_name] -= 1
-        elif fulfillment_percentage >= 80:
-            # 80% or more: +1 reputation
+    if visit_type not in daily_fulfillment_data[store_name]:
+        visit_type = "allocated"
+
+    if starting_needs <= 0:
+        if routed_no_need_counts is not None:
+            routed_no_need_counts[store_name][visit_type] += 1
+        return
+
+    fulfillment_percentage = (visit["fulfilled"] / starting_needs) * 100
+
+    # Track fulfillment percentage for this customer visit
+    daily_fulfillment_data[store_name][visit_type].append(fulfillment_percentage)
+
+    if visit_type == "overflow":
+        fulfillment_visit_counts[store_name]["overflow"] += 1
+    else:
+        fulfillment_visit_counts[store_name]["allocated"] += 1
+
+    # Track reputation changes based on fulfillment for this store visit
+    if fulfillment_percentage <= 30:
+        # 30% or less: -1 reputation
+        daily_reputation_changes[store_name] -= 1
+    elif fulfillment_percentage >= 80:
+        # 80% or more: +1 reputation
+        daily_reputation_changes[store_name] += 1
+
+        # If 100% fulfilled at exactly one store, +2 total (so +1 additional)
+        if fulfillment_percentage >= 99.9 and visit.get("only_store", False):
             daily_reputation_changes[store_name] += 1
-
-            # If 100% fulfilled at exactly one store, +2 total (so +1 additional)
-            if fulfillment_percentage >= 99.9 and len(store_visit_data) == 1:
-                daily_reputation_changes[store_name] += 1
 
 
 def format_fulfillment_summary(player: Player, visit_counts: Dict[str, int]) -> str:
@@ -2576,6 +2604,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         for player in game_state.players
     }
     fulfillment_visit_counts = {player.name: {"allocated": 0, "overflow": 0} for player in game_state.players}
+    routed_no_need_counts = {player.name: {"allocated": 0, "overflow": 0} for player in game_state.players}
 
     # Track customer types for daily summary
     customer_type_stats = {
@@ -2669,14 +2698,38 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     'starting_needs': sum(need.quantity for need in current_needs),
                     'fulfilled': 0,
                     'visit_type': visit_type,
+                    'recorded': False,
                 })
+
+            def has_remaining_quantity(current_needs: List[Need]) -> bool:
+                return any(need.quantity > 0 for need in current_needs)
+
+            def finalize_latest_visit(only_store_flag: Optional[bool] = None):
+                if not store_visit_data:
+                    return
+
+                visit = store_visit_data[-1]
+                if visit.get('recorded'):
+                    return
+
+                visit['recorded'] = True
+                visit['only_store'] = (
+                    only_store_flag if only_store_flag is not None else len(store_visit_data) == 1
+                )
+                record_single_store_visit(
+                    visit,
+                    daily_fulfillment_data,
+                    fulfillment_visit_counts,
+                    daily_reputation_changes,
+                    routed_no_need_counts,
+                )
 
             start_store_visit(current_supplier, remaining_needs, visit_type="allocated")
 
             # Track visited stores to avoid bouncing between the same shops
             visited_stores: Set[str] = {current_supplier.name}
 
-            while remaining_needs and customer_spending < customer_budget:
+            while has_remaining_quantity(remaining_needs) and customer_spending < customer_budget:
 
                 # Try to purchase items from assigned supplier
                 purchased_needs = []
@@ -2762,7 +2815,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     remaining_needs.remove(need)
 
                 # Stop if basket is empty or budget is exhausted
-                if not remaining_needs or customer_spending >= customer_budget:
+                if not remaining_needs or customer_spending >= customer_budget or not has_remaining_quantity(remaining_needs):
                     break
 
                 # Attempt to visit another store for remaining needs
@@ -2780,6 +2833,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                         break
 
                 if next_supplier:
+                    finalize_latest_visit(only_store_flag=False)
                     current_supplier = next_supplier
                     visited_stores.add(current_supplier.name)
                     start_store_visit(current_supplier, remaining_needs, visit_type="overflow")
@@ -2795,12 +2849,19 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # Track reputation changes and fulfillment for all stores this customer visited
         # (Will be applied at end of day with limits)
-        record_store_visit_metrics(
-            store_visit_data,
-            daily_fulfillment_data,
-            fulfillment_visit_counts,
-            daily_reputation_changes,
-        )
+        customer_only_store = len(store_visit_data) == 1
+        finalize_latest_visit(only_store_flag=customer_only_store)
+        for visit in store_visit_data:
+            if not visit.get('recorded'):
+                visit['recorded'] = True
+                visit['only_store'] = customer_only_store
+                record_single_store_visit(
+                    visit,
+                    daily_fulfillment_data,
+                    fulfillment_visit_counts,
+                    daily_reputation_changes,
+                    routed_no_need_counts,
+                )
 
         # Track customer type statistics for customers who never bought anything
         if (customer.customer_type in customer_type_stats['bought_something']
