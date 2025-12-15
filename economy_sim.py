@@ -2654,10 +2654,29 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             for need in purchased_needs:
                 remaining_needs.remove(need)
 
-            # Mark unmet demand and reset to find another store
+            # If the assigned supplier couldn't fulfill anything, try other stores before
+            # giving up on the remaining needs. This prevents customers from immediately
+            # abandoning their carts when another player actually has the item.
             if remaining_needs and not purchased_needs:
-                # Current supplier couldn't fulfill any more needs
-                # Mark remaining as unmet and stop
+                switched_store = False
+                for need in list(remaining_needs):
+                    alternative_supplier = customer.choose_supplier(
+                        game_state.players, need.item_name, need.quantity, game_state.market_prices
+                    )
+
+                    # Only switch if we find a different supplier with acceptable pricing/stock
+                    if alternative_supplier and alternative_supplier != current_supplier:
+                        current_supplier = alternative_supplier
+                        if alternative_supplier.name not in visited_stores:
+                            visited_stores.append(alternative_supplier.name)
+                        switched_store = True
+                        break
+
+                if switched_store:
+                    # Try again with the new store
+                    continue
+
+                # No alternative store could fulfill the remaining needs, mark as unmet
                 for need in remaining_needs:
                     unmet_demand += need.quantity
                     unmet_demand_per_item[need.item_name] = (
