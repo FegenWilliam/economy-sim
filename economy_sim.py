@@ -631,9 +631,11 @@ class Player:
     def get_xp_for_next_level(self) -> float:
         """
         Calculate XP needed for next level.
-        Formula: 500 * current_level + (10000 * (current_level // 10))
+        Formula: 500 * (1 + current_level // 5) * current_level
+                 + (10000 * (current_level // 10))
         """
-        return 500 * self.store_level + (10000 * (self.store_level // 10))
+        level = self.store_level
+        return 500 * (1 + level // 5) * level + (10000 * (level // 10))
 
     def add_experience(self, xp: float) -> bool:
         """
@@ -2569,7 +2571,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             current_supplier = player
             visited_stores = [player.name]  # Track which stores this customer shopped at
 
+            # Safety guard to prevent infinite loops if needs never resolve
+            max_iterations = max(10, len(remaining_needs) * 10)
+            iterations = 0
+
             while remaining_needs and customer_spending < customer_budget:
+                iterations += 1
+                if iterations > max_iterations:
+                    # If we've looped too many times without clearing needs, mark remaining as unmet
+                    for need in remaining_needs:
+                        unmet_demand += need.quantity
+                        unmet_demand_per_item[need.item_name] = (
+                            unmet_demand_per_item.get(need.item_name, 0) + need.quantity
+                        )
+                    break
+
                 # Try to purchase items from assigned supplier
                 purchased_needs = []
                 for need in remaining_needs:
@@ -2886,7 +2902,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             )
 
             print(f"  {player.name}:")
-            print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | XP: {player.experience:.0f}/{xp_needed:.0f}")
+            print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | Level: {player.store_level} | XP: {player.experience:.0f}/{xp_needed:.0f}")
             customer_info = f"Regular: {served}"
             if uncapped_customer_count > 0:
                 customer_info += f" | 💎 Uncapped: {uncapped_served}"
