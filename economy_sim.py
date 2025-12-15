@@ -2485,6 +2485,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     daily_profits = {player.name: 0.0 for player in game_state.players}
     customers_served = {player.name: 0 for player in game_state.players}
     allocated_customers_served = {player.name: 0 for player in game_state.players}
+    allocated_customers_assigned = {player.name: 0 for player in game_state.players}
     overflow_customers_served = {player.name: 0 for player in game_state.players}
     uncapped_customers_served = {player.name: 0 for player in game_state.players}
     unmet_demand = 0
@@ -2502,6 +2503,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         'bought_something': {'low': 0, 'medium': 0, 'high': 0},
         'found_nothing': {'low': 0, 'medium': 0, 'high': 0}
     }
+    customers_counted_in_stats: Set[str] = set()
 
     # Track special customers for daily summary
     special_customer_events = []  # List of (customer_type, target_player_name, items_taken/bought)
@@ -2547,6 +2549,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     )
 
     # Process customers for each player
+    for player in game_state.players:
+        allocated_customers_assigned[player.name] = len(customer_assignments.get(player.name, []))
+
     for player in game_state.players:
         assigned_customers = customer_assignments.get(player.name, [])
 
@@ -2724,14 +2729,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 # 50-79%: no change
 
         # Track customer type statistics
-        if customer.customer_type in customer_type_stats['bought_something']:
-            if not needs:
-                # Customer had no needs generated - don't count them
-                pass
-            elif customer_bought_anything:
+        if (customer.customer_type in customer_type_stats['bought_something']
+                and customer.name not in customers_counted_in_stats):
+            if customer_bought_anything:
                 customer_type_stats['bought_something'][customer.customer_type] += 1
-            else:
+            elif needs:
+                # Only count as found nothing if they actually had needs
                 customer_type_stats['found_nothing'][customer.customer_type] += 1
+            customers_counted_in_stats.add(customer.name)
 
     # Step 5.5: Process uncapped customers (no cashier limits)
     if uncapped_customer_count > 0:
@@ -2925,6 +2930,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             profit = daily_profits[player.name]
             served = customers_served[player.name]
             allocated_served = allocated_customers_served[player.name]
+            allocated_assigned = allocated_customers_assigned[player.name]
             overflow_served = overflow_customers_served[player.name]
             uncapped_served = uncapped_customers_served[player.name]
             xp_needed = player.get_xp_for_next_level()
@@ -2937,7 +2943,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             print(f"  {player.name}:")
             print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | Level: {player.store_level} | XP: {player.experience:.0f}/{xp_needed:.0f}")
-            customer_info = f"Regular: {served} (Allocated: {allocated_served} | Overflow: {overflow_served})"
+            customer_info = f"Regular: {served} (Allocated: {allocated_served}/{allocated_assigned} | Overflow: {overflow_served})"
             if uncapped_customer_count > 0:
                 customer_info += f" | 💎 Uncapped: {uncapped_served}"
             print(f"    Customers: {customer_info} | Items Sold: {total_items_sold} | Cash: ${player.cash:.2f}")
