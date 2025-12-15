@@ -1,6 +1,6 @@
 # econ_sim.py
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 import random
 import json
 import signal
@@ -2399,6 +2399,50 @@ def update_player_fulfillment_averages(player: Player, fulfillment_data: Dict[st
         player.overflow_average_fulfillment_pct = sum(overflow_data) / len(overflow_data)
 
 
+def record_store_visit_metrics(
+    store_visit_data: List[Dict[str, Any]],
+    daily_fulfillment_data: Dict[str, Dict[str, List[float]]],
+    fulfillment_visit_counts: Dict[str, Dict[str, int]],
+    daily_reputation_changes: Dict[str, int],
+) -> None:
+    """Track fulfillment and reputation for every store visit (including zero-need visits)."""
+
+    for visit in store_visit_data:
+        store_name = visit["store_name"]
+        visit_type = visit.get("visit_type", "allocated")
+        starting_needs = visit.get("starting_needs", 0)
+
+        if starting_needs <= 0:
+            # Count the visit so summaries match the number of customers routed to the store,
+            # but avoid reputation swings when there were no needs to fulfill. Use 0% so these
+            # visits do not inflate fulfillment averages.
+            daily_fulfillment_data[store_name][visit_type].append(0.0)
+            fulfillment_visit_counts[store_name][visit_type] += 1
+            continue
+
+        fulfillment_percentage = (visit["fulfilled"] / starting_needs) * 100
+
+        # Track fulfillment percentage for this customer visit
+        daily_fulfillment_data[store_name][visit_type].append(fulfillment_percentage)
+
+        if visit_type == "overflow":
+            fulfillment_visit_counts[store_name]["overflow"] += 1
+        else:
+            fulfillment_visit_counts[store_name]["allocated"] += 1
+
+        # Track reputation changes based on fulfillment for this store visit
+        if fulfillment_percentage <= 30:
+            # 30% or less: -1 reputation
+            daily_reputation_changes[store_name] -= 1
+        elif fulfillment_percentage >= 80:
+            # 80% or more: +1 reputation
+            daily_reputation_changes[store_name] += 1
+
+            # If 100% fulfilled at exactly one store, +2 total (so +1 additional)
+            if fulfillment_percentage >= 99.9 and len(store_visit_data) == 1:
+                daily_reputation_changes[store_name] += 1
+
+
 def format_fulfillment_summary(player: Player, visit_counts: Dict[str, int]) -> str:
     """Generate a formatted fulfillment summary for display."""
     allocated_visits = visit_counts.get("allocated", 0)
@@ -2751,35 +2795,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # Track reputation changes and fulfillment for all stores this customer visited
         # (Will be applied at end of day with limits)
-        if original_needs_count > 0:
-            for visit in store_visit_data:
-                if visit['starting_needs'] <= 0:
-                    continue
-
-                fulfillment_percentage = (visit['fulfilled'] / visit['starting_needs']) * 100
-                store_name = visit['store_name']
-                visit_type = visit.get('visit_type', 'allocated')
-
-                # Track fulfillment percentage for this customer visit
-                daily_fulfillment_data[store_name][visit_type].append(fulfillment_percentage)
-
-                if visit_type == "overflow":
-                    fulfillment_visit_counts[store_name]["overflow"] += 1
-                else:
-                    fulfillment_visit_counts[store_name]["allocated"] += 1
-
-                # Track reputation changes based on fulfillment for this store visit
-                if fulfillment_percentage <= 30:
-                    # 30% or less: -1 reputation
-                    daily_reputation_changes[store_name] -= 1
-                elif fulfillment_percentage >= 80:
-                    # 80% or more: +1 reputation
-                    daily_reputation_changes[store_name] += 1
-
-                    # If 100% fulfilled at exactly one store, +2 total (so +1 additional)
-                    if fulfillment_percentage >= 99.9 and len(store_visit_data) == 1:
-                        daily_reputation_changes[store_name] += 1
-                # 50-79%: no change
+        record_store_visit_metrics(
+            store_visit_data,
+            daily_fulfillment_data,
+            fulfillment_visit_counts,
+            daily_reputation_changes,
+        )
 
         # Track customer type statistics for customers who never bought anything
         if (customer.customer_type in customer_type_stats['bought_something']
