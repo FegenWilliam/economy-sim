@@ -1948,14 +1948,13 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
     # Add vendor discount upgrades for each vendor (30-day duration, tier-based pricing)
     # Pricing tiers based on vendor value:
     vendor_pricing = {
-        "Lucky Deal Trader": (5000, 10000),  # Limited (1 random item)
-        "Discount Wholesale Co.": (6000, 13000),  # Moderate (5 random items)
-        "Budget Goods Ltd.": (6000, 13000),  # Moderate (cheap items only)
-        "Premium Select Inc.": (8000, 16000),  # High (wide selection, okay pricing)
-        "Universal Supply Corp.": (15000, 30000),  # Highest (everything, guaranteed)
-        "Bulk Goods Co.": (7000, 14000),  # Moderate-high (good pricing, high minimum)
-        "Cheap Goods Co.": (5000, 12000),  # Low (very limited range, very high minimum)
-        "VIP Goods Co.": (10000, 20000),  # High (expensive items, late game)
+        "Bulk Goods Co.": (9000, 18000),  # Good pricing, high minimum, limited price ceiling
+        "Instant Goods Ltd.": (11000, 22000),  # Fast delivery for budget items
+        "Universal Supply Corp.": (18000, 36000),  # Everything available instantly
+        "Bulk Master Co.": (30000, 60000),  # Extreme volume value → very high cost
+        "Stock Masters Ltd": (28000, 56000),  # Premium access, strong discounts
+        "Luxury House Co.": (14000, 28000),  # Luxury and gaming focus with discounts
+        "Daily Essentials Co.": (10000, 20000),  # Essentials specialist
     }
 
     for vendor in vendors:
