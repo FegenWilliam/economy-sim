@@ -2853,7 +2853,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         finalize_latest_visit(only_store_flag=customer_only_store)
         for visit in store_visit_data:
             if not visit.get('recorded'):
-                visit['recorded'] = True
                 visit['only_store'] = customer_only_store
                 record_single_store_visit(
                     visit,
@@ -2862,6 +2861,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     daily_reputation_changes,
                     routed_no_need_counts,
                 )
+                visit['recorded'] = True
 
         # Track customer type statistics for customers who never bought anything
         if (customer.customer_type in customer_type_stats['bought_something']
