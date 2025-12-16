@@ -2335,20 +2335,25 @@ def assign_customers_by_cas(
     market_prices: Dict[str, float],
     items_by_name: Dict[str, Item],
     all_available_items: List[Item]
-) -> Dict[str, List[Customer]]:
+) -> tuple[Dict[str, List[Customer]], Dict[str, Dict[str, Any]]]:
     """
     Assign customers to players based on proportional CAS distribution.
 
     If a player has 30% of total CAS, they receive exactly 30% of customers.
     This is deterministic and proportional, not random.
 
-    Returns a dictionary mapping player name to list of assigned customers.
+    Returns:
+        - A dictionary mapping player name to list of assigned customers.
+        - A dictionary mapping player name to their CAS breakdown data.
     """
-    # Calculate CAS for each player
+    # Calculate CAS for each player and store breakdown
     player_cas = {}
+    cas_breakdowns = {}
     for player in players:
-        cas = calculate_player_cas(player, market_prices, items_by_name, all_available_items)
+        breakdown = calculate_cas_breakdown(player, market_prices, items_by_name, all_available_items)
+        cas = breakdown["final_cas"]
         player_cas[player.name] = cas
+        cas_breakdowns[player.name] = breakdown
         print(f"   {player.name} CAS (allocation): {cas:.2f}")
 
     # Calculate total CAS
@@ -2362,7 +2367,7 @@ def assign_customers_by_cas(
         for i, customer in enumerate(customers):
             player = players[i % len(players)]
             assignments[player.name].append(customer)
-        return assignments
+        return assignments, cas_breakdowns
 
     # Distribute customers based on CAS proportions (not random weights)
     # If a player has 30% of total CAS, they get exactly 30% of customers
@@ -2406,7 +2411,7 @@ def assign_customers_by_cas(
                 assignments[player.name].append(customers[customer_index])
                 customer_index += 1
 
-    return assignments
+    return assignments, cas_breakdowns
 
 
 def update_player_fulfillment_averages(player: Player, fulfillment_data: Dict[str, List[float]]) -> None:
@@ -2680,7 +2685,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     if show_details:
         print(f"\n🔍 DEBUG: Customer Allocation (Day {game_state.day})")
         print(f"   Total customers to allocate: {len(all_customers)}")
-    customer_assignments = assign_customers_by_cas(
+    customer_assignments, cas_breakdowns_pre_shopping = assign_customers_by_cas(
         all_customers,
         game_state.players,
         game_state.market_prices,
@@ -3261,8 +3266,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 )
                 print(fulfillment_summary)
 
-            # Display CAS breakdown for this player
-            display_cas_breakdown(player, game_state)
+            # Display CAS breakdown for this player (using pre-shopping data)
+            display_cas_breakdown(player, game_state, cas_breakdowns_pre_shopping.get(player.name))
 
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
@@ -3431,13 +3436,11 @@ def calculate_marketing_effect(player: Player, market_prices: Dict[str, float]) 
     return reputation_bonus + price_bonus
 
 
-def display_cas_breakdown(player: Player, game_state: GameState) -> None:
-    """Display Customer Attraction Score (CAS) breakdown for a player."""
-    print(f"\n🎯 {player.name} - Customer Attraction Score (CAS):")
-
-    # Build items_by_name dict for item_stability calculation
-    items_by_name = {item.name: item for item in game_state.items}
-
+def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], items_by_name: Dict[str, Item], all_available_items: List[Item]) -> Dict[str, Any]:
+    """
+    Calculate Customer Attraction Score (CAS) breakdown for a player.
+    Returns a dictionary with all CAS components.
+    """
     # Calculate reputation multiplier
     reputation_multiplier = 10 ** (player.reputation / 100)
 
@@ -3448,11 +3451,11 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
     if player.inventory and player.prices:
         for item_name, qty in player.inventory.items():
             if qty > 0 and item_name in player.prices:
-                market_price = game_state.market_prices.get(item_name, 0)
+                market_price = market_prices.get(item_name, 0)
                 if market_price > 0:
                     player_price = player.prices[item_name]
                     # Get item importance
-                    item = next((i for i in game_state.items if i.name == item_name), None)
+                    item = next((i for i in all_available_items if i.name == item_name), None)
                     importance = item.importance if item else 2
 
                     # Calculate discount percentage
@@ -3466,10 +3469,10 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
                     items_counted += 1
 
     # Calculate item stability score
-    item_stability = calculate_item_stability(player, game_state.market_prices, items_by_name)
+    item_stability = calculate_item_stability(player, market_prices, items_by_name)
 
     # Calculate global availability multiplier
-    total_catalog_items = len(game_state.items)
+    total_catalog_items = len(all_available_items)
     items_in_stock = sum(1 for qty in player.inventory.values() if qty > 0)
     availability_pct = (items_in_stock / total_catalog_items) * 100 if total_catalog_items > 0 else 0
 
@@ -3498,17 +3501,62 @@ def display_cas_breakdown(player: Player, game_state: GameState) -> None:
         fulfillment_multiplier = 0.5
 
     # Calculate marketing effect
-    marketing_effect = calculate_marketing_effect(player, game_state.market_prices)
+    marketing_effect = calculate_marketing_effect(player, market_prices)
 
     # Calculate final CAS (marketing effect boosts both components)
     final_cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
 
+    # Return all components as a dictionary
+    return {
+        "reputation": player.reputation,
+        "discount_score": discount_score,
+        "total_discount_pct": total_discount_pct,
+        "items_counted": items_counted,
+        "item_stability": item_stability,
+        "marketing_effect": marketing_effect,
+        "marketing_agents": player.marketing_agents,
+        "availability_multiplier": availability_multiplier,
+        "items_in_stock": items_in_stock,
+        "total_catalog_items": total_catalog_items,
+        "availability_pct": availability_pct,
+        "fulfillment_multiplier": fulfillment_multiplier,
+        "fulfillment_pct": fulfillment_pct,
+        "final_cas": final_cas
+    }
+
+
+def display_cas_breakdown(player: Player, game_state: GameState, breakdown: Dict[str, Any] = None) -> None:
+    """Display Customer Attraction Score (CAS) breakdown for a player."""
+    print(f"\n🎯 {player.name} - Customer Attraction Score (CAS):")
+
+    # Use pre-calculated breakdown if provided, otherwise calculate it
+    if breakdown is None:
+        # Build items_by_name dict for item_stability calculation
+        items_by_name = {item.name: item for item in game_state.items}
+        breakdown = calculate_cas_breakdown(player, game_state.market_prices, items_by_name, game_state.items)
+
+    # Extract values from breakdown
+    discount_score = breakdown["discount_score"]
+    total_discount_pct = breakdown["total_discount_pct"]
+    items_counted = breakdown["items_counted"]
+    item_stability = breakdown["item_stability"]
+    marketing_effect = breakdown["marketing_effect"]
+    marketing_agents = breakdown["marketing_agents"]
+    availability_multiplier = breakdown["availability_multiplier"]
+    items_in_stock = breakdown["items_in_stock"]
+    total_catalog_items = breakdown["total_catalog_items"]
+    availability_pct = breakdown["availability_pct"]
+    fulfillment_multiplier = breakdown["fulfillment_multiplier"]
+    fulfillment_pct = breakdown["fulfillment_pct"]
+    final_cas = breakdown["final_cas"]
+    reputation = breakdown["reputation"]
+
     # Display compact breakdown
-    print(f"   Reputation:              {player.reputation:.0f}")
+    print(f"   Reputation:              {reputation:.0f}")
     print(f"   Discount Score:          {total_discount_pct:.1f}% total across {items_counted} items (importance: {discount_score:.2f})")
     print(f"   Item Stability:          {item_stability:.2f}")
     if marketing_effect > 0:
-        print(f"   Marketing Effect:        {marketing_effect:.2f} ({player.marketing_agents} agents)")
+        print(f"   Marketing Effect:        {marketing_effect:.2f} ({marketing_agents} agents)")
     print(f"   Availability Multiplier: {availability_multiplier:6.2f}x  ({items_in_stock}/{total_catalog_items} = {availability_pct:.0f}%)")
     print(f"   Fulfillment Multiplier:  {fulfillment_multiplier:6.2f}x  ({fulfillment_pct:.0f}% avg)")
     print(f"   ─────────────────────────────────────────")
