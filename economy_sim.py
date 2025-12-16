@@ -2337,7 +2337,10 @@ def assign_customers_by_cas(
     all_available_items: List[Item]
 ) -> Dict[str, List[Customer]]:
     """
-    Assign customers to players based on weighted CAS distribution.
+    Assign customers to players based on proportional CAS distribution.
+
+    If a player has 30% of total CAS, they receive exactly 30% of customers.
+    This is deterministic and proportional, not random.
 
     Returns a dictionary mapping player name to list of assigned customers.
     """
@@ -2359,26 +2362,40 @@ def assign_customers_by_cas(
             assignments[player.name].append(customer)
         return assignments
 
-    # Distribute customers based on CAS weights
+    # Distribute customers based on CAS proportions (not random weights)
+    # If a player has 30% of total CAS, they get exactly 30% of customers
     assignments = {player.name: [] for player in players}
 
-    for customer in customers:
-        # Weighted random selection
-        rand = random.random() * total_cas
-        cumulative = 0.0
+    # Calculate each player's allocation based on their CAS proportion
+    allocations = {}  # player_name -> number of customers
+    remainders = {}   # player_name -> fractional remainder
 
-        selected_player = None
-        for player in players:
-            cumulative += player_cas[player.name]
-            if rand < cumulative:
-                selected_player = player
-                break
+    total_customers = len(customers)
+    for player in players:
+        proportion = player_cas[player.name] / total_cas
+        exact_allocation = proportion * total_customers
+        allocations[player.name] = int(exact_allocation)  # whole number
+        remainders[player.name] = exact_allocation - allocations[player.name]  # fractional part
 
-        if selected_player is None:
-            # Fallback to first player if something goes wrong
-            selected_player = players[0]
+    # Distribute any remaining customers due to rounding
+    # Give them to players with highest fractional remainders
+    total_allocated = sum(allocations.values())
+    customers_remaining = total_customers - total_allocated
 
-        assignments[selected_player.name].append(customer)
+    if customers_remaining > 0:
+        # Sort players by remainder (highest first)
+        sorted_by_remainder = sorted(players, key=lambda p: remainders[p.name], reverse=True)
+        for i in range(customers_remaining):
+            allocations[sorted_by_remainder[i].name] += 1
+
+    # Assign customers to players based on allocations
+    customer_index = 0
+    for player in players:
+        num_to_assign = allocations[player.name]
+        for _ in range(num_to_assign):
+            if customer_index < len(customers):
+                assignments[player.name].append(customers[customer_index])
+                customer_index += 1
 
     return assignments
 
