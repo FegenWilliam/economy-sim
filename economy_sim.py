@@ -2674,69 +2674,57 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             for need in needs:
                 daily_demand_per_item[need.item_name] = daily_demand_per_item.get(need.item_name, 0) + need.quantity
 
+            # Skip customers with no needs
+            if not needs:
+                continue
+
             # Track customer spending against their budget
             customer_spending = 0.0
             customer_budget = customer.budget
-            customer_counted_at_store = {}
             customer_bought_anything = False
 
-            # Track original needs for reputation calculation
-            original_needs_count = sum(need.quantity for need in needs)
-
-            remaining_needs = list(needs)
+            # Track which stores this customer made purchases at (for customer counting)
+            stores_purchased_from = {}  # store_name -> visit_type
 
             # Track whether this customer has already been counted in daily stats
             customer_stat_recorded = False
-            had_needs = bool(needs)
+            had_needs = True
 
-            # Customer will shop at their assigned player's store
+            # Customer starts at their assigned player's store
             current_supplier = player
 
-            # Track fulfillment per store visit (based on remaining needs when entering)
-            store_visit_data = []
+            # Track all store visits with basket size when entering
+            store_visits = []
 
-            def start_store_visit(supplier, current_needs, visit_type: str):
-                starting_needs_val = sum(need.quantity for need in current_needs)
-                store_visit_data.append({
-                    'store_name': supplier.name,
-                    'starting_needs': starting_needs_val,
-                    'fulfilled': 0,
-                    'visit_type': visit_type,
-                    'recorded': False,
-                })
+            # Copy needs to track what remains
+            remaining_needs = list(needs)
 
-            def has_remaining_quantity(current_needs: List[CustomerNeed]) -> bool:
-                return any(need.quantity > 0 for need in current_needs)
+            # Track visited stores to avoid loops
+            visited_stores: Set[str] = set()
 
-            def finalize_latest_visit(only_store_flag: Optional[bool] = None):
-                if not store_visit_data:
-                    return
+            # Helper to check if customer still has items in basket
+            def has_remaining_items(needs_list):
+                return any(need.quantity > 0 for need in needs_list)
 
-                visit = store_visit_data[-1]
-                if visit.get('recorded'):
-                    return
+            # Main shopping loop
+            while has_remaining_items(remaining_needs) and customer_spending < customer_budget:
+                # Check if we've already visited this store
+                if current_supplier.name in visited_stores:
+                    break
 
-                visit['only_store'] = (
-                    only_store_flag if only_store_flag is not None else len(store_visit_data) == 1
-                )
-                record_single_store_visit(
-                    visit,
-                    daily_fulfillment_data,
-                    fulfillment_visit_counts,
-                    daily_reputation_changes,
-                    routed_no_need_counts,
-                )
+                visited_stores.add(current_supplier.name)
 
-            start_store_visit(current_supplier, remaining_needs, visit_type="allocated")
+                # Determine visit type
+                visit_type = "allocated" if current_supplier == player else "overflow"
 
-            # Track visited stores to avoid bouncing between the same shops
-            visited_stores: Set[str] = {current_supplier.name}
+                # Record basket size when entering this store
+                basket_size_on_entry = sum(need.quantity for need in remaining_needs)
 
-            while has_remaining_quantity(remaining_needs) and customer_spending < customer_budget:
-
-                # Try to purchase items from assigned supplier
+                # Try to purchase items from current supplier
+                items_purchased_at_store = 0
                 purchased_needs = []
-                for need in remaining_needs:
+
+                for need in list(remaining_needs):
                     # Check if current supplier has this item
                     if (need.item_name in current_supplier.inventory and
                         current_supplier.inventory[need.item_name] > 0 and
@@ -2751,129 +2739,146 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                             remaining_budget = customer_budget - customer_spending
 
                             # Check if customer can afford this item (at least 1 unit)
-                            if supplier_price > remaining_budget:
-                                continue
+                            if supplier_price <= remaining_budget:
+                                # Adjust quantity based on remaining budget
+                                affordable_quantity = min(need.quantity, int(remaining_budget / supplier_price))
 
-                            # Adjust quantity based on remaining budget
-                            affordable_quantity = min(need.quantity, int(remaining_budget / supplier_price))
+                                if affordable_quantity > 0:
+                                    # Purchase from current supplier
+                                    revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
+                                        need.item_name, affordable_quantity, supplier_price
+                                    )
 
-                            # Purchase from current supplier
-                            revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
-                                need.item_name, affordable_quantity, supplier_price
-                            )
+                                    if revenue > 0 and actual_units_sold > 0:
+                                        # Track customer spending
+                                        customer_spending += revenue
 
-                            if revenue > 0:
-                                # Track customer spending
-                                customer_spending += revenue
+                                        # Track items purchased at this store
+                                        items_purchased_at_store += actual_units_sold
 
-                                # Track fulfillment for the current store visit
-                                if store_visit_data:
-                                    store_visit_data[-1]['fulfilled'] += actual_units_sold
+                                        # Track sales
+                                        daily_sales[current_supplier.name] += revenue
+                                        daily_profits[current_supplier.name] += profit
 
-                                # Track sales
-                                daily_sales[current_supplier.name] += revenue
-                                daily_profits[current_supplier.name] += profit
+                                        # Track per-item sales
+                                        if need.item_name not in per_item_sales[current_supplier.name]:
+                                            per_item_sales[current_supplier.name][need.item_name] = {
+                                                'units_sold': 0,
+                                                'revenue': 0.0,
+                                                'starting_inventory': 0
+                                            }
+                                        per_item_sales[current_supplier.name][need.item_name]['units_sold'] += actual_units_sold
+                                        per_item_sales[current_supplier.name][need.item_name]['revenue'] += revenue
 
-                                # Count customer at this store (only once)
-                                if current_supplier.name not in customer_counted_at_store:
-                                    customers_served[current_supplier.name] += 1
-                                    visit_type = store_visit_data[-1]['visit_type'] if store_visit_data else "allocated"
-                                    if visit_type == "allocated":
-                                        allocated_customers_served[current_supplier.name] += 1
-                                    else:
-                                        overflow_customers_served[current_supplier.name] += 1
-                                    customer_counted_at_store[current_supplier.name] = True
+                                        customer_bought_anything = True
 
-                                # Track per-item sales
-                                if need.item_name not in per_item_sales[current_supplier.name]:
-                                    per_item_sales[current_supplier.name][need.item_name] = {
-                                        'units_sold': 0,
-                                        'revenue': 0.0,
-                                        'starting_inventory': 0
-                                    }
-                                per_item_sales[current_supplier.name][need.item_name]['units_sold'] += actual_units_sold
-                                per_item_sales[current_supplier.name][need.item_name]['revenue'] += revenue
+                                        # Mark customer as having bought something for daily stats (only once)
+                                        if (customer.customer_type in customer_type_stats['bought_something']
+                                                and not customer_stat_recorded):
+                                            customer_type_stats['bought_something'][customer.customer_type] += 1
+                                            customers_counted_in_stats.add(customer.name)
+                                            customer_stat_recorded = True
 
-                                customer_bought_anything = True
+                                        # Update need quantity
+                                        need.quantity -= actual_units_sold
+                                        if need.quantity <= 0:
+                                            purchased_needs.append(need)
 
-                                # Mark customer as having bought something for daily stats
-                                if (customer.customer_type in customer_type_stats['bought_something']
-                                        and not customer_stat_recorded):
-                                    customer_type_stats['bought_something'][customer.customer_type] += 1
-                                    customers_counted_in_stats.add(customer.name)
-                                    customer_stat_recorded = True
+                                        # Check if customer has hit their budget limit
+                                        if customer_spending >= customer_budget:
+                                            break
 
-                                # Update need quantity or mark as purchased
-                                if actual_units_sold >= need.quantity:
-                                    purchased_needs.append(need)
-                                else:
-                                    need.quantity -= actual_units_sold
-
-                                # Check if customer has hit their budget limit
-                                if customer_spending >= customer_budget:
-                                    break
-
-                # Remove fully purchased items from remaining needs
+                # Remove fully purchased items
                 for need in purchased_needs:
-                    remaining_needs.remove(need)
+                    if need in remaining_needs:
+                        remaining_needs.remove(need)
 
-                # Stop if basket is empty or budget is exhausted
-                if not remaining_needs or customer_spending >= customer_budget or not has_remaining_quantity(remaining_needs):
+                # Only record this visit if customer made purchases
+                if items_purchased_at_store > 0:
+                    # Calculate fulfillment for this visit
+                    fulfillment_pct = (items_purchased_at_store / basket_size_on_entry) * 100
+
+                    # Record the visit
+                    store_visits.append({
+                        'store_name': current_supplier.name,
+                        'visit_type': visit_type,
+                        'basket_on_entry': basket_size_on_entry,
+                        'items_purchased': items_purchased_at_store,
+                        'fulfillment_pct': fulfillment_pct,
+                    })
+
+                    # Track that customer made purchase at this store
+                    if current_supplier.name not in stores_purchased_from:
+                        stores_purchased_from[current_supplier.name] = visit_type
+
+                # Check if done shopping
+                if not has_remaining_items(remaining_needs) or customer_spending >= customer_budget:
                     break
 
-                # Attempt to visit another store for remaining needs
+                # Try to find next store for overflow
                 next_supplier = None
-                for need in list(remaining_needs):
-                    alternative_supplier = customer.choose_supplier(
-                        [p for p in game_state.players if p.name not in visited_stores],
-                        need.item_name,
-                        need.quantity,
-                        game_state.market_prices
-                    )
-
-                    if alternative_supplier and alternative_supplier != current_supplier:
-                        next_supplier = alternative_supplier
-                        break
+                for need in remaining_needs:
+                    if need.quantity > 0:
+                        alternative_supplier = customer.choose_supplier(
+                            [p for p in game_state.players if p.name not in visited_stores],
+                            need.item_name,
+                            need.quantity,
+                            game_state.market_prices
+                        )
+                        if alternative_supplier:
+                            next_supplier = alternative_supplier
+                            break
 
                 if next_supplier:
-                    finalize_latest_visit(only_store_flag=False)
                     current_supplier = next_supplier
-                    visited_stores.add(current_supplier.name)
-                    start_store_visit(current_supplier, remaining_needs, visit_type="overflow")
-                    continue
+                else:
+                    # No more stores available, mark remaining as unmet
+                    for need in remaining_needs:
+                        if need.quantity > 0:
+                            unmet_demand += need.quantity
+                            unmet_demand_per_item[need.item_name] = (
+                                unmet_demand_per_item.get(need.item_name, 0) + need.quantity
+                            )
+                    break
 
-                # No alternative store could fulfill the remaining needs, mark as unmet
-                for need in remaining_needs:
-                    unmet_demand += need.quantity
-                    unmet_demand_per_item[need.item_name] = (
-                        unmet_demand_per_item.get(need.item_name, 0) + need.quantity
-                    )
-                break
+            # Now record all visits and update counters
+            customer_visited_only_one_store = len(store_visits) == 1
 
-        # Track reputation changes and fulfillment for all stores this customer visited
-        # (Will be applied at end of day with limits)
-        customer_only_store = len(store_visit_data) == 1
-        finalize_latest_visit(only_store_flag=customer_only_store)
-        for visit in store_visit_data:
-            if not visit.get('recorded'):
-                visit['only_store'] = customer_only_store
-                record_single_store_visit(
-                    visit,
-                    daily_fulfillment_data,
-                    fulfillment_visit_counts,
-                    daily_reputation_changes,
-                    routed_no_need_counts,
-                )
+            for visit in store_visits:
+                store_name = visit['store_name']
+                visit_type = visit['visit_type']
+                fulfillment_pct = visit['fulfillment_pct']
 
-        # Track customer type statistics for customers who never bought anything
-        if (customer.customer_type in customer_type_stats['bought_something']
-                and not customer_stat_recorded):
-            if customer_bought_anything:
-                customer_type_stats['bought_something'][customer.customer_type] += 1
-            elif had_needs:
-                # Only count as found nothing if they actually had needs
-                customer_type_stats['found_nothing'][customer.customer_type] += 1
-            customers_counted_in_stats.add(customer.name)
+                # Record fulfillment data
+                daily_fulfillment_data[store_name][visit_type].append(fulfillment_pct)
+                fulfillment_visit_counts[store_name][visit_type] += 1
+
+                # Update reputation based on fulfillment
+                if fulfillment_pct <= 30:
+                    daily_reputation_changes[store_name] -= 1
+                elif fulfillment_pct >= 80:
+                    daily_reputation_changes[store_name] += 1
+                    # Bonus for 100% fulfillment at only store
+                    if fulfillment_pct >= 99.9 and customer_visited_only_one_store:
+                        daily_reputation_changes[store_name] += 1
+
+            # Update customer counters (only count each store once)
+            for store_name, visit_type in stores_purchased_from.items():
+                customers_served[store_name] += 1
+                if visit_type == "allocated":
+                    allocated_customers_served[store_name] += 1
+                else:
+                    overflow_customers_served[store_name] += 1
+
+            # Track customer type statistics for customers who never bought anything
+            if (customer.customer_type in customer_type_stats['bought_something']
+                    and not customer_stat_recorded):
+                if customer_bought_anything:
+                    customer_type_stats['bought_something'][customer.customer_type] += 1
+                elif had_needs:
+                    # Only count as found nothing if they actually had needs
+                    customer_type_stats['found_nothing'][customer.customer_type] += 1
+                customers_counted_in_stats.add(customer.name)
 
     # Step 5.5: Process uncapped customers (no cashier limits)
     if uncapped_customer_count > 0:
