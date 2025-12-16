@@ -2510,14 +2510,16 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     Simulate a single day in the economic game.
 
     Steps:
-    1. Apply daily price fluctuations and special events
-    2. Let AI players adjust buy orders and prices
-    3. Execute buy orders for all players (from cheapest to most expensive)
-    4. For each customer, generate needs and make purchases (limited by cashier capacity)
-    5. Pay employee wages
-    6. Track statistics
-    7. Refresh vendor inventory for next day (at END of day)
-    8. Advance the day counter
+    1. Reset special event prices from previous day
+    2. Apply special events for today (if any)
+    3. Let AI players adjust buy orders and prices
+    4. Execute buy orders for all players (from cheapest to most expensive)
+    5. For each customer, generate needs and make purchases (limited by cashier capacity)
+    6. Pay employee wages
+    7. Track statistics
+    8. Refresh vendor inventory for next day (at END of day)
+    9. Advance the day counter
+    10. Apply daily price fluctuations for next day (at END of day)
 
     Returns dictionary of daily sales per player.
     """
@@ -2530,9 +2532,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         for item_name, original_price in game_state.event_price_changes.items():
             game_state.market_prices[item_name] = original_price
         game_state.event_price_changes.clear()
-
-    # Apply price fluctuations and special events
-    apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
 
     # Check for special events
     if game_state.day % 30 == 0 and show_details:
@@ -3316,6 +3315,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Step 10: Reset daily vendor purchase tracking
     game_state.vendor_daily_purchases.clear()
+
+    # Step 11: Apply price fluctuations for next day
+    # Done at END of day so customers shop based on today's prices
+    apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
 
     return daily_sales
 
