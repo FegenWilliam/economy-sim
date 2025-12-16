@@ -2354,11 +2354,9 @@ def assign_customers_by_cas(
         cas = breakdown["final_cas"]
         player_cas[player.name] = cas
         cas_breakdowns[player.name] = breakdown
-        print(f"   {player.name} CAS (allocation): {cas:.2f}")
 
     # Calculate total CAS
     total_cas = sum(player_cas.values())
-    print(f"   Total CAS: {total_cas:.2f}")
 
     # If no players have any CAS, distribute evenly
     if total_cas == 0:
@@ -2383,7 +2381,6 @@ def assign_customers_by_cas(
         exact_allocation = proportion * total_customers
         allocations[player.name] = int(exact_allocation)  # whole number
         remainders[player.name] = exact_allocation - allocations[player.name]  # fractional part
-        print(f"   {player.name}: {proportion*100:.1f}% = {exact_allocation:.2f} → {allocations[player.name]} customers (remainder: {remainders[player.name]:.3f})")
 
     # Distribute any remaining customers due to rounding
     # Give them to players with highest fractional remainders
@@ -2393,14 +2390,8 @@ def assign_customers_by_cas(
     if customers_remaining > 0:
         # Sort players by remainder (highest first)
         sorted_by_remainder = sorted(players, key=lambda p: remainders[p.name], reverse=True)
-        print(f"   Distributing {customers_remaining} remaining customers to players with highest remainders:")
         for i in range(customers_remaining):
             allocations[sorted_by_remainder[i].name] += 1
-            print(f"      +1 to {sorted_by_remainder[i].name}")
-
-    print(f"   Final allocation:")
-    for player in players:
-        print(f"      {player.name}: {allocations[player.name]} customers")
 
     # Assign customers to players based on allocations
     customer_index = 0
@@ -2682,9 +2673,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     items_by_name = {item.name: item for item in game_state.items}
 
     # Assign customers to players based on weighted CAS distribution
-    if show_details:
-        print(f"\n🔍 DEBUG: Customer Allocation (Day {game_state.day})")
-        print(f"   Total customers to allocate: {len(all_customers)}")
     customer_assignments, cas_breakdowns_pre_shopping = assign_customers_by_cas(
         all_customers,
         game_state.players,
