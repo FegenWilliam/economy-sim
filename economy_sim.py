@@ -2458,6 +2458,9 @@ def record_single_store_visit(
     else:
         fulfillment_visit_counts[store_name]["allocated"] += 1
 
+    # Mark visit as successfully recorded
+    visit['recorded'] = True
+
     # Track reputation changes based on fulfillment for this store visit
     if fulfillment_percentage <= 30:
         # 30% or less: -1 reputation
@@ -2693,9 +2696,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             store_visit_data = []
 
             def start_store_visit(supplier, current_needs, visit_type: str):
+                starting_needs_val = sum(need.quantity for need in current_needs)
                 store_visit_data.append({
                     'store_name': supplier.name,
-                    'starting_needs': sum(need.quantity for need in current_needs),
+                    'starting_needs': starting_needs_val,
                     'fulfilled': 0,
                     'visit_type': visit_type,
                     'recorded': False,
@@ -2722,7 +2726,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     daily_reputation_changes,
                     routed_no_need_counts,
                 )
-                visit['recorded'] = True
 
             start_store_visit(current_supplier, remaining_needs, visit_type="allocated")
 
@@ -2861,7 +2864,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     daily_reputation_changes,
                     routed_no_need_counts,
                 )
-                visit['recorded'] = True
 
         # Track customer type statistics for customers who never bought anything
         if (customer.customer_type in customer_type_stats['bought_something']
