@@ -859,6 +859,20 @@ class Player:
             discount = self.get_vendor_discount(vendor.name, current_day)
             final_price = vendor_price * (1.0 - discount)
 
+            # Apply catch-up discount for non-dominating players (starts day 10)
+            if game_state and game_state.day >= 10:
+                # Find the highest level player
+                highest_level = max(p.store_level for p in game_state.players)
+
+                # If this player is not the highest level, apply catch-up discount
+                if self.store_level < highest_level:
+                    if vendor.name == "Daily Essentials Co.":
+                        # 10% additional discount: 90% → 80% market price
+                        final_price *= (0.80 / 0.90)
+                    elif vendor.name == "Instant Goods Ltd.":
+                        # 3% additional discount: 98% → 95% market price
+                        final_price *= (0.95 / 0.98)
+
         total_cost = final_price * quantity
 
         if self.cash < total_cost:
@@ -1222,9 +1236,11 @@ class Customer:
           * consistency_bonus: +2 if price change <= 5% from previous
         - specialty_multiplier based on category item counts (additive bonuses)
         - fulfillment_multiplier based on average % customer needs fulfilled (from past performance):
-          * <20%: ×0.5
+          * <10%: ×0.1
+          * 10-20%: ×0.5
           * 20-50%: ×0.9
-          * 50-90%: ×1.0
+          * 50-70%: ×1.0
+          * 71-89%: ×1.1
           * 90-99%: ×1.4
           * 100%: ×2.0
         - final_score = (discount_score + item_stability) * reputation_multiplier * specialty_multiplier * fulfillment_multiplier
@@ -1288,12 +1304,16 @@ class Customer:
                 fulfillment_multiplier = 2.0
             elif fulfillment_pct >= 90:
                 fulfillment_multiplier = 1.4
+            elif fulfillment_pct > 70:
+                fulfillment_multiplier = 1.1
             elif fulfillment_pct >= 50:
                 fulfillment_multiplier = 1.0
             elif fulfillment_pct >= 20:
                 fulfillment_multiplier = 0.9
-            else:
+            elif fulfillment_pct >= 10:
                 fulfillment_multiplier = 0.5
+            else:
+                fulfillment_multiplier = 0.1
 
             # Calculate reputation multiplier
             reputation = player.reputation
@@ -2332,12 +2352,16 @@ def calculate_player_cas(
         fulfillment_multiplier = 2.0
     elif fulfillment_pct >= 90:
         fulfillment_multiplier = 1.4
+    elif fulfillment_pct > 70:
+        fulfillment_multiplier = 1.1
     elif fulfillment_pct >= 50:
         fulfillment_multiplier = 1.0
     elif fulfillment_pct >= 20:
         fulfillment_multiplier = 0.9
-    else:
+    elif fulfillment_pct >= 10:
         fulfillment_multiplier = 0.5
+    else:
+        fulfillment_multiplier = 0.1
 
     # Calculate reputation multiplier
     reputation_multiplier = 10 ** (player.reputation / 100)
@@ -3652,12 +3676,16 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
         fulfillment_multiplier = 2.0
     elif fulfillment_pct >= 90:
         fulfillment_multiplier = 1.4
+    elif fulfillment_pct > 70:
+        fulfillment_multiplier = 1.1
     elif fulfillment_pct >= 50:
         fulfillment_multiplier = 1.0
     elif fulfillment_pct >= 20:
         fulfillment_multiplier = 0.9
-    else:
+    elif fulfillment_pct >= 10:
         fulfillment_multiplier = 0.5
+    else:
+        fulfillment_multiplier = 0.1
 
     # Calculate marketing effect
     marketing_effect = calculate_marketing_effect(player, market_prices)
