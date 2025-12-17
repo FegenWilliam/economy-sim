@@ -1991,16 +1991,20 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
 # Market dynamics
 # -------------------------------------------------------------------
 
-def apply_daily_price_fluctuation(market_prices: Dict[str, float], items: List[Item]) -> None:
+def apply_daily_price_fluctuation(market_prices: Dict[str, float], items: List[Item]) -> List[tuple]:
     """
     Apply daily price fluctuation to 1-2 random items.
     Fluctuation ranges based on item importance:
     - Importance 3 (essentials): 3-6% (more stable)
     - Importance 2 (medium): 5-10% (baseline)
     - Importance 1 (luxury): 7-14% (more volatile)
+
+    Returns list of (item_name, old_price, new_price, change_percent) tuples for changed items.
     """
     if not items:
-        return
+        return []
+
+    price_changes = []
 
     # Choose 1-2 items to fluctuate
     num_items_to_fluctuate = random.randint(1, min(2, len(items)))
@@ -2024,6 +2028,12 @@ def apply_daily_price_fluctuation(market_prices: Dict[str, float], items: List[I
         new_price = max(item.base_cost * 1.2, min(new_price, item.base_price * 2.0))
 
         market_prices[item.name] = new_price
+
+        # Calculate actual change percent
+        change_percent = ((new_price - old_price) / old_price) * 100
+        price_changes.append((item.name, old_price, new_price, change_percent))
+
+    return price_changes
 
 
 # -------------------------------------------------------------------
@@ -3176,6 +3186,20 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 emoji = "➡️"
             print(f"   {emoji} {item_name}: {demand:.2f}x demand")
 
+    # Apply price fluctuations for next day (before other end-of-day processing)
+    # Done here so we can display it near demand changes
+    price_changes = apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
+    if show_details and price_changes:
+        print(f"\n💰 MARKET PRICE UPDATE: {len(price_changes)} items had price changes")
+        for item_name, old_price, new_price, change_percent in price_changes:
+            if change_percent > 0:
+                emoji = "📈"
+            elif change_percent < 0:
+                emoji = "📉"
+            else:
+                emoji = "➡️"
+            print(f"   {emoji} {item_name}: ${old_price:.2f} → ${new_price:.2f} ({change_percent:+.1f}%)")
+
     # Unlock new product every 5 days (at end of day, so players can buy it next day)
     if game_state.day % 5 == 0 and game_state.day > 0:
         new_product = unlock_new_product(game_state)
@@ -3368,10 +3392,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Step 10: Reset daily vendor purchase tracking
     game_state.vendor_daily_purchases.clear()
-
-    # Step 11: Apply price fluctuations for next day
-    # Done at END of day so customers shop based on today's prices
-    apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
 
     return daily_sales
 
