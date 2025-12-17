@@ -77,6 +77,7 @@ class Item:
     base_cost: float  # cost to produce 1 unit
     base_price: float  # default selling price (can be overridden by players)
     category: str  # product category (determines importance level)
+    size: float = 1.0  # item size (affects inventory space; 0.1 = 10 items per slot, 10 = takes 10 slots)
 
     def __post_init__(self):
         """Validate that base_price and base_cost have a reasonable ratio."""
@@ -103,344 +104,344 @@ class Item:
 # Product catalog - items that can be unlocked over time
 PRODUCT_CATALOG = [
     # Groceries & Food
-    Item("Bread", 2.0, 5.0, "Food & Groceries"),
-    Item("Milk", 3.0, 6.0, "Food & Groceries"),
-    Item("Eggs", 2.5, 5.5, "Food & Groceries"),
-    Item("Bananas", 1.5, 3.5, "Fresh Produce"),
-    Item("Batteries", 5.0, 10.0, "Household Essentials"),
-    Item("Rice", 5.0, 10.0, "Food & Groceries"),
-    Item("Coffee", 6.0, 12.0, "Food & Groceries"),
-    Item("Toilet Paper", 8.0, 15.0, "Household Essentials"),
-    Item("Vitamins", 12.0, 24.0, "Supplements"),
-    Item("Cheese", 4.0, 8.0, "Food & Groceries"),
-    Item("Butter", 3.5, 7.0, "Food & Groceries"),
-    Item("Yogurt", 2.0, 4.5, "Food & Groceries"),
-    Item("Cereal", 3.0, 6.5, "Food & Groceries"),
-    Item("Pasta", 2.0, 4.0, "Food & Groceries"),
-    Item("Canned Soup", 1.5, 3.5, "Food & Groceries"),
-    Item("Frozen Pizza", 4.0, 8.5, "Food & Groceries"),
-    Item("Ice Cream", 3.5, 7.5, "Food & Groceries"),
-    Item("Soda", 1.5, 3.0, "Food & Groceries"),
-    Item("Orange Juice", 3.0, 6.0, "Food & Groceries"),
-    Item("Tea Bags", 3.0, 6.5, "Food & Groceries"),
-    Item("Sugar", 2.0, 4.5, "Food & Groceries"),
-    Item("Flour", 3.0, 6.0, "Food & Groceries"),
-    Item("Cooking Oil", 4.0, 8.0, "Food & Groceries"),
-    Item("Salt", 1.0, 2.5, "Food & Groceries"),
-    Item("Pepper", 2.0, 4.5, "Food & Groceries"),
-    Item("Ketchup", 2.5, 5.0, "Food & Groceries"),
-    Item("Mustard", 2.0, 4.5, "Food & Groceries"),
-    Item("Mayo", 3.0, 6.0, "Food & Groceries"),
-    Item("BBQ Sauce", 3.5, 7.0, "Food & Groceries"),
+    Item("Bread", 2.0, 5.0, "Food & Groceries", 1.0),
+    Item("Milk", 3.0, 6.0, "Food & Groceries", 1.0),
+    Item("Eggs", 2.5, 5.5, "Food & Groceries", 1.0),
+    Item("Bananas", 1.5, 3.5, "Fresh Produce", 0.8),
+    Item("Batteries", 5.0, 10.0, "Household Essentials", 0.3),
+    Item("Rice", 5.0, 10.0, "Food & Groceries", 1.5),
+    Item("Coffee", 6.0, 12.0, "Food & Groceries", 0.8),
+    Item("Toilet Paper", 8.0, 15.0, "Household Essentials", 2.0),
+    Item("Vitamins", 12.0, 24.0, "Supplements", 0.3),
+    Item("Cheese", 4.0, 8.0, "Food & Groceries", 0.8),
+    Item("Butter", 3.5, 7.0, "Food & Groceries", 0.5),
+    Item("Yogurt", 2.0, 4.5, "Food & Groceries", 0.6),
+    Item("Cereal", 3.0, 6.5, "Food & Groceries", 1.5),
+    Item("Pasta", 2.0, 4.0, "Food & Groceries", 0.8),
+    Item("Canned Soup", 1.5, 3.5, "Food & Groceries", 0.5),
+    Item("Frozen Pizza", 4.0, 8.5, "Food & Groceries", 1.2),
+    Item("Ice Cream", 3.5, 7.5, "Food & Groceries", 1.0),
+    Item("Soda", 1.5, 3.0, "Food & Groceries", 0.8),
+    Item("Orange Juice", 3.0, 6.0, "Food & Groceries", 1.0),
+    Item("Tea Bags", 3.0, 6.5, "Food & Groceries", 0.6),
+    Item("Sugar", 2.0, 4.5, "Food & Groceries", 1.2),
+    Item("Flour", 3.0, 6.0, "Food & Groceries", 1.5),
+    Item("Cooking Oil", 4.0, 8.0, "Food & Groceries", 1.0),
+    Item("Salt", 1.0, 2.5, "Food & Groceries", 0.4),
+    Item("Pepper", 2.0, 4.5, "Food & Groceries", 0.3),
+    Item("Ketchup", 2.5, 5.0, "Food & Groceries", 0.7),
+    Item("Mustard", 2.0, 4.5, "Food & Groceries", 0.6),
+    Item("Mayo", 3.0, 6.0, "Food & Groceries", 0.8),
+    Item("BBQ Sauce", 3.5, 7.0, "Food & Groceries", 0.7),
 
     # Fresh Produce
-    Item("Apples", 2.5, 5.5, "Fresh Produce"),
-    Item("Oranges", 3.0, 6.0, "Fresh Produce"),
-    Item("Grapes", 4.0, 8.5, "Fresh Produce"),
-    Item("Strawberries", 4.5, 9.0, "Fresh Produce"),
-    Item("Tomatoes", 2.5, 5.5, "Fresh Produce"),
-    Item("Lettuce", 2.0, 4.5, "Fresh Produce"),
-    Item("Carrots", 1.5, 3.5, "Fresh Produce"),
-    Item("Potatoes", 2.0, 4.0, "Fresh Produce"),
-    Item("Onions", 1.5, 3.5, "Fresh Produce"),
+    Item("Apples", 2.5, 5.5, "Fresh Produce", 0.7),
+    Item("Oranges", 3.0, 6.0, "Fresh Produce", 0.7),
+    Item("Grapes", 4.0, 8.5, "Fresh Produce", 0.6),
+    Item("Strawberries", 4.5, 9.0, "Fresh Produce", 0.5),
+    Item("Tomatoes", 2.5, 5.5, "Fresh Produce", 0.6),
+    Item("Lettuce", 2.0, 4.5, "Fresh Produce", 0.8),
+    Item("Carrots", 1.5, 3.5, "Fresh Produce", 0.6),
+    Item("Potatoes", 2.0, 4.0, "Fresh Produce", 1.0),
+    Item("Onions", 1.5, 3.5, "Fresh Produce", 0.6),
 
     # Household Items
-    Item("Paper Towels", 5.0, 10.0, "Household Essentials"),
-    Item("Dish Soap", 3.0, 6.5, "Household Essentials"),
-    Item("Laundry Detergent", 8.0, 16.0, "Household Essentials"),
-    Item("Trash Bags", 5.0, 10.5, "Household Essentials"),
-    Item("Sponges", 2.5, 5.5, "Household Essentials"),
-    Item("Aluminum Foil", 4.0, 8.5, "Household Essentials"),
-    Item("Plastic Wrap", 3.5, 7.5, "Household Essentials"),
-    Item("Light Bulbs", 6.0, 12.0, "Household Essentials"),
-    Item("Candles", 4.0, 8.5, "Household Essentials"),
-    Item("Air Freshener", 3.5, 7.5, "Household Essentials"),
+    Item("Paper Towels", 5.0, 10.0, "Household Essentials", 1.5),
+    Item("Dish Soap", 3.0, 6.5, "Household Essentials", 0.7),
+    Item("Laundry Detergent", 8.0, 16.0, "Household Essentials", 2.0),
+    Item("Trash Bags", 5.0, 10.5, "Household Essentials", 1.0),
+    Item("Sponges", 2.5, 5.5, "Household Essentials", 0.3),
+    Item("Aluminum Foil", 4.0, 8.5, "Household Essentials", 0.8),
+    Item("Plastic Wrap", 3.5, 7.5, "Household Essentials", 0.7),
+    Item("Light Bulbs", 6.0, 12.0, "Household Essentials", 0.4),
+    Item("Candles", 4.0, 8.5, "Household Essentials", 0.5),
+    Item("Air Freshener", 3.5, 7.5, "Household Essentials", 0.6),
 
     # Personal Care
-    Item("Shampoo", 5.0, 10.0, "Personal Care"),
-    Item("Conditioner", 5.0, 10.0, "Personal Care"),
-    Item("Body Wash", 4.5, 9.0, "Personal Care"),
-    Item("Toothpaste", 3.0, 6.5, "Personal Care"),
-    Item("Toothbrush", 2.5, 5.5, "Personal Care"),
-    Item("Deodorant", 4.0, 8.5, "Personal Care"),
-    Item("Razor Blades", 8.0, 16.0, "Personal Care"),
-    Item("Shaving Cream", 4.5, 9.0, "Personal Care"),
-    Item("Hand Soap", 3.0, 6.5, "Personal Care"),
-    Item("Hand Sanitizer", 3.5, 7.5, "Personal Care"),
-    Item("Tissues", 2.5, 5.5, "Personal Care"),
-    Item("Cotton Swabs", 2.0, 4.5, "Personal Care"),
+    Item("Shampoo", 5.0, 10.0, "Personal Care", 0.8),
+    Item("Conditioner", 5.0, 10.0, "Personal Care", 0.8),
+    Item("Body Wash", 4.5, 9.0, "Personal Care", 0.8),
+    Item("Toothpaste", 3.0, 6.5, "Personal Care", 0.4),
+    Item("Toothbrush", 2.5, 5.5, "Personal Care", 0.1),
+    Item("Deodorant", 4.0, 8.5, "Personal Care", 0.5),
+    Item("Razor Blades", 8.0, 16.0, "Personal Care", 0.2),
+    Item("Shaving Cream", 4.5, 9.0, "Personal Care", 0.6),
+    Item("Hand Soap", 3.0, 6.5, "Personal Care", 0.6),
+    Item("Hand Sanitizer", 3.5, 7.5, "Personal Care", 0.5),
+    Item("Tissues", 2.5, 5.5, "Personal Care", 0.7),
+    Item("Cotton Swabs", 2.0, 4.5, "Personal Care", 0.2),
 
     # Electronics
-    Item("Phone Charger", 8.0, 16.0, "Electronics"),
-    Item("USB Cable", 5.0, 10.0, "Electronics"),
-    Item("Earbuds", 12.0, 25.0, "Electronics"),
-    Item("Phone Case", 10.0, 20.0, "Electronics"),
-    Item("Screen Protector", 6.0, 12.0, "Electronics"),
-    Item("Mouse Pad", 7.0, 15.0, "Electronics"),
-    Item("Keyboard", 25.0, 50.0, "Electronics"),
-    Item("Computer Mouse", 15.0, 30.0, "Electronics"),
-    Item("Webcam", 35.0, 70.0, "Electronics"),
-    Item("Microphone", 40.0, 80.0, "Electronics"),
-    Item("USB Flash Drive", 10.0, 20.0, "Electronics"),
-    Item("SD Card", 12.0, 25.0, "Electronics"),
-    Item("HDMI Cable", 8.0, 16.0, "Electronics"),
-    Item("Power Strip", 15.0, 30.0, "Electronics"),
-    Item("Desk Lamp", 20.0, 40.0, "Electronics"),
-    Item("Alarm Clock", 12.0, 25.0, "Electronics"),
-    Item("Calculator", 10.0, 20.0, "Electronics"),
-    Item("Portable Speaker", 30.0, 60.0, "Electronics"),
-    Item("Bluetooth Headphones", 45.0, 90.0, "Electronics"),
+    Item("Phone Charger", 8.0, 16.0, "Electronics", 0.3),
+    Item("USB Cable", 5.0, 10.0, "Electronics", 0.2),
+    Item("Earbuds", 12.0, 25.0, "Electronics", 0.3),
+    Item("Phone Case", 10.0, 20.0, "Electronics", 0.2),
+    Item("Screen Protector", 6.0, 12.0, "Electronics", 0.1),
+    Item("Mouse Pad", 7.0, 15.0, "Electronics", 0.3),
+    Item("Keyboard", 25.0, 50.0, "Electronics", 1.2),
+    Item("Computer Mouse", 15.0, 30.0, "Electronics", 0.4),
+    Item("Webcam", 35.0, 70.0, "Electronics", 0.6),
+    Item("Microphone", 40.0, 80.0, "Electronics", 0.8),
+    Item("USB Flash Drive", 10.0, 20.0, "Electronics", 0.05),
+    Item("SD Card", 12.0, 25.0, "Electronics", 0.05),
+    Item("HDMI Cable", 8.0, 16.0, "Electronics", 0.2),
+    Item("Power Strip", 15.0, 30.0, "Electronics", 0.8),
+    Item("Desk Lamp", 20.0, 40.0, "Electronics", 1.5),
+    Item("Alarm Clock", 12.0, 25.0, "Electronics", 0.5),
+    Item("Calculator", 10.0, 20.0, "Electronics", 0.3),
+    Item("Portable Speaker", 30.0, 60.0, "Electronics", 1.0),
+    Item("Bluetooth Headphones", 45.0, 90.0, "Electronics", 0.8),
 
     # Office Supplies
-    Item("Pens", 3.0, 6.5, "Office Supplies"),
-    Item("Pencils", 2.5, 5.5, "Office Supplies"),
-    Item("Notebooks", 4.0, 8.5, "Office Supplies"),
-    Item("Sticky Notes", 3.5, 7.5, "Office Supplies"),
-    Item("Stapler", 8.0, 16.0, "Office Supplies"),
-    Item("Tape Dispenser", 6.0, 12.0, "Office Supplies"),
-    Item("Scissors", 5.0, 10.0, "Office Supplies"),
-    Item("Ruler", 2.0, 4.5, "Office Supplies"),
-    Item("Binder", 4.5, 9.0, "Office Supplies"),
-    Item("File Folders", 6.0, 12.5, "Office Supplies"),
-    Item("Printer Paper", 15.0, 30.0, "Office Supplies"),
+    Item("Pens", 3.0, 6.5, "Office Supplies", 0.1),
+    Item("Pencils", 2.5, 5.5, "Office Supplies", 0.1),
+    Item("Notebooks", 4.0, 8.5, "Office Supplies", 0.6),
+    Item("Sticky Notes", 3.5, 7.5, "Office Supplies", 0.2),
+    Item("Stapler", 8.0, 16.0, "Office Supplies", 0.4),
+    Item("Tape Dispenser", 6.0, 12.0, "Office Supplies", 0.4),
+    Item("Scissors", 5.0, 10.0, "Office Supplies", 0.3),
+    Item("Ruler", 2.0, 4.5, "Office Supplies", 0.2),
+    Item("Binder", 4.5, 9.0, "Office Supplies", 0.6),
+    Item("File Folders", 6.0, 12.5, "Office Supplies", 0.4),
+    Item("Printer Paper", 15.0, 30.0, "Office Supplies", 2.0),
 
     # Mid-range Electronics & Gaming
-    Item("Tablet", 150.0, 300.0, "Electronics"),
-    Item("E-Reader", 80.0, 160.0, "Electronics"),
-    Item("Smart Watch", 120.0, 240.0, "Luxury"),
-    Item("Fitness Tracker", 60.0, 120.0, "Electronics"),
-    Item("Wireless Earbuds", 70.0, 140.0, "Electronics"),
-    Item("Gaming Mouse", 45.0, 90.0, "Gaming"),
-    Item("Gaming Keyboard", 60.0, 120.0, "Gaming"),
-    Item("Monitor", 150.0, 300.0, "Electronics"),
-    Item("External Hard Drive", 55.0, 110.0, "Electronics"),
-    Item("Wireless Router", 50.0, 100.0, "Electronics"),
-    Item("Smart Plug", 15.0, 30.0, "Electronics"),
-    Item("Security Camera", 40.0, 80.0, "Electronics"),
-    Item("Video Doorbell", 80.0, 160.0, "Electronics"),
+    Item("Tablet", 150.0, 300.0, "Electronics", 0.8),
+    Item("E-Reader", 80.0, 160.0, "Electronics", 0.5),
+    Item("Smart Watch", 120.0, 240.0, "Luxury", 0.3),
+    Item("Fitness Tracker", 60.0, 120.0, "Electronics", 0.2),
+    Item("Wireless Earbuds", 70.0, 140.0, "Electronics", 0.3),
+    Item("Gaming Mouse", 45.0, 90.0, "Gaming", 0.4),
+    Item("Gaming Keyboard", 60.0, 120.0, "Gaming", 1.2),
+    Item("Monitor", 150.0, 300.0, "Electronics", 4.0),
+    Item("External Hard Drive", 55.0, 110.0, "Electronics", 0.5),
+    Item("Wireless Router", 50.0, 100.0, "Electronics", 0.8),
+    Item("Smart Plug", 15.0, 30.0, "Electronics", 0.3),
+    Item("Security Camera", 40.0, 80.0, "Electronics", 0.6),
+    Item("Video Doorbell", 80.0, 160.0, "Electronics", 0.8),
 
     # Appliances & Home Electronics
-    Item("Coffee Maker", 40.0, 80.0, "Appliances"),
-    Item("Toaster", 25.0, 50.0, "Appliances"),
-    Item("Blender", 35.0, 70.0, "Appliances"),
-    Item("Microwave", 80.0, 160.0, "Appliances"),
-    Item("Air Fryer", 70.0, 140.0, "Appliances"),
-    Item("Slow Cooker", 35.0, 70.0, "Appliances"),
-    Item("Electric Kettle", 30.0, 60.0, "Appliances"),
-    Item("Hair Dryer", 25.0, 50.0, "Appliances"),
-    Item("Iron", 20.0, 40.0, "Appliances"),
-    Item("Vacuum Cleaner", 120.0, 240.0, "Appliances"),
-    Item("Fan", 35.0, 70.0, "Appliances"),
-    Item("Space Heater", 45.0, 90.0, "Appliances"),
-    Item("Humidifier", 40.0, 80.0, "Appliances"),
-    Item("Air Purifier", 90.0, 180.0, "Appliances"),
+    Item("Coffee Maker", 40.0, 80.0, "Appliances", 2.5),
+    Item("Toaster", 25.0, 50.0, "Appliances", 1.5),
+    Item("Blender", 35.0, 70.0, "Appliances", 2.0),
+    Item("Microwave", 80.0, 160.0, "Appliances", 3.5),
+    Item("Air Fryer", 70.0, 140.0, "Appliances", 3.0),
+    Item("Slow Cooker", 35.0, 70.0, "Appliances", 2.5),
+    Item("Electric Kettle", 30.0, 60.0, "Appliances", 1.5),
+    Item("Hair Dryer", 25.0, 50.0, "Appliances", 0.8),
+    Item("Iron", 20.0, 40.0, "Appliances", 1.2),
+    Item("Vacuum Cleaner", 120.0, 240.0, "Appliances", 5.0),
+    Item("Fan", 35.0, 70.0, "Appliances", 2.5),
+    Item("Space Heater", 45.0, 90.0, "Appliances", 2.5),
+    Item("Humidifier", 40.0, 80.0, "Appliances", 2.0),
+    Item("Air Purifier", 90.0, 180.0, "Appliances", 3.5),
 
     # Expensive Electronics & Gaming
-    Item("Laptop", 400.0, 800.0, "Gaming"),
-    Item("Gaming Console", 300.0, 600.0, "Gaming"),
-    Item("4K TV", 350.0, 700.0, "Gaming"),
-    Item("Soundbar", 150.0, 300.0, "Electronics"),
-    Item("Noise-Cancelling Headphones", 180.0, 360.0, "Gaming"),
-    Item("Drone", 250.0, 500.0, "Luxury"),
-    Item("VR Headset", 300.0, 600.0, "Gaming"),
-    Item("Digital Camera", 400.0, 800.0, "Luxury"),
-    Item("Projector", 300.0, 600.0, "Electronics"),
-    Item("Smart Thermostat", 120.0, 240.0, "Electronics"),
-    Item("Robot Vacuum", 200.0, 400.0, "Appliances"),
-    Item("Electric Scooter", 350.0, 700.0, "Luxury"),
+    Item("Laptop", 400.0, 800.0, "Gaming", 2.5),
+    Item("Gaming Console", 300.0, 600.0, "Gaming", 2.0),
+    Item("4K TV", 350.0, 700.0, "Gaming", 6.0),
+    Item("Soundbar", 150.0, 300.0, "Electronics", 2.5),
+    Item("Noise-Cancelling Headphones", 180.0, 360.0, "Gaming", 0.8),
+    Item("Drone", 250.0, 500.0, "Luxury", 2.0),
+    Item("VR Headset", 300.0, 600.0, "Gaming", 2.0),
+    Item("Digital Camera", 400.0, 800.0, "Luxury", 1.5),
+    Item("Projector", 300.0, 600.0, "Electronics", 3.5),
+    Item("Smart Thermostat", 120.0, 240.0, "Electronics", 0.8),
+    Item("Robot Vacuum", 200.0, 400.0, "Appliances", 3.5),
+    Item("Electric Scooter", 350.0, 700.0, "Luxury", 8.0),
 
     # Luxury Items
-    Item("Designer Handbag", 600.0, 1200.0, "Luxury"),
-    Item("Leather Wallet", 100.0, 200.0, "Luxury"),
-    Item("Sunglasses", 150.0, 300.0, "Luxury"),
-    Item("Perfume", 80.0, 160.0, "Luxury"),
-    Item("Cologne", 70.0, 140.0, "Luxury"),
-    Item("Watch", 200.0, 400.0, "Luxury"),
-    Item("Jewelry Box", 60.0, 120.0, "Luxury"),
-    Item("Gold Necklace", 500.0, 1000.0, "Luxury"),
-    Item("Silver Bracelet", 150.0, 300.0, "Luxury"),
-    Item("Diamond Earrings", 800.0, 1600.0, "Luxury"),
-    Item("Designer Shoes", 300.0, 600.0, "Luxury"),
-    Item("Leather Jacket", 250.0, 500.0, "Luxury"),
-    Item("Cashmere Sweater", 180.0, 360.0, "Luxury"),
-    Item("Silk Scarf", 80.0, 160.0, "Luxury"),
-    Item("Designer Jeans", 120.0, 240.0, "Luxury"),
+    Item("Designer Handbag", 600.0, 1200.0, "Luxury", 2.0),
+    Item("Leather Wallet", 100.0, 200.0, "Luxury", 0.2),
+    Item("Sunglasses", 150.0, 300.0, "Luxury", 0.3),
+    Item("Perfume", 80.0, 160.0, "Luxury", 0.4),
+    Item("Cologne", 70.0, 140.0, "Luxury", 0.4),
+    Item("Watch", 200.0, 400.0, "Luxury", 0.3),
+    Item("Jewelry Box", 60.0, 120.0, "Luxury", 1.0),
+    Item("Gold Necklace", 500.0, 1000.0, "Luxury", 0.2),
+    Item("Silver Bracelet", 150.0, 300.0, "Luxury", 0.2),
+    Item("Diamond Earrings", 800.0, 1600.0, "Luxury", 0.1),
+    Item("Designer Shoes", 300.0, 600.0, "Luxury", 1.5),
+    Item("Leather Jacket", 250.0, 500.0, "Luxury", 2.0),
+    Item("Cashmere Sweater", 180.0, 360.0, "Luxury", 1.0),
+    Item("Silk Scarf", 80.0, 160.0, "Luxury", 0.3),
+    Item("Designer Jeans", 120.0, 240.0, "Luxury", 0.8),
 
     # Sports & Outdoor
-    Item("Yoga Mat", 20.0, 40.0, "Sports & Outdoor"),
-    Item("Dumbbells", 30.0, 60.0, "Sports & Outdoor"),
-    Item("Tennis Racket", 60.0, 120.0, "Sports & Outdoor"),
-    Item("Basketball", 15.0, 30.0, "Sports & Outdoor"),
-    Item("Camping Tent", 100.0, 200.0, "Sports & Outdoor"),
-    Item("Sleeping Bag", 50.0, 100.0, "Sports & Outdoor"),
-    Item("Hiking Boots", 80.0, 160.0, "Sports & Outdoor"),
+    Item("Yoga Mat", 20.0, 40.0, "Sports & Outdoor", 1.5),
+    Item("Dumbbells", 30.0, 60.0, "Sports & Outdoor", 1.5),
+    Item("Tennis Racket", 60.0, 120.0, "Sports & Outdoor", 1.2),
+    Item("Basketball", 15.0, 30.0, "Sports & Outdoor", 1.0),
+    Item("Camping Tent", 100.0, 200.0, "Sports & Outdoor", 4.0),
+    Item("Sleeping Bag", 50.0, 100.0, "Sports & Outdoor", 2.5),
+    Item("Hiking Boots", 80.0, 160.0, "Sports & Outdoor", 1.5),
 
     # More Groceries & Food
-    Item("Peanut Butter", 4.0, 8.0, "Food & Groceries"),
-    Item("Jelly", 3.0, 6.0, "Food & Groceries"),
-    Item("Honey", 5.0, 10.0, "Food & Groceries"),
-    Item("Maple Syrup", 6.0, 12.0, "Food & Groceries"),
-    Item("Crackers", 3.0, 6.0, "Food & Groceries"),
-    Item("Chips", 2.5, 5.0, "Food & Groceries"),
-    Item("Pretzels", 2.5, 5.0, "Food & Groceries"),
-    Item("Popcorn", 2.0, 4.0, "Food & Groceries"),
-    Item("Cookies", 3.5, 7.0, "Food & Groceries"),
-    Item("Cake Mix", 3.0, 6.0, "Food & Groceries"),
-    Item("Brownie Mix", 3.0, 6.0, "Food & Groceries"),
-    Item("Chocolate Bar", 1.5, 3.0, "Food & Groceries"),
-    Item("Candy", 1.0, 2.5, "Food & Groceries"),
-    Item("Gum", 1.0, 2.5, "Food & Groceries"),
-    Item("Mints", 1.5, 3.0, "Food & Groceries"),
-    Item("Granola Bars", 4.0, 8.0, "Food & Groceries"),
-    Item("Energy Bars", 5.0, 10.0, "Food & Groceries"),
-    Item("Protein Powder", 25.0, 50.0, "Supplements"),
-    Item("Fish Oil", 15.0, 30.0, "Supplements"),
-    Item("Canned Tuna", 1.5, 3.5, "Food & Groceries"),
-    Item("Canned Beans", 1.5, 3.5, "Food & Groceries"),
-    Item("Canned Corn", 1.5, 3.5, "Food & Groceries"),
-    Item("Canned Tomatoes", 2.0, 4.0, "Food & Groceries"),
-    Item("Tomato Sauce", 2.0, 4.5, "Food & Groceries"),
-    Item("Spaghetti Sauce", 3.0, 6.5, "Food & Groceries"),
-    Item("Hot Sauce", 2.5, 5.5, "Food & Groceries"),
-    Item("Soy Sauce", 3.0, 6.0, "Food & Groceries"),
-    Item("Vinegar", 2.0, 4.5, "Food & Groceries"),
-    Item("Olive Oil", 8.0, 16.0, "Food & Groceries"),
-    Item("Coconut Oil", 9.0, 18.0, "Food & Groceries"),
-    Item("Protein Shake", 4.0, 8.0, "Supplements"),
-    Item("Sports Drink", 2.0, 4.5, "Food & Groceries"),
-    Item("Energy Drink", 3.0, 6.0, "Food & Groceries"),
-    Item("Bottled Water", 1.0, 2.5, "Food & Groceries"),
-    Item("Sparkling Water", 1.5, 3.5, "Food & Groceries"),
-    Item("Iced Tea", 2.0, 4.5, "Food & Groceries"),
-    Item("Lemonade", 2.5, 5.5, "Food & Groceries"),
+    Item("Peanut Butter", 4.0, 8.0, "Food & Groceries", 0.9),
+    Item("Jelly", 3.0, 6.0, "Food & Groceries", 0.7),
+    Item("Honey", 5.0, 10.0, "Food & Groceries", 0.8),
+    Item("Maple Syrup", 6.0, 12.0, "Food & Groceries", 0.9),
+    Item("Crackers", 3.0, 6.0, "Food & Groceries", 0.8),
+    Item("Chips", 2.5, 5.0, "Food & Groceries", 0.9),
+    Item("Pretzels", 2.5, 5.0, "Food & Groceries", 0.8),
+    Item("Popcorn", 2.0, 4.0, "Food & Groceries", 0.7),
+    Item("Cookies", 3.5, 7.0, "Food & Groceries", 0.8),
+    Item("Cake Mix", 3.0, 6.0, "Food & Groceries", 1.0),
+    Item("Brownie Mix", 3.0, 6.0, "Food & Groceries", 0.9),
+    Item("Chocolate Bar", 1.5, 3.0, "Food & Groceries", 0.2),
+    Item("Candy", 1.0, 2.5, "Food & Groceries", 0.1),
+    Item("Gum", 1.0, 2.5, "Food & Groceries", 0.05),
+    Item("Mints", 1.5, 3.0, "Food & Groceries", 0.05),
+    Item("Granola Bars", 4.0, 8.0, "Food & Groceries", 0.6),
+    Item("Energy Bars", 5.0, 10.0, "Food & Groceries", 0.6),
+    Item("Protein Powder", 25.0, 50.0, "Supplements", 1.5),
+    Item("Fish Oil", 15.0, 30.0, "Supplements", 0.4),
+    Item("Canned Tuna", 1.5, 3.5, "Food & Groceries", 0.4),
+    Item("Canned Beans", 1.5, 3.5, "Food & Groceries", 0.5),
+    Item("Canned Corn", 1.5, 3.5, "Food & Groceries", 0.5),
+    Item("Canned Tomatoes", 2.0, 4.0, "Food & Groceries", 0.6),
+    Item("Tomato Sauce", 2.0, 4.5, "Food & Groceries", 0.7),
+    Item("Spaghetti Sauce", 3.0, 6.5, "Food & Groceries", 0.9),
+    Item("Hot Sauce", 2.5, 5.5, "Food & Groceries", 0.5),
+    Item("Soy Sauce", 3.0, 6.0, "Food & Groceries", 0.6),
+    Item("Vinegar", 2.0, 4.5, "Food & Groceries", 0.9),
+    Item("Olive Oil", 8.0, 16.0, "Food & Groceries", 1.2),
+    Item("Coconut Oil", 9.0, 18.0, "Food & Groceries", 1.0),
+    Item("Protein Shake", 4.0, 8.0, "Supplements", 0.7),
+    Item("Sports Drink", 2.0, 4.5, "Food & Groceries", 0.8),
+    Item("Energy Drink", 3.0, 6.0, "Food & Groceries", 0.6),
+    Item("Bottled Water", 1.0, 2.5, "Food & Groceries", 0.8),
+    Item("Sparkling Water", 1.5, 3.5, "Food & Groceries", 0.8),
+    Item("Iced Tea", 2.0, 4.5, "Food & Groceries", 0.8),
+    Item("Lemonade", 2.5, 5.5, "Food & Groceries", 0.9),
 
     # Pet Supplies
-    Item("Dog Food", 15.0, 30.0, "Pet Supplies"),
-    Item("Cat Food", 12.0, 24.0, "Pet Supplies"),
-    Item("Dog Treats", 5.0, 10.0, "Pet Supplies"),
-    Item("Cat Treats", 4.0, 8.0, "Pet Supplies"),
-    Item("Dog Toy", 6.0, 12.0, "Pet Supplies"),
-    Item("Cat Toy", 4.0, 8.0, "Pet Supplies"),
-    Item("Pet Bowl", 8.0, 16.0, "Pet Supplies"),
-    Item("Pet Collar", 10.0, 20.0, "Pet Supplies"),
-    Item("Pet Leash", 12.0, 24.0, "Pet Supplies"),
-    Item("Cat Litter", 10.0, 20.0, "Pet Supplies"),
-    Item("Fish Tank", 40.0, 80.0, "Pet Supplies"),
-    Item("Fish Food", 4.0, 8.0, "Pet Supplies"),
-    Item("Bird Cage", 50.0, 100.0, "Pet Supplies"),
-    Item("Bird Seed", 6.0, 12.0, "Pet Supplies"),
+    Item("Dog Food", 15.0, 30.0, "Pet Supplies", 2.5),
+    Item("Cat Food", 12.0, 24.0, "Pet Supplies", 1.5),
+    Item("Dog Treats", 5.0, 10.0, "Pet Supplies", 0.6),
+    Item("Cat Treats", 4.0, 8.0, "Pet Supplies", 0.4),
+    Item("Dog Toy", 6.0, 12.0, "Pet Supplies", 0.5),
+    Item("Cat Toy", 4.0, 8.0, "Pet Supplies", 0.3),
+    Item("Pet Bowl", 8.0, 16.0, "Pet Supplies", 0.8),
+    Item("Pet Collar", 10.0, 20.0, "Pet Supplies", 0.2),
+    Item("Pet Leash", 12.0, 24.0, "Pet Supplies", 0.4),
+    Item("Cat Litter", 10.0, 20.0, "Pet Supplies", 2.5),
+    Item("Fish Tank", 40.0, 80.0, "Pet Supplies", 5.0),
+    Item("Fish Food", 4.0, 8.0, "Pet Supplies", 0.3),
+    Item("Bird Cage", 50.0, 100.0, "Pet Supplies", 6.0),
+    Item("Bird Seed", 6.0, 12.0, "Pet Supplies", 1.0),
 
     # Baby Products
-    Item("Diapers", 20.0, 40.0, "Baby Products"),
-    Item("Baby Wipes", 5.0, 10.0, "Baby Products"),
-    Item("Baby Formula", 25.0, 50.0, "Baby Products"),
-    Item("Baby Bottle", 8.0, 16.0, "Baby Products"),
-    Item("Pacifier", 4.0, 8.0, "Baby Products"),
-    Item("Baby Lotion", 6.0, 12.0, "Baby Products"),
-    Item("Baby Shampoo", 5.0, 10.0, "Baby Products"),
-    Item("Baby Powder", 4.0, 8.0, "Baby Products"),
-    Item("Diaper Bag", 30.0, 60.0, "Baby Products"),
-    Item("Baby Blanket", 15.0, 30.0, "Baby Products"),
-    Item("Teething Ring", 5.0, 10.0, "Baby Products"),
+    Item("Diapers", 20.0, 40.0, "Baby Products", 2.5),
+    Item("Baby Wipes", 5.0, 10.0, "Baby Products", 0.8),
+    Item("Baby Formula", 25.0, 50.0, "Baby Products", 2.0),
+    Item("Baby Bottle", 8.0, 16.0, "Baby Products", 0.4),
+    Item("Pacifier", 4.0, 8.0, "Baby Products", 0.1),
+    Item("Baby Lotion", 6.0, 12.0, "Baby Products", 0.6),
+    Item("Baby Shampoo", 5.0, 10.0, "Baby Products", 0.6),
+    Item("Baby Powder", 4.0, 8.0, "Baby Products", 0.5),
+    Item("Diaper Bag", 30.0, 60.0, "Baby Products", 2.0),
+    Item("Baby Blanket", 15.0, 30.0, "Baby Products", 1.0),
+    Item("Teething Ring", 5.0, 10.0, "Baby Products", 0.2),
 
     # Pharmacy & Health
-    Item("Pain Reliever", 8.0, 16.0, "Health & Pharmacy"),
-    Item("Cold Medicine", 10.0, 20.0, "Health & Pharmacy"),
-    Item("Allergy Medicine", 12.0, 24.0, "Health & Pharmacy"),
-    Item("Band-Aids", 4.0, 8.0, "Health & Pharmacy"),
-    Item("First Aid Kit", 20.0, 40.0, "Health & Pharmacy"),
-    Item("Thermometer", 15.0, 30.0, "Health & Pharmacy"),
-    Item("Cough Drops", 3.0, 6.0, "Health & Pharmacy"),
-    Item("Antacid", 6.0, 12.0, "Health & Pharmacy"),
-    Item("Eye Drops", 8.0, 16.0, "Health & Pharmacy"),
-    Item("Lip Balm", 2.0, 4.5, "Health & Pharmacy"),
-    Item("Sunscreen", 10.0, 20.0, "Health & Pharmacy"),
-    Item("Bug Spray", 7.0, 14.0, "Health & Pharmacy"),
+    Item("Pain Reliever", 8.0, 16.0, "Health & Pharmacy", 0.3),
+    Item("Cold Medicine", 10.0, 20.0, "Health & Pharmacy", 0.4),
+    Item("Allergy Medicine", 12.0, 24.0, "Health & Pharmacy", 0.3),
+    Item("Band-Aids", 4.0, 8.0, "Health & Pharmacy", 0.2),
+    Item("First Aid Kit", 20.0, 40.0, "Health & Pharmacy", 1.5),
+    Item("Thermometer", 15.0, 30.0, "Health & Pharmacy", 0.3),
+    Item("Cough Drops", 3.0, 6.0, "Health & Pharmacy", 0.2),
+    Item("Antacid", 6.0, 12.0, "Health & Pharmacy", 0.3),
+    Item("Eye Drops", 8.0, 16.0, "Health & Pharmacy", 0.2),
+    Item("Lip Balm", 2.0, 4.5, "Health & Pharmacy", 0.05),
+    Item("Sunscreen", 10.0, 20.0, "Health & Pharmacy", 0.6),
+    Item("Bug Spray", 7.0, 14.0, "Health & Pharmacy", 0.6),
 
     # Kitchen & Dining
-    Item("Plates Set", 20.0, 40.0, "Kitchen & Dining"),
-    Item("Bowls Set", 15.0, 30.0, "Kitchen & Dining"),
-    Item("Cups Set", 12.0, 24.0, "Kitchen & Dining"),
-    Item("Silverware Set", 25.0, 50.0, "Kitchen & Dining"),
-    Item("Cooking Pot", 30.0, 60.0, "Kitchen & Dining"),
-    Item("Frying Pan", 25.0, 50.0, "Kitchen & Dining"),
-    Item("Baking Sheet", 12.0, 24.0, "Kitchen & Dining"),
-    Item("Mixing Bowl", 10.0, 20.0, "Kitchen & Dining"),
-    Item("Cutting Board", 15.0, 30.0, "Kitchen & Dining"),
-    Item("Kitchen Knife", 20.0, 40.0, "Kitchen & Dining"),
-    Item("Can Opener", 8.0, 16.0, "Kitchen & Dining"),
-    Item("Bottle Opener", 5.0, 10.0, "Kitchen & Dining"),
-    Item("Measuring Cups", 10.0, 20.0, "Kitchen & Dining"),
-    Item("Measuring Spoons", 8.0, 16.0, "Kitchen & Dining"),
-    Item("Spatula", 7.0, 14.0, "Kitchen & Dining"),
-    Item("Whisk", 6.0, 12.0, "Kitchen & Dining"),
-    Item("Tongs", 8.0, 16.0, "Kitchen & Dining"),
-    Item("Ladle", 7.0, 14.0, "Kitchen & Dining"),
-    Item("Colander", 12.0, 24.0, "Kitchen & Dining"),
-    Item("Grater", 10.0, 20.0, "Kitchen & Dining"),
+    Item("Plates Set", 20.0, 40.0, "Kitchen & Dining", 2.5),
+    Item("Bowls Set", 15.0, 30.0, "Kitchen & Dining", 2.0),
+    Item("Cups Set", 12.0, 24.0, "Kitchen & Dining", 1.5),
+    Item("Silverware Set", 25.0, 50.0, "Kitchen & Dining", 1.5),
+    Item("Cooking Pot", 30.0, 60.0, "Kitchen & Dining", 2.5),
+    Item("Frying Pan", 25.0, 50.0, "Kitchen & Dining", 2.0),
+    Item("Baking Sheet", 12.0, 24.0, "Kitchen & Dining", 1.0),
+    Item("Mixing Bowl", 10.0, 20.0, "Kitchen & Dining", 1.0),
+    Item("Cutting Board", 15.0, 30.0, "Kitchen & Dining", 0.8),
+    Item("Kitchen Knife", 20.0, 40.0, "Kitchen & Dining", 0.5),
+    Item("Can Opener", 8.0, 16.0, "Kitchen & Dining", 0.3),
+    Item("Bottle Opener", 5.0, 10.0, "Kitchen & Dining", 0.1),
+    Item("Measuring Cups", 10.0, 20.0, "Kitchen & Dining", 0.6),
+    Item("Measuring Spoons", 8.0, 16.0, "Kitchen & Dining", 0.3),
+    Item("Spatula", 7.0, 14.0, "Kitchen & Dining", 0.4),
+    Item("Whisk", 6.0, 12.0, "Kitchen & Dining", 0.4),
+    Item("Tongs", 8.0, 16.0, "Kitchen & Dining", 0.4),
+    Item("Ladle", 7.0, 14.0, "Kitchen & Dining", 0.4),
+    Item("Colander", 12.0, 24.0, "Kitchen & Dining", 1.5),
+    Item("Grater", 10.0, 20.0, "Kitchen & Dining", 0.5),
 
     # Home Decor
-    Item("Picture Frame", 12.0, 24.0, "Home Decor"),
-    Item("Wall Art", 25.0, 50.0, "Home Decor"),
-    Item("Throw Pillow", 15.0, 30.0, "Home Decor"),
-    Item("Blanket", 25.0, 50.0, "Household Essentials"),
-    Item("Curtains", 30.0, 60.0, "Home Decor"),
-    Item("Area Rug", 60.0, 120.0, "Home Decor"),
-    Item("Table Lamp", 35.0, 70.0, "Home Decor"),
-    Item("Floor Lamp", 50.0, 100.0, "Home Decor"),
-    Item("Wall Clock", 20.0, 40.0, "Home Decor"),
-    Item("Vase", 18.0, 36.0, "Home Decor"),
-    Item("Candle Holder", 12.0, 24.0, "Home Decor"),
-    Item("Plant Pot", 10.0, 20.0, "Home Decor"),
-    Item("Fake Plant", 15.0, 30.0, "Home Decor"),
-    Item("Mirror", 40.0, 80.0, "Home Decor"),
+    Item("Picture Frame", 12.0, 24.0, "Home Decor", 0.8),
+    Item("Wall Art", 25.0, 50.0, "Home Decor", 1.5),
+    Item("Throw Pillow", 15.0, 30.0, "Home Decor", 1.0),
+    Item("Blanket", 25.0, 50.0, "Household Essentials", 1.5),
+    Item("Curtains", 30.0, 60.0, "Home Decor", 1.5),
+    Item("Area Rug", 60.0, 120.0, "Home Decor", 4.0),
+    Item("Table Lamp", 35.0, 70.0, "Home Decor", 1.5),
+    Item("Floor Lamp", 50.0, 100.0, "Home Decor", 2.5),
+    Item("Wall Clock", 20.0, 40.0, "Home Decor", 1.0),
+    Item("Vase", 18.0, 36.0, "Home Decor", 0.8),
+    Item("Candle Holder", 12.0, 24.0, "Home Decor", 0.5),
+    Item("Plant Pot", 10.0, 20.0, "Home Decor", 1.0),
+    Item("Fake Plant", 15.0, 30.0, "Home Decor", 1.2),
+    Item("Mirror", 40.0, 80.0, "Home Decor", 3.0),
 
     # Garden & Outdoor
-    Item("Garden Hose", 25.0, 50.0, "Sports & Outdoor"),
-    Item("Sprinkler", 20.0, 40.0, "Sports & Outdoor"),
-    Item("Garden Gloves", 8.0, 16.0, "Sports & Outdoor"),
-    Item("Plant Seeds", 3.0, 6.0, "Sports & Outdoor"),
-    Item("Fertilizer", 12.0, 24.0, "Sports & Outdoor"),
-    Item("Potting Soil", 10.0, 20.0, "Sports & Outdoor"),
-    Item("Weed Killer", 15.0, 30.0, "Sports & Outdoor"),
-    Item("Lawn Mower", 200.0, 400.0, "Sports & Outdoor"),
-    Item("Rake", 18.0, 36.0, "Sports & Outdoor"),
-    Item("Shovel", 22.0, 44.0, "Sports & Outdoor"),
-    Item("Garden Shears", 15.0, 30.0, "Sports & Outdoor"),
-    Item("Watering Can", 12.0, 24.0, "Sports & Outdoor"),
-    Item("BBQ Grill", 150.0, 300.0, "Sports & Outdoor"),
-    Item("Charcoal", 10.0, 20.0, "Sports & Outdoor"),
-    Item("Lighter Fluid", 6.0, 12.0, "Sports & Outdoor"),
-    Item("Patio Furniture", 250.0, 500.0, "Luxury"),
+    Item("Garden Hose", 25.0, 50.0, "Sports & Outdoor", 2.5),
+    Item("Sprinkler", 20.0, 40.0, "Sports & Outdoor", 1.5),
+    Item("Garden Gloves", 8.0, 16.0, "Sports & Outdoor", 0.3),
+    Item("Plant Seeds", 3.0, 6.0, "Sports & Outdoor", 0.1),
+    Item("Fertilizer", 12.0, 24.0, "Sports & Outdoor", 3.0),
+    Item("Potting Soil", 10.0, 20.0, "Sports & Outdoor", 4.0),
+    Item("Weed Killer", 15.0, 30.0, "Sports & Outdoor", 1.5),
+    Item("Lawn Mower", 200.0, 400.0, "Sports & Outdoor", 15.0),
+    Item("Rake", 18.0, 36.0, "Sports & Outdoor", 1.5),
+    Item("Shovel", 22.0, 44.0, "Sports & Outdoor", 1.8),
+    Item("Garden Shears", 15.0, 30.0, "Sports & Outdoor", 0.6),
+    Item("Watering Can", 12.0, 24.0, "Sports & Outdoor", 1.5),
+    Item("BBQ Grill", 150.0, 300.0, "Sports & Outdoor", 8.0),
+    Item("Charcoal", 10.0, 20.0, "Sports & Outdoor", 2.5),
+    Item("Lighter Fluid", 6.0, 12.0, "Sports & Outdoor", 0.8),
+    Item("Patio Furniture", 250.0, 500.0, "Luxury", 20.0),
 
     # Toys & Games
-    Item("Board Game", 20.0, 40.0, "Toys & Games"),
-    Item("Puzzle", 15.0, 30.0, "Toys & Games"),
-    Item("Playing Cards", 5.0, 10.0, "Toys & Games"),
-    Item("Action Figure", 12.0, 24.0, "Toys & Games"),
-    Item("Doll", 18.0, 36.0, "Toys & Games"),
-    Item("Stuffed Animal", 15.0, 30.0, "Toys & Games"),
-    Item("Building Blocks", 25.0, 50.0, "Toys & Games"),
-    Item("Art Supplies", 20.0, 40.0, "Toys & Games"),
-    Item("Crayons", 4.0, 8.0, "Toys & Games"),
-    Item("Coloring Book", 5.0, 10.0, "Toys & Games"),
-    Item("Play-Doh", 8.0, 16.0, "Toys & Games"),
-    Item("Remote Control Car", 40.0, 80.0, "Toys & Games"),
-    Item("Nerf Gun", 25.0, 50.0, "Toys & Games"),
-    Item("Water Gun", 10.0, 20.0, "Toys & Games"),
-    Item("Frisbee", 8.0, 16.0, "Sports & Outdoor"),
-    Item("Soccer Ball", 18.0, 36.0, "Sports & Outdoor"),
-    Item("Football", 20.0, 40.0, "Sports & Outdoor"),
-    Item("Baseball Glove", 35.0, 70.0, "Sports & Outdoor"),
-    Item("Baseball Bat", 30.0, 60.0, "Sports & Outdoor"),
+    Item("Board Game", 20.0, 40.0, "Toys & Games", 1.5),
+    Item("Puzzle", 15.0, 30.0, "Toys & Games", 1.0),
+    Item("Playing Cards", 5.0, 10.0, "Toys & Games", 0.1),
+    Item("Action Figure", 12.0, 24.0, "Toys & Games", 0.3),
+    Item("Doll", 18.0, 36.0, "Toys & Games", 0.6),
+    Item("Stuffed Animal", 15.0, 30.0, "Toys & Games", 0.8),
+    Item("Building Blocks", 25.0, 50.0, "Toys & Games", 1.5),
+    Item("Art Supplies", 20.0, 40.0, "Toys & Games", 1.2),
+    Item("Crayons", 4.0, 8.0, "Toys & Games", 0.2),
+    Item("Coloring Book", 5.0, 10.0, "Toys & Games", 0.3),
+    Item("Play-Doh", 8.0, 16.0, "Toys & Games", 0.5),
+    Item("Remote Control Car", 40.0, 80.0, "Toys & Games", 1.5),
+    Item("Nerf Gun", 25.0, 50.0, "Toys & Games", 1.0),
+    Item("Water Gun", 10.0, 20.0, "Toys & Games", 0.6),
+    Item("Frisbee", 8.0, 16.0, "Sports & Outdoor", 0.4),
+    Item("Soccer Ball", 18.0, 36.0, "Sports & Outdoor", 1.0),
+    Item("Football", 20.0, 40.0, "Sports & Outdoor", 1.0),
+    Item("Baseball Glove", 35.0, 70.0, "Sports & Outdoor", 1.0),
+    Item("Baseball Bat", 30.0, 60.0, "Sports & Outdoor", 1.2),
 
     # Automotive
-    Item("Car Phone Mount", 15.0, 30.0, "Automotive"),
-    Item("Car Charger", 12.0, 24.0, "Automotive"),
-    Item("Jumper Cables", 25.0, 50.0, "Automotive"),
-    Item("Car Air Freshener", 3.0, 6.0, "Automotive"),
-    Item("Windshield Wiper", 18.0, 36.0, "Automotive"),
-    Item("Motor Oil", 20.0, 40.0, "Automotive"),
+    Item("Car Phone Mount", 15.0, 30.0, "Automotive", 0.4),
+    Item("Car Charger", 12.0, 24.0, "Automotive", 0.2),
+    Item("Jumper Cables", 25.0, 50.0, "Automotive", 1.5),
+    Item("Car Air Freshener", 3.0, 6.0, "Automotive", 0.1),
+    Item("Windshield Wiper", 18.0, 36.0, "Automotive", 0.8),
+    Item("Motor Oil", 20.0, 40.0, "Automotive", 1.5),
 ]
 
 
@@ -617,6 +618,15 @@ class Player:
         worker_bonus = total_workers * 300
 
         return int(warehouse_capacity + bonus + worker_bonus)
+
+    def get_inventory_size_used(self, items_by_name: Dict[str, 'Item']) -> float:
+        """Calculate total inventory space used based on item sizes."""
+        total_size = 0.0
+        for item_name, quantity in self.inventory.items():
+            if item_name in items_by_name:
+                item_size = items_by_name[item_name].size
+                total_size += item_size * quantity
+        return total_size
 
     def get_xp_multiplier(self) -> float:
         """Get XP gain multiplier from upgrades."""
@@ -2245,9 +2255,9 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     Returns a dictionary of items purchased: {item_name: quantity_bought}
     """
     purchases = {}
-    total_items_bought = 0
+    total_size_bought = 0.0
     max_inventory = player.get_max_inventory()
-    current_inventory = sum(player.inventory.values())
+    current_inventory_size = player.get_inventory_size_used(game_state.items_by_name)
 
     # Get all non-zero buy orders (now supporting multiple vendors per item)
     active_orders = []
@@ -2308,12 +2318,19 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
 
     # Execute orders in order, respecting inventory capacity
     for item_name, quantity, vendor, price in active_orders:
-        if current_inventory + total_items_bought >= max_inventory:
+        if current_inventory_size + total_size_bought >= max_inventory:
             break  # Reached inventory capacity
 
-        # Limit quantity by remaining warehouse capacity
-        remaining_capacity = max_inventory - current_inventory - total_items_bought
-        actual_quantity = min(quantity, remaining_capacity)
+        # Get item size to calculate how much space this order needs
+        item = game_state.items_by_name.get(item_name)
+        if not item:
+            continue
+        item_size = item.size
+
+        # Limit quantity by remaining warehouse capacity (based on size)
+        remaining_capacity_size = max_inventory - current_inventory_size - total_size_bought
+        max_quantity_by_size = int(remaining_capacity_size / item_size) if item_size > 0 else quantity
+        actual_quantity = min(quantity, max_quantity_by_size)
 
         # Get market price for production line check
         market_price = game_state.market_prices.get(item_name, 0)
@@ -2321,18 +2338,18 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
         success = player.purchase_from_vendor(vendor, item_name, actual_quantity, market_price, game_state)
         if success:
             purchases[item_name] = actual_quantity
-            total_items_bought += actual_quantity
+            total_size_bought += actual_quantity * item_size
         else:
             # Try to buy as many as possible with remaining cash
             # Recalculate price if production line owned
             actual_price = player.get_production_line_price(item_name, market_price) or price
             max_affordable = int(player.cash / actual_price)
             if max_affordable > 0:
-                affordable_quantity = min(max_affordable, remaining_capacity)
+                affordable_quantity = min(max_affordable, max_quantity_by_size)
                 partial_success = player.purchase_from_vendor(vendor, item_name, affordable_quantity, market_price, game_state)
                 if partial_success:
                     purchases[item_name] = affordable_quantity
-                    total_items_bought += affordable_quantity
+                    total_size_bought += affordable_quantity * item_size
 
     return purchases
 
@@ -4182,9 +4199,15 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
     actual_wage = max(0, monthly_wage - wage_reduction)
     print(f"  Monthly wages: ${total_employees * actual_wage:.2f} (${actual_wage:.2f}/employee)")
 
-    total_items = sum(player.inventory.values())
-    num_products = len([i for i, q in player.inventory.items() if q > 0])
-    print(f"\nInventory ({total_items}/{player.get_max_inventory()} items, {num_products} different products):")
+    if game_state:
+        inventory_size_used = player.get_inventory_size_used(game_state.items_by_name)
+        total_items = sum(player.inventory.values())
+        num_products = len([i for i, q in player.inventory.items() if q > 0])
+        print(f"\nInventory ({inventory_size_used:.1f}/{player.get_max_inventory()} space, {total_items} items, {num_products} products):")
+    else:
+        total_items = sum(player.inventory.values())
+        num_products = len([i for i, q in player.inventory.items() if q > 0])
+        print(f"\nInventory ({total_items} items, {num_products} different products):")
     if player.inventory:
         for item_name, quantity in player.inventory.items():
             if quantity > 0:
@@ -5198,7 +5221,9 @@ def warehouse_menu(game_state: GameState, player: Player) -> None:
         print("WAREHOUSE MANAGEMENT MENU")
         print("=" * 70)
         print(f"\nYour Cash: ${player.cash:.2f}")
-        print(f"Current Inventory: {sum(player.inventory.values())}/{player.get_max_inventory()} items")
+        inventory_size_used = player.get_inventory_size_used(game_state.items_by_name)
+        total_items = sum(player.inventory.values())
+        print(f"Current Inventory: {inventory_size_used:.1f}/{player.get_max_inventory()} space ({total_items} items)")
         print(f"\nWarehouses: {len(player.warehouses)}/4")
 
         # Display warehouse information
