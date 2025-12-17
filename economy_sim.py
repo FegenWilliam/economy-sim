@@ -476,7 +476,7 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, List[tuple]] = field(default_factory=dict)  # item_name -> [(quantity, vendor_name), ...] (up to 3 vendors)
-    restockers: int = 0  # Each restocker adds 500 items per day capacity
+    restockers: int = 0  # Warehouse Workers (renamed in v2.0): Each adds +300 max inventory capacity
     marketing_agents: int = 0  # Marketing agents boost customer attraction
     store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
     experience: float = 0.0  # XP gained from profits
@@ -554,17 +554,19 @@ class Player:
         return sum(q for q, v in self.get_buy_order(item_name))
 
     def get_max_products(self) -> int:
-        """Get max number of different products based on store level and upgrades."""
-        base = 3 + (self.store_level - 1)  # Level 1 = 3, Level 2 = 4, etc.
-        bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_products")
-        return int(base + bonus)
+        """DEPRECATED: No longer enforced in v2.0. Kept for backward compatibility."""
+        return 999999  # Effectively unlimited
+
+    def get_max_inventory(self) -> int:
+        """Get max inventory capacity (total items that can be stored)."""
+        base = 500 + ((self.store_level - 1) * 100)  # Base 500 items + 100 per level
+        bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
+        warehouse_bonus = self.restockers * 300  # Each warehouse worker adds 300 capacity (renamed from restocker in v2.0)
+        return int(base + bonus + warehouse_bonus)
 
     def get_max_items_per_day(self) -> int:
-        """Get max number of items that can be bought per day (buy order limit)."""
-        base = 300 + ((self.store_level - 1) * 100)  # Base 300 items + 100 per level
-        bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
-        restocker_bonus = self.restockers * 500  # Each restocker adds 500 items per day
-        return int(base + bonus + restocker_bonus)
+        """DEPRECATED: Use get_max_inventory() instead. Kept for backward compatibility."""
+        return self.get_max_inventory()
 
     def get_xp_multiplier(self) -> float:
         """Get XP gain multiplier from upgrades."""
@@ -658,11 +660,11 @@ class Player:
     def hire_employee(self, employee_type: str) -> bool:
         """
         Hire an employee.
-        - Restocker: $1000 upfront, $1000/month
+        - Warehouse Worker (restocker): $1000 upfront, $1000/month, adds +300 max inventory
         - Marketing Agent: 5x scaling cost (1k, 5k, 25k...), $1000/month, requires level 5+
         Returns True if successful, False if not enough cash or requirements not met.
         """
-        if employee_type == "restocker":
+        if employee_type == "restocker":  # Keep "restocker" for backward compatibility
             HIRING_COST = 1000.0
             if self.cash < HIRING_COST:
                 return False
@@ -1490,8 +1492,8 @@ class Customer:
 
 @dataclass
 class GameConfig:
-    """Configuration for the economic simulation."""
-    starting_cash: float = 5000.0
+    """Configuration for the economic simulation (v2.0)."""
+    starting_cash: float = 10000.0
     num_days: int = 30
     customers_per_day: int = 10
     # TODO: add more config options if needed (e.g. random seed, max inventory, etc.)
@@ -2051,15 +2053,15 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     - VIP Goods Co. (high-end items $200+) falls back to Universal Supply Corp.
     - Other vendors fall back to Budget Goods Ltd.
 
-    Respects restocker limits (restockers * 20 items per day) and store level
-    (max different products).
+    In v2.0+: Respects max inventory capacity. Buy orders have no per-day limit,
+    but purchases stop when inventory would exceed capacity or money runs out.
 
     Returns a dictionary of items purchased: {item_name: quantity_bought}
     """
     purchases = {}
     total_items_bought = 0
-    max_items = player.get_max_items_per_day()
-    max_products = player.get_max_products()
+    max_inventory = player.get_max_inventory()
+    current_inventory = sum(player.inventory.values())
 
     # Get all non-zero buy orders (now supporting multiple vendors per item)
     active_orders = []
@@ -2118,18 +2120,13 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     # Sort by price (cheapest first)
     active_orders.sort(key=lambda x: x[3])
 
-    # Execute orders in order, respecting item limit
+    # Execute orders in order, respecting inventory capacity
     for item_name, quantity, vendor, price in active_orders:
-        if total_items_bought >= max_items:
-            break  # Reached restocker limit
+        if current_inventory + total_items_bought >= max_inventory:
+            break  # Reached inventory capacity
 
-        # Check if player already has too many different products
-        current_products = len([item for item, qty in player.inventory.items() if qty > 0])
-        if player.inventory.get(item_name, 0) == 0 and current_products >= max_products:
-            continue  # Skip this item, store is full of different products
-
-        # Limit quantity by remaining items restockers can handle
-        remaining_capacity = max_items - total_items_bought
+        # Limit quantity by remaining warehouse capacity
+        remaining_capacity = max_inventory - current_inventory - total_items_bought
         actual_quantity = min(quantity, remaining_capacity)
 
         # Get market price for production line check
@@ -3170,7 +3167,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         wages = player.pay_monthly_wages(game_state.day)
         total_employees = player.restockers + player.marketing_agents
         if show_details and wages > 0:
-            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({player.restockers} restockers, {player.marketing_agents} marketing agents)")
+            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({player.restockers} warehouse workers, {player.marketing_agents} marketing agents)")
         elif show_details and total_employees > 0:
             days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
             print(f"  {player.name}: No payment today ({days_until_payment} days until next wage)")
@@ -3484,11 +3481,11 @@ def calculate_item_stability(player: Player, market_prices: Dict[str, float], it
     """
     Calculate item stability score to reward pricing close to market price and consistent pricing.
 
-    Formula:
+    Formula (v2.0):
     For each item with stock:
     1. Price proximity score:
-       - Starts at 10 if within 5% of market price
-       - Decreases by 1 for each 1% beyond 5% difference
+       - Starts at 5 if at exact market price (0% difference)
+       - Decreases by 1 for each 1% difference from market price
        - Minimum of 0
     2. Consistency bonus:
        - +2 if price hasn't changed more than ±5% from previous price
@@ -3518,12 +3515,8 @@ def calculate_item_stability(player: Player, market_prices: Dict[str, float], it
         # Calculate price difference percentage
         price_diff_pct = abs((player_price - market_price) / market_price) * 100
 
-        # Calculate proximity score
-        if price_diff_pct <= 5:
-            proximity_score = 10.0
-        else:
-            # Decrease by 1 for each 1% beyond 5%
-            proximity_score = max(0, 10 - (price_diff_pct - 5))
+        # Calculate proximity score (v2.0: 5 at market price, -1 per 1% difference)
+        proximity_score = max(0, 5 - price_diff_pct)
 
         # Calculate consistency bonus
         consistency_bonus = 0.0
@@ -3765,7 +3758,7 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
     print(f"Experience: {player.experience:.0f}/{xp_needed:.0f} XP")
 
     print(f"\nEmployees:")
-    print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
+    print(f"  Warehouse Workers: {player.restockers} (Max inventory: {player.get_max_inventory()} items)")
     print(f"  Marketing Agents: {player.marketing_agents} (Boost customer attraction)")
     total_employees = player.restockers + player.marketing_agents
     monthly_wage = 1000.0
@@ -4859,7 +4852,7 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         print(f"\nYour Cash: ${player.cash:.2f}")
         print(f"Store Level: {player.store_level}")
         print(f"\nCurrent Employees:")
-        print(f"  Restockers: {player.restockers} (Max {player.get_max_items_per_day()} items/day)")
+        print(f"  Warehouse Workers: {player.restockers} (Max inventory: {player.get_max_inventory()} items)")
         print(f"  Marketing Agents: {player.marketing_agents} (Boost customer attraction)")
         total_employees = player.restockers + player.marketing_agents
 
@@ -4883,7 +4876,7 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         marketing_cost = 1000.0 * (5 ** player.marketing_agents)
 
         print("\nOptions:")
-        print(f"  1. Hire Restocker (+500 items/day capacity) - ${RESTOCKER_COST:.2f}")
+        print(f"  1. Hire Warehouse Worker (+300 max inventory) - ${RESTOCKER_COST:.2f}")
         if player.store_level >= 5:
             print(f"  2. Hire Marketing Agent (Boost CAS) - ${marketing_cost:.2f}")
         else:
@@ -4902,10 +4895,10 @@ def employee_menu(game_state: GameState, player: Player) -> None:
                 else:
                     success = player.hire_employee("restocker")
                     if success:
-                        print(f"\n✓ Hired 1 restocker for ${RESTOCKER_COST:.2f}")
-                        print(f"  New capacity: {player.get_max_items_per_day()} items/day")
+                        print(f"\n✓ Hired 1 warehouse worker for ${RESTOCKER_COST:.2f}")
+                        print(f"  New max inventory: {player.get_max_inventory()} items")
                     else:
-                        print("\n✗ Failed to hire restocker")
+                        print("\n✗ Failed to hire warehouse worker")
             elif choice_num == 2:
                 if player.store_level < 5:
                     print(f"\n✗ Requires Store Level 5+! (Current: {player.store_level})")
@@ -5406,7 +5399,7 @@ def main_menu(game_state: GameState) -> bool:
         print(f"MAIN MENU - Day {game_state.day}")
         print("=" * 50)
         print(f"Your Cash: ${player.cash:.2f}")
-        print(f"Employees: {player.restockers} restockers")
+        print(f"Employees: {player.restockers} warehouse workers")
         print("\nOptions:")
         print("  1. Pass Day (Simulate)")
         print("  2. View Market Prices")
