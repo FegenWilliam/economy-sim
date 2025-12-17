@@ -2204,6 +2204,27 @@ def get_special_customer_count(day: int) -> int:
         return 2 + ((day - 30) // 30)
 
 
+def can_special_customer_type_spawn(customer_type: str, items: List[Item]) -> bool:
+    """
+    Check if a special customer type can spawn based on available items.
+
+    Some customer types require specific items/categories to exist:
+    - Gamer: requires at least one Gaming category item
+    - Christmas Dad: requires both "Gaming Console" and "4K TV"
+    """
+    if customer_type == "gamer":
+        # Check if any Gaming category items exist
+        return any(item.category == "Gaming" for item in items)
+
+    elif customer_type == "christmas_dad":
+        # Check if both required items exist
+        item_names = {item.name for item in items}
+        return "Gaming Console" in item_names and "4K TV" in item_names
+
+    # All other customer types can always spawn
+    return True
+
+
 def get_weighted_special_customer_type() -> str:
     """
     Returns a weighted random special customer type.
@@ -2963,20 +2984,40 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         youtuber_spawned = False
 
         for i in range(special_customer_count):
-            # Get weighted special customer type
-            special_type = get_weighted_special_customer_type()
+            # Get weighted special customer type, with validation for item requirements
+            max_attempts = 20  # Prevent infinite loop
+            special_type = None
 
-            # Enforce max 1 lottery winner and 1 youtuber per day
-            if special_type == "lottery_winner":
-                if lottery_winner_spawned:
-                    special_type = "hoarder"  # Fallback to hoarder
+            for _ in range(max_attempts):
+                candidate_type = get_weighted_special_customer_type()
+
+                # Check if this customer type can spawn (has required items)
+                if not can_special_customer_type_spawn(candidate_type, game_state.items):
+                    continue  # Try again with different type
+
+                # Enforce max 1 lottery winner and 1 youtuber per day
+                if candidate_type == "lottery_winner":
+                    if lottery_winner_spawned:
+                        continue  # Try again
+                    else:
+                        lottery_winner_spawned = True
+                        special_type = candidate_type
+                        break
+                elif candidate_type == "youtuber":
+                    if youtuber_spawned:
+                        continue  # Try again
+                    else:
+                        youtuber_spawned = True
+                        special_type = candidate_type
+                        break
                 else:
-                    lottery_winner_spawned = True
-            elif special_type == "youtuber":
-                if youtuber_spawned:
-                    special_type = "hoarder"  # Fallback to hoarder
-                else:
-                    youtuber_spawned = True
+                    # Valid type that can spawn
+                    special_type = candidate_type
+                    break
+
+            # If we couldn't find a valid type after max_attempts, skip this spawn
+            if special_type is None:
+                continue
 
             customer = Customer(name=f"Special_{i+1}", customer_type=special_type, day=game_state.day)
             special_customers.append(customer)
