@@ -5360,6 +5360,106 @@ def warehouse_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def discard_inventory_menu(game_state: GameState, player: Player) -> None:
+    """Menu for discarding inventory items."""
+    while True:
+        print("\n" + "=" * 70)
+        print("DISCARD INVENTORY MENU")
+        print("=" * 70)
+        print(f"\nYour Cash: ${player.cash:.2f}")
+
+        # Show current inventory
+        inventory_size_used = player.get_inventory_size_used(game_state.items_by_name)
+        total_items = sum(player.inventory.values())
+        print(f"Current Inventory: {inventory_size_used:.1f}/{player.get_max_inventory()} space ({total_items} items)")
+
+        if not player.inventory:
+            print("\n✗ Your inventory is empty. Nothing to discard.")
+            input("\nPress Enter to continue...")
+            break
+
+        # Display inventory items
+        print("\n" + "-" * 70)
+        print(f"{'#':<4} {'Item':<25} {'Quantity':>10} {'Size Each':>12} {'Total Size':>12}")
+        print("-" * 70)
+
+        inventory_items = []
+        for idx, (item_name, qty) in enumerate(sorted(player.inventory.items()), 1):
+            if qty > 0:  # Only show items with quantity > 0
+                item_obj = game_state.items_by_name.get(item_name)
+                size = item_obj.size if item_obj else 1.0
+                total_size = size * qty
+                print(f"{idx:<4} {item_name:<25} {qty:>10} {size:>12.1f} {total_size:>12.1f}")
+                inventory_items.append((item_name, qty))
+
+        print("-" * 70)
+        print("\nOptions:")
+        print("  Enter item # to discard")
+        print("  0. Back to Main Menu")
+
+        try:
+            choice = input("\nSelect item (0-{}): ".format(len(inventory_items)))
+            choice_num = int(choice)
+
+            if choice_num == 0:
+                break
+
+            if 1 <= choice_num <= len(inventory_items):
+                item_name, current_qty = inventory_items[choice_num - 1]
+
+                # Submenu for discard amount
+                print(f"\n{item_name} - Current Quantity: {current_qty}")
+                print("\nDiscard Options:")
+                print("  1. Discard specific amount")
+                print("  2. Discard all")
+                print("  0. Cancel")
+
+                discard_choice = input("\nSelect option (0-2): ")
+                discard_num = int(discard_choice)
+
+                if discard_num == 0:
+                    continue
+                elif discard_num == 1:
+                    # Discard specific amount
+                    amount_str = input(f"\nEnter amount to discard (1-{current_qty}): ")
+                    amount = int(amount_str)
+
+                    if amount <= 0:
+                        print("\n✗ Amount must be greater than 0")
+                    elif amount > current_qty:
+                        print(f"\n✗ You only have {current_qty} {item_name}")
+                    else:
+                        # Confirm discard
+                        confirm = input(f"\nAre you sure you want to discard {amount} {item_name}? (y/n): ").strip().lower()
+                        if confirm == 'y':
+                            player.inventory[item_name] -= amount
+                            if player.inventory[item_name] == 0:
+                                del player.inventory[item_name]
+                            print(f"\n✓ Discarded {amount} {item_name}")
+                        else:
+                            print("\n✗ Discard cancelled")
+
+                    input("\nPress Enter to continue...")
+
+                elif discard_num == 2:
+                    # Discard all
+                    confirm = input(f"\nAre you sure you want to discard ALL {current_qty} {item_name}? (y/n): ").strip().lower()
+                    if confirm == 'y':
+                        del player.inventory[item_name]
+                        print(f"\n✓ Discarded all {current_qty} {item_name}")
+                    else:
+                        print("\n✗ Discard cancelled")
+
+                    input("\nPress Enter to continue...")
+                else:
+                    print("\n✗ Invalid option!")
+            else:
+                print("\n✗ Invalid item number!")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+
+
 def employee_menu(game_state: GameState, player: Player) -> None:
     """Menu for hiring marketing agents."""
 
@@ -6182,12 +6282,13 @@ def main_menu(game_state: GameState) -> bool:
         print("  7. Store Upgrades")
         print("  8. Loans")
         print("  9. Warehouse Management")
+        print(" 10. Discard Inventory")
         print("  c. Customer Forecast")
         print("  s. Save Game")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-9, c, s): ").strip().lower()
+            choice = input("\nSelect option (0-10, c, s): ").strip().lower()
 
             # Handle customer forecast
             if choice == 'c':
@@ -6252,6 +6353,8 @@ def main_menu(game_state: GameState) -> bool:
                 loans_menu(game_state, player)
             elif choice_num == 9:
                 warehouse_menu(game_state, player)
+            elif choice_num == 10:
+                discard_inventory_menu(game_state, player)
             else:
                 print("\n✗ Invalid option!")
 
