@@ -1,6 +1,6 @@
 # econ_sim.py
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import random
 import json
 import signal
@@ -2335,7 +2335,7 @@ def assign_customers_by_cas(
     market_prices: Dict[str, float],
     items_by_name: Dict[str, Item],
     all_available_items: List[Item]
-) -> tuple[Dict[str, List[Customer]], Dict[str, Dict[str, Any]]]:
+) -> Tuple[Dict[str, List[Customer]], Dict[str, Dict[str, Any]]]:
     """
     Assign customers to players based on proportional CAS distribution.
 

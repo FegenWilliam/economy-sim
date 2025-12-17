@@ -1,0 +1,3 @@
+# Python 3.6 compatibility
+# Install dataclasses backport for Python < 3.7
+dataclasses;python_version<'3.7'
