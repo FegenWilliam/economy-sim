@@ -2204,18 +2204,43 @@ def get_special_customer_count(day: int) -> int:
         return 2 + ((day - 30) // 30)
 
 
+def can_special_customer_type_spawn(customer_type: str, items: List[Item]) -> bool:
+    """
+    Check if a special customer type can spawn based on available items.
+
+    Some customer types require specific items/categories to exist:
+    - Gamer: requires at least one Gaming category item
+    - Christmas Dad: requires both "Gaming Console" and "4K TV"
+    """
+    if customer_type == "gamer":
+        # Check if any Gaming category items exist
+        return any(item.category == "Gaming" for item in items)
+
+    elif customer_type == "christmas_dad":
+        # Check if both required items exist
+        item_names = {item.name for item in items}
+        return "Gaming Console" in item_names and "4K TV" in item_names
+
+    # All other customer types can always spawn
+    return True
+
+
 def get_weighted_special_customer_type() -> str:
     """
     Returns a weighted random special customer type.
 
-    Spawn rates:
-    - Hoarder: 30%
-    - Shoplifter: 15%
-    - Party Prep Mom: 30%
-    - Gamer: 10%
-    - Christmas Dad: 10%
-    - Lottery Winner: 4%
-    - Youtuber: 1%
+    These are relative weights, not spawn probabilities. Special customers
+    spawn every day (based on get_special_customer_count), and these weights
+    determine which types are selected.
+
+    Selection weights:
+    - Hoarder: 30 (most common)
+    - Shoplifter: 15
+    - Party Prep Mom: 30 (most common)
+    - Gamer: 10
+    - Christmas Dad: 10
+    - Lottery Winner: 4 (rare)
+    - Youtuber: 1 (very rare)
     """
     weights = {
         "hoarder": 0.30,
@@ -2959,20 +2984,40 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         youtuber_spawned = False
 
         for i in range(special_customer_count):
-            # Get weighted special customer type
-            special_type = get_weighted_special_customer_type()
+            # Get weighted special customer type, with validation for item requirements
+            max_attempts = 20  # Prevent infinite loop
+            special_type = None
 
-            # Enforce max 1 lottery winner and 1 youtuber per day
-            if special_type == "lottery_winner":
-                if lottery_winner_spawned:
-                    special_type = "hoarder"  # Fallback to hoarder
+            for _ in range(max_attempts):
+                candidate_type = get_weighted_special_customer_type()
+
+                # Check if this customer type can spawn (has required items)
+                if not can_special_customer_type_spawn(candidate_type, game_state.items):
+                    continue  # Try again with different type
+
+                # Enforce max 1 lottery winner and 1 youtuber per day
+                if candidate_type == "lottery_winner":
+                    if lottery_winner_spawned:
+                        continue  # Try again
+                    else:
+                        lottery_winner_spawned = True
+                        special_type = candidate_type
+                        break
+                elif candidate_type == "youtuber":
+                    if youtuber_spawned:
+                        continue  # Try again
+                    else:
+                        youtuber_spawned = True
+                        special_type = candidate_type
+                        break
                 else:
-                    lottery_winner_spawned = True
-            elif special_type == "youtuber":
-                if youtuber_spawned:
-                    special_type = "hoarder"  # Fallback to hoarder
-                else:
-                    youtuber_spawned = True
+                    # Valid type that can spawn
+                    special_type = candidate_type
+                    break
+
+            # If we couldn't find a valid type after max_attempts, skip this spawn
+            if special_type is None:
+                continue
 
             customer = Customer(name=f"Special_{i+1}", customer_type=special_type, day=game_state.day)
             special_customers.append(customer)
@@ -2981,6 +3026,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         for customer in special_customers:
             # Build items dictionary for quick lookup
             items_by_name = {item.name: item for item in game_state.items}
+
+            # Format customer type for display
+            customer_type_display = customer.customer_type.replace("_", " ").title()
 
             # Shoplifter has special handling (steals items)
             if customer.customer_type == "shoplifter":
@@ -3011,18 +3059,41 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
                         if stolen_items:
                             special_customer_events.append((
-                                "Shoplifter",
+                                customer_type_display,
                                 target.name,
                                 f"Stole: {', '.join(stolen_items)}"
                             ))
                             # Apply reputation penalty for theft
                             daily_reputation_changes[target.name] -= 5
+                        else:
+                            special_customer_events.append((
+                                customer_type_display,
+                                target.name,
+                                "Visited but found nothing to steal"
+                            ))
+                    else:
+                        special_customer_events.append((
+                            customer_type_display,
+                            target.name,
+                            "Visited but found nothing to steal"
+                        ))
+                else:
+                    special_customer_events.append((
+                        customer_type_display,
+                        "No store",
+                        "Could not find a target"
+                    ))
                 continue
 
             # For other special customers, generate needs
             needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
 
             if not needs:
+                special_customer_events.append((
+                    customer_type_display,
+                    "No store",
+                    "Could not generate shopping needs"
+                ))
                 continue
 
             # Choose supplier using special customer logic
@@ -3031,6 +3102,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             )
 
             if not supplier:
+                special_customer_events.append((
+                    customer_type_display,
+                    "No store",
+                    "Could not find a suitable store"
+                ))
                 continue
 
             # Track purchases
@@ -3062,12 +3138,16 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                             items_bought.append(f"{actual_units_sold}x {need.item_name}")
 
             if items_bought:
-                # Format special customer type for display
-                customer_type_display = customer.customer_type.replace("_", " ").title()
                 special_customer_events.append((
                     customer_type_display,
                     supplier.name,
                     f"Bought: {', '.join(items_bought[:3])}{'...' if len(items_bought) > 3 else ''} (${total_spent:.2f})"
+                ))
+            else:
+                special_customer_events.append((
+                    customer_type_display,
+                    supplier.name,
+                    "Visited but couldn't find desired items"
                 ))
 
     # Step 5.7: Calculate actual profits (Sales - Daily Spending, before wages)
@@ -3159,7 +3239,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # Display special customer events
         if special_customer_events:
-            print(f"\n🌟 Special Customers Today:")
+            print(f"\n🌟 Special Customers Today ({len(special_customer_events)} spawned):")
             for customer_type, target_name, details in special_customer_events:
                 print(f"  {customer_type} → {target_name}: {details}")
 
