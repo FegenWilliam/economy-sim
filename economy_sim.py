@@ -3104,12 +3104,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 for data in per_item_sales[player.name].values()
             )
 
-            print(f"  {player.name}:")
-            print(f"    Sales: ${sales:.2f} | Profit: ${profit:.2f} | Level: {player.store_level} | XP: {player.experience:.0f}/{xp_needed:.0f}")
-            customer_info = f"Regular: {served} (Allocated: {allocated_served}/{allocated_assigned} | Overflow: {overflow_served})"
-            if uncapped_customer_count > 0:
-                customer_info += f" | 💎 Uncapped: {uncapped_served}"
-            print(f"    Customers: {customer_info} | Items Sold: {total_items_sold} | Cash: ${player.cash:.2f}")
+            # Main stats line
+            uncapped_text = f", 💎{uncapped_served}" if uncapped_customer_count > 0 and uncapped_served > 0 else ""
+            level_up_text = f" 🎉LVL{level_ups[player.name]}!" if player.name in level_ups else ""
+            print(f"  {player.name}: Sales ${sales:.2f}, Profit ${profit:.2f}, Lvl {player.store_level} ({player.experience:.0f}/{xp_needed:.0f}XP){level_up_text}, Cust {served} (A:{allocated_served}/{allocated_assigned}, O:{overflow_served}{uncapped_text}), Items {total_items_sold}, Cash ${player.cash:.2f}")
 
             # Show per-item sales breakdown
             if per_item_sales[player.name]:
@@ -3118,19 +3116,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     if data['units_sold'] > 0:
                         items_breakdown.append(f"{item_name}: {data['units_sold']}")
                 if items_breakdown:
-                    print(f"    Items: {', '.join(items_breakdown)}")
-
-            # Show level up if occurred
-            if player.name in level_ups:
-                print(f"    🎉 LEVEL UP! Now level {level_ups[player.name]} (max {player.get_max_products()} products)")
+                    print(f"    Sales: {', '.join(items_breakdown)}")
 
             # Show inventory (end of day)
             if player.inventory:
                 inventory_items = [f"{item}: {qty}" for item, qty in sorted(player.inventory.items())]
-                inventory_str = ", ".join(inventory_items)
-                print(f"    Inventory: {inventory_str}")
-            else:
-                print(f"    Inventory: (empty)")
+                print(f"    Inv: {', '.join(inventory_items)}")
 
             # Show pricing for sold items only
             sold_items = per_item_sales[player.name].keys()
@@ -3140,8 +3131,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     if item_name in player.prices:
                         pricing_items.append(f"{item_name}: ${player.prices[item_name]:.2f}")
                 if pricing_items:
-                    pricing_str = ", ".join(pricing_items)
-                    print(f"    Pricing: {pricing_str}")
+                    print(f"    Price: {', '.join(pricing_items)}")
 
         if unmet_demand > 0:
             print(f"\nUnmet regular demand: {unmet_demand} items")
@@ -3195,6 +3185,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Step 7.8: Apply daily reputation changes with limits and decay
     import math
+
+    # Collect data for table displays
+    reputation_data = []
+    cas_data = []
+
     for player in game_state.players:
         # Apply daily reputation changes from customer interactions
         rep_change = daily_reputation_changes[player.name]
@@ -3243,19 +3238,60 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             fulfillment_data["allocated"] or fulfillment_data["overflow"]
         )
 
-        # Show reputation changes for all players
+        # Collect reputation/fulfillment data for table display
         if show_details:
-            decay_text = f" (decay: -{decay_amount})" if decay_amount > 0 else ""
-            change_text = f" (change: {rep_change:+d}{decay_text})" if (rep_change != 0 or decay_amount > 0) else ""
-            print(f"\n📊 {player.name} Reputation: {player.reputation:.0f}{change_text}")
-            if has_fulfillment_data:
-                fulfillment_summary = format_fulfillment_summary(
-                    player, visit_counts
-                )
-                print(fulfillment_summary)
+            reputation_data.append({
+                'name': player.name,
+                'reputation': player.reputation,
+                'rep_change': rep_change,
+                'decay': decay_amount,
+                'avg_fulfillment': player.average_fulfillment_pct,
+                'allocated_avg': player.allocated_average_fulfillment_pct,
+                'allocated_count': visit_counts["allocated"],
+                'overflow_avg': player.overflow_average_fulfillment_pct,
+                'overflow_count': visit_counts["overflow"],
+                'total_customers': visit_counts["allocated"] + visit_counts["overflow"],
+                'has_fulfillment': has_fulfillment_data
+            })
 
-            # Display CAS breakdown for this player (using pre-shopping data)
-            display_cas_breakdown(player, game_state, cas_breakdowns_pre_shopping.get(player.name))
+            # Collect CAS data (using pre-shopping data)
+            breakdown = cas_breakdowns_pre_shopping.get(player.name)
+            if breakdown:
+                cas_data.append({
+                    'name': player.name,
+                    'reputation': breakdown["reputation"],
+                    'discount_pct': breakdown["total_discount_pct"],
+                    'discount_score': breakdown["discount_score"],
+                    'items_counted': breakdown["items_counted"],
+                    'stability': breakdown["item_stability"],
+                    'marketing': breakdown["marketing_effect"],
+                    'marketing_agents': breakdown["marketing_agents"],
+                    'avail_mult': breakdown["availability_multiplier"],
+                    'avail_pct': breakdown["availability_pct"],
+                    'items_in_stock': breakdown["items_in_stock"],
+                    'total_items': breakdown["total_catalog_items"],
+                    'fulfill_mult': breakdown["fulfillment_multiplier"],
+                    'fulfill_pct': breakdown["fulfillment_pct"],
+                    'final_cas': breakdown["final_cas"]
+                })
+
+    # Display reputation and fulfillment table
+    if show_details and reputation_data:
+        print("\n📊 Reputation & Fulfillment:")
+        for data in reputation_data:
+            decay_text = f" (decay: -{data['decay']})" if data['decay'] > 0 else ""
+            change_text = f" ({data['rep_change']:+d}{decay_text})" if (data['rep_change'] != 0 or data['decay'] > 0) else ""
+            fulfillment_text = ""
+            if data['has_fulfillment']:
+                fulfillment_text = f" | Avg: {data['avg_fulfillment']:.1f}% ({data['total_customers']} cust: Alloc {data['allocated_avg']:.1f}%/{data['allocated_count']}, Ovrf {data['overflow_avg']:.1f}%/{data['overflow_count']})"
+            print(f"  {data['name']}: Rep {data['reputation']:.0f}{change_text}{fulfillment_text}")
+
+    # Display CAS table
+    if show_details and cas_data:
+        print("\n🎯 Customer Attraction Score (CAS):")
+        for data in cas_data:
+            marketing_text = f", Mkt: {data['marketing']:.1f}" if data['marketing'] > 0 else ""
+            print(f"  {data['name']}: CAS={data['final_cas']:.1f} | Rep: {data['reputation']:.0f}, Disc: {data['discount_pct']:.1f}%, Stab: {data['stability']:.1f}{marketing_text}, Avail: {data['avail_mult']:.2f}x ({data['avail_pct']:.0f}%), Fulfill: {data['fulfill_mult']:.2f}x ({data['fulfill_pct']:.0f}%)")
 
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
@@ -3265,6 +3301,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     game_state.day += 1
 
     # Step 9.25: Process pending deliveries for all players
+    delivery_summary = {}  # Track deliveries per player for consolidated output
+
     for player in game_state.players:
         deliveries_to_process = []
         remaining_deliveries = []
@@ -3279,6 +3317,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 remaining_deliveries.append(delivery)
 
         # Process deliveries that have arrived
+        player_deliveries = []
         for delivery in deliveries_to_process:
             item_name, quantity, cost_per_item, delivery_day = delivery
 
@@ -3294,11 +3333,20 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             player.inventory[item_name] = new_total_qty
 
-            if player.is_human and show_details:
-                print(f"\n📦 Delivery arrived for {player.name}: {quantity}x {item_name}")
+            if player.is_human:
+                player_deliveries.append(f"{quantity}x {item_name}")
+
+        # Track deliveries for this player
+        if player.is_human and player_deliveries:
+            delivery_summary[player.name] = player_deliveries
 
         # Update pending deliveries list
         player.pending_deliveries = remaining_deliveries
+
+    # Print consolidated delivery notifications
+    if show_details and delivery_summary:
+        for player_name, deliveries in delivery_summary.items():
+            print(f"\n📦 Deliveries for {player_name}: {', '.join(deliveries)}")
 
     # Step 9.5: Clean up expired vendor partnerships
     for player in game_state.players:
