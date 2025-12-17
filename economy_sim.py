@@ -499,6 +499,13 @@ class Upgrade:
 
 
 @dataclass
+class Warehouse:
+    """Represents a warehouse owned by a player."""
+    level: int = 1  # Warehouse level (1-10), each level adds 500 capacity
+    workers: int = 0  # Number of workers in this warehouse (max 5)
+
+
+@dataclass
 class Loan:
     """Represents a loan taken by a player."""
     lender_name: str  # Name of the lending institution
@@ -534,6 +541,7 @@ class Player:
     price_history: Dict[str, float] = field(default_factory=dict)  # item_name -> previous_price (for consistency tracking)
     pending_deliveries: List[tuple] = field(default_factory=list)  # List of (item_name, quantity, cost_per_item, delivery_day) for orders with lead time
     loans: List['Loan'] = field(default_factory=list)  # Active loans taken by the player
+    warehouses: List['Warehouse'] = field(default_factory=lambda: [Warehouse()])  # List of warehouses (starts with 1)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -598,10 +606,17 @@ class Player:
 
     def get_max_inventory(self) -> int:
         """Get max inventory capacity (total items that can be stored)."""
-        base = 500 + ((self.store_level - 1) * 100)  # Base 500 items + 100 per level
+        # Warehouse capacity: each warehouse level 1 = 500, +500 per upgrade (level 10 = 5000)
+        warehouse_capacity = sum(warehouse.level * 500 for warehouse in self.warehouses)
+
+        # Upgrade bonuses
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
-        warehouse_bonus = self.restockers * 300  # Each warehouse worker adds 300 capacity
-        return int(base + bonus + warehouse_bonus)
+
+        # Warehouse workers add capacity
+        total_workers = sum(warehouse.workers for warehouse in self.warehouses)
+        worker_bonus = total_workers * 300
+
+        return int(warehouse_capacity + bonus + worker_bonus)
 
     def get_xp_multiplier(self) -> float:
         """Get XP gain multiplier from upgrades."""
@@ -692,21 +707,36 @@ class Player:
             return True
         return False
 
+    def hire_warehouse_worker(self, warehouse_index: int) -> bool:
+        """
+        Hire a warehouse worker for a specific warehouse.
+        - Cost: $500 upfront, $500/month
+        - Each warehouse can have at most 5 workers
+        - Adds +300 max inventory per worker
+        Returns True if successful, False if not enough cash or warehouse is full.
+        """
+        if warehouse_index < 0 or warehouse_index >= len(self.warehouses):
+            return False
+
+        warehouse = self.warehouses[warehouse_index]
+        if warehouse.workers >= 5:
+            return False
+
+        HIRING_COST = 500.0
+        if self.cash < HIRING_COST:
+            return False
+
+        self.cash -= HIRING_COST
+        warehouse.workers += 1
+        return True
+
     def hire_employee(self, employee_type: str) -> bool:
         """
         Hire an employee.
-        - Warehouse Worker: $1000 upfront, $1000/month, adds +300 max inventory
         - Marketing Agent: 5x scaling cost (1k, 5k, 25k...), $1000/month, requires level 5+
         Returns True if successful, False if not enough cash or requirements not met.
         """
-        if employee_type == "restocker":
-            HIRING_COST = 1000.0
-            if self.cash < HIRING_COST:
-                return False
-            self.cash -= HIRING_COST
-            self.restockers += 1
-            return True
-        elif employee_type == "marketing_agent":
+        if employee_type == "marketing_agent":
             # Level 5+ required
             if self.store_level < 5:
                 return False
@@ -722,7 +752,9 @@ class Player:
 
     def pay_monthly_wages(self, current_day: int) -> float:
         """
-        Pay monthly wages for all employees ($1000 per employee every 30 days).
+        Pay monthly wages for all employees every 30 days.
+        - Warehouse workers: $500/month each
+        - Marketing agents: $1000/month each
         Only pays if 30 days have passed since last payment.
         Returns total wages paid (0 if not a payment day).
         """
@@ -730,22 +762,77 @@ class Player:
         if current_day - self.last_wage_payment_day < 30:
             return 0.0
 
-        total_employees = self.restockers + self.marketing_agents
+        # Calculate total warehouse workers
+        total_warehouse_workers = sum(warehouse.workers for warehouse in self.warehouses)
+
+        # Total employees
+        total_employees = total_warehouse_workers + self.marketing_agents
 
         # No wages if no employees
         if total_employees == 0:
             return 0.0
 
-        monthly_wage_per_employee = 1000.0
+        # Warehouse workers: $500/month
+        warehouse_worker_wage = 500.0
+        # Marketing agents: $1000/month
+        marketing_agent_wage = 1000.0
 
-        # Apply wage reduction upgrades (still applies to monthly wage)
+        # Apply wage reduction upgrades (applies to all wages)
         wage_reduction = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "wage_reduction")
-        actual_wage = max(0, monthly_wage_per_employee - wage_reduction)
 
-        wages = total_employees * actual_wage
+        actual_worker_wage = max(0, warehouse_worker_wage - wage_reduction)
+        actual_agent_wage = max(0, marketing_agent_wage - wage_reduction)
+
+        wages = (total_warehouse_workers * actual_worker_wage) + (self.marketing_agents * actual_agent_wage)
         self.cash -= wages
         self.last_wage_payment_day = current_day
         return wages
+
+    def get_total_warehouse_level(self) -> int:
+        """Get total warehouse level across all warehouses."""
+        return sum(warehouse.level for warehouse in self.warehouses)
+
+    def buy_warehouse(self) -> bool:
+        """
+        Buy a new warehouse.
+        - Cost: $20000 * number of warehouses already owned
+        - Max 4 warehouses per player
+        Returns True if successful, False otherwise.
+        """
+        if len(self.warehouses) >= 4:
+            return False
+
+        cost = 20000.0 * len(self.warehouses)
+        if self.cash < cost:
+            return False
+
+        self.cash -= cost
+        self.warehouses.append(Warehouse())
+        return True
+
+    def upgrade_warehouse(self, warehouse_index: int) -> bool:
+        """
+        Upgrade a warehouse by one level.
+        - Cost: $5000 * current total warehouse level
+        - Max level per warehouse: 10
+        Returns True if successful, False otherwise.
+        """
+        if warehouse_index < 0 or warehouse_index >= len(self.warehouses):
+            return False
+
+        warehouse = self.warehouses[warehouse_index]
+        if warehouse.level >= 10:
+            return False
+
+        total_level = self.get_total_warehouse_level()
+        cost = 5000.0 * total_level
+
+        if self.cash < cost:
+            return False
+
+        self.cash -= cost
+        warehouse.level += 1
+        return True
 
     def set_price(self, item_name: str, price: float) -> None:
         """
@@ -5101,10 +5188,155 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
             print("\n✗ Invalid input!")
 
 
+def warehouse_menu(game_state: GameState, player: Player) -> None:
+    """Menu for managing warehouses, upgrades, and workers."""
+    WORKER_HIRE_COST = 500.0
+    WORKER_MONTHLY_WAGE = 500.0
+
+    while True:
+        print("\n" + "=" * 70)
+        print("WAREHOUSE MANAGEMENT MENU")
+        print("=" * 70)
+        print(f"\nYour Cash: ${player.cash:.2f}")
+        print(f"Current Inventory: {sum(player.inventory.values())}/{player.get_max_inventory()} items")
+        print(f"\nWarehouses: {len(player.warehouses)}/4")
+
+        # Display warehouse information
+        print("\n" + "-" * 70)
+        total_workers = 0
+        for i, warehouse in enumerate(player.warehouses):
+            capacity = warehouse.level * 500
+            print(f"  Warehouse {i + 1}: Level {warehouse.level}/10 | {warehouse.workers}/5 workers | Capacity: {capacity}")
+            total_workers += warehouse.workers
+
+        print("-" * 70)
+
+        # Calculate wages
+        wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
+        actual_worker_wage = max(0, WORKER_MONTHLY_WAGE - wage_reduction)
+        marketing_agent_wage = max(0, 1000.0 - wage_reduction)
+        total_employees = total_workers + player.marketing_agents
+        total_monthly_wages = (total_workers * actual_worker_wage) + (player.marketing_agents * marketing_agent_wage)
+
+        print(f"\nEmployees:")
+        print(f"  Warehouse Workers: {total_workers} (${actual_worker_wage:.2f}/month each)")
+        print(f"  Marketing Agents: {player.marketing_agents} (${marketing_agent_wage:.2f}/month each)")
+        print(f"  Total monthly wages: ${total_monthly_wages:.2f}")
+
+        # Show days until next wage payment
+        days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
+        if total_employees > 0:
+            print(f"  Next wage payment: Day {player.last_wage_payment_day + 30} ({days_until_payment} days)")
+
+        # Calculate costs
+        total_level = player.get_total_warehouse_level()
+        upgrade_cost = 5000.0 * total_level
+        new_warehouse_cost = 20000.0 * len(player.warehouses)
+
+        print("\nOptions:")
+        print(f"  1. Upgrade Warehouse (Cost: ${upgrade_cost:.2f})")
+        if len(player.warehouses) < 4:
+            print(f"  2. Buy New Warehouse (Cost: ${new_warehouse_cost:.2f})")
+        else:
+            print(f"  2. Buy New Warehouse (Max 4 warehouses reached)")
+        print(f"  3. Hire Warehouse Worker (Cost: ${WORKER_HIRE_COST:.2f})")
+        print("  0. Back to Main Menu")
+
+        try:
+            choice = input("\nSelect option (0-3): ")
+            choice_num = int(choice)
+
+            if choice_num == 0:
+                break
+            elif choice_num == 1:
+                # Upgrade warehouse submenu
+                print("\nWhich warehouse to upgrade?")
+                for i, warehouse in enumerate(player.warehouses):
+                    status = f"(Level {warehouse.level}/10)" if warehouse.level < 10 else "(Max Level)"
+                    print(f"  {i + 1}. Warehouse {i + 1} {status}")
+                print("  0. Cancel")
+
+                try:
+                    w_choice = input("\nSelect warehouse (0-{}): ".format(len(player.warehouses)))
+                    w_num = int(w_choice)
+
+                    if w_num == 0:
+                        continue
+                    if 1 <= w_num <= len(player.warehouses):
+                        warehouse = player.warehouses[w_num - 1]
+                        if warehouse.level >= 10:
+                            print(f"\n✗ Warehouse {w_num} is already at max level (10)")
+                        elif player.cash < upgrade_cost:
+                            print(f"\n✗ Not enough cash! Need ${upgrade_cost:.2f}, have ${player.cash:.2f}")
+                        else:
+                            if player.upgrade_warehouse(w_num - 1):
+                                print(f"\n✓ Upgraded Warehouse {w_num} to Level {warehouse.level}")
+                                print(f"  Capacity increased to {warehouse.level * 500} items")
+                                next_cost = 5000.0 * player.get_total_warehouse_level()
+                                print(f"  Next upgrade will cost: ${next_cost:.2f}")
+                            else:
+                                print("\n✗ Failed to upgrade warehouse")
+                    else:
+                        print("\n✗ Invalid warehouse number!")
+                except (ValueError, IndexError):
+                    print("\n✗ Invalid input!")
+
+            elif choice_num == 2:
+                if len(player.warehouses) >= 4:
+                    print("\n✗ Maximum warehouses (4) reached!")
+                elif player.cash < new_warehouse_cost:
+                    print(f"\n✗ Not enough cash! Need ${new_warehouse_cost:.2f}, have ${player.cash:.2f}")
+                else:
+                    if player.buy_warehouse():
+                        print(f"\n✓ Bought new warehouse for ${new_warehouse_cost:.2f}")
+                        print(f"  Total warehouses: {len(player.warehouses)}/4")
+                        next_cost = 20000.0 * len(player.warehouses)
+                        print(f"  Next warehouse will cost: ${next_cost:.2f}")
+                    else:
+                        print("\n✗ Failed to buy warehouse")
+
+            elif choice_num == 3:
+                # Hire worker submenu
+                print("\nWhich warehouse to hire for?")
+                for i, warehouse in enumerate(player.warehouses):
+                    status = f"({warehouse.workers}/5 workers)" if warehouse.workers < 5 else "(Full - 5/5)"
+                    print(f"  {i + 1}. Warehouse {i + 1} {status}")
+                print("  0. Cancel")
+
+                try:
+                    w_choice = input("\nSelect warehouse (0-{}): ".format(len(player.warehouses)))
+                    w_num = int(w_choice)
+
+                    if w_num == 0:
+                        continue
+                    if 1 <= w_num <= len(player.warehouses):
+                        warehouse = player.warehouses[w_num - 1]
+                        if warehouse.workers >= 5:
+                            print(f"\n✗ Warehouse {w_num} is full (5/5 workers)")
+                        elif player.cash < WORKER_HIRE_COST:
+                            print(f"\n✗ Not enough cash! Need ${WORKER_HIRE_COST:.2f}, have ${player.cash:.2f}")
+                        else:
+                            if player.hire_warehouse_worker(w_num - 1):
+                                print(f"\n✓ Hired worker for Warehouse {w_num}")
+                                print(f"  Cost: ${WORKER_HIRE_COST:.2f}")
+                                print(f"  Workers: {warehouse.workers}/5")
+                                print(f"  New max inventory: {player.get_max_inventory()} items")
+                            else:
+                                print("\n✗ Failed to hire worker")
+                    else:
+                        print("\n✗ Invalid warehouse number!")
+                except (ValueError, IndexError):
+                    print("\n✗ Invalid input!")
+
+            else:
+                print("\n✗ Invalid option!")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+
+
 def employee_menu(game_state: GameState, player: Player) -> None:
-    """Menu for hiring employees."""
-    RESTOCKER_COST = 1000.0
-    BASE_MONTHLY_WAGE = 1000.0
+    """Menu for hiring marketing agents."""
 
     while True:
         print("\n" + "=" * 60)
@@ -5113,19 +5345,25 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         print(f"\nYour Cash: ${player.cash:.2f}")
         print(f"Store Level: {player.store_level}")
         print(f"\nCurrent Employees:")
-        print(f"  Warehouse Workers: {player.restockers} (Max inventory: {player.get_max_inventory()} items)")
         print(f"  Marketing Agents: {player.marketing_agents} (Boost customer attraction)")
-        total_employees = player.restockers + player.marketing_agents
 
-        # Calculate actual wage with upgrades
+        # Total employees including warehouse workers
+        total_warehouse_workers = sum(w.workers for w in player.warehouses)
+        total_employees = total_warehouse_workers + player.marketing_agents
+
+        # Calculate actual wages with upgrades
         wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
-        actual_wage = max(0, BASE_MONTHLY_WAGE - wage_reduction)
-        print(f"  Total monthly wages: ${total_employees * actual_wage:.2f}")
+        worker_wage = max(0, 500.0 - wage_reduction)
+        agent_wage = max(0, 1000.0 - wage_reduction)
+        total_monthly_wages = (total_warehouse_workers * worker_wage) + (player.marketing_agents * agent_wage)
+
+        print(f"  Warehouse Workers (in Warehouse menu): {total_warehouse_workers}")
+        print(f"  Total monthly wages: ${total_monthly_wages:.2f}")
 
         if wage_reduction > 0:
-            print(f"\nMonthly Wage: ${actual_wage:.2f} per employee (reduced from ${BASE_MONTHLY_WAGE:.2f})")
+            print(f"\nMonthly Wage per Agent: ${agent_wage:.2f} (reduced from $1000.00)")
         else:
-            print(f"\nMonthly Wage: ${actual_wage:.2f} per employee")
+            print(f"\nMonthly Wage per Agent: ${agent_wage:.2f}")
 
         # Show days until next wage payment
         days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
@@ -5137,30 +5375,20 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         marketing_cost = 1000.0 * (5 ** player.marketing_agents)
 
         print("\nOptions:")
-        print(f"  1. Hire Warehouse Worker (+300 max inventory) - ${RESTOCKER_COST:.2f}")
+        print("  [For warehouse workers, use: 9. Warehouse Management]")
         if player.store_level >= 5:
-            print(f"  2. Hire Marketing Agent (Boost CAS) - ${marketing_cost:.2f}")
+            print(f"  1. Hire Marketing Agent (Boost CAS) - ${marketing_cost:.2f}")
         else:
-            print(f"  2. Hire Marketing Agent (Requires Level 5+)")
+            print(f"  1. Hire Marketing Agent (Requires Level 5+)")
         print("  0. Back to Main Menu")
 
         try:
-            choice = input("\nSelect option (0-2): ")
+            choice = input("\nSelect option (0-1): ")
             choice_num = int(choice)
 
             if choice_num == 0:
                 break
             elif choice_num == 1:
-                if player.cash < RESTOCKER_COST:
-                    print(f"\n✗ Not enough cash! Need ${RESTOCKER_COST:.2f}, have ${player.cash:.2f}")
-                else:
-                    success = player.hire_employee("restocker")
-                    if success:
-                        print(f"\n✓ Hired 1 warehouse worker for ${RESTOCKER_COST:.2f}")
-                        print(f"  New max inventory: {player.get_max_inventory()} items")
-                    else:
-                        print("\n✗ Failed to hire warehouse worker")
-            elif choice_num == 2:
                 if player.store_level < 5:
                     print(f"\n✗ Requires Store Level 5+! (Current: {player.store_level})")
                 elif player.cash < marketing_cost:
@@ -5910,7 +6138,9 @@ def main_menu(game_state: GameState) -> bool:
         print(f"MAIN MENU - Day {game_state.day}")
         print("=" * 50)
         print(f"Your Cash: ${player.cash:.2f}")
-        print(f"Employees: {player.restockers} warehouse workers")
+        total_workers = sum(w.workers for w in player.warehouses)
+        print(f"Warehouses: {len(player.warehouses)}/4 | Workers: {total_workers} | Capacity: {player.get_max_inventory()}")
+        print(f"Marketing Agents: {player.marketing_agents}")
 
         # Show loan debt if any
         if player.loans:
@@ -5926,12 +6156,13 @@ def main_menu(game_state: GameState) -> bool:
         print("  6. View Your Store Status")
         print("  7. Store Upgrades")
         print("  8. Loans")
+        print("  9. Warehouse Management")
         print("  c. Customer Forecast")
         print("  s. Save Game")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-8, c, s): ").strip().lower()
+            choice = input("\nSelect option (0-9, c, s): ").strip().lower()
 
             # Handle customer forecast
             if choice == 'c':
@@ -5994,6 +6225,8 @@ def main_menu(game_state: GameState) -> bool:
                 upgrades_menu(game_state, player)
             elif choice_num == 8:
                 loans_menu(game_state, player)
+            elif choice_num == 9:
+                warehouse_menu(game_state, player)
             else:
                 print("\n✗ Invalid option!")
 
@@ -6073,6 +6306,26 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "allocated_average_fulfillment_pct": player.allocated_average_fulfillment_pct,
                 "overflow_average_fulfillment_pct": player.overflow_average_fulfillment_pct,
                 "pending_deliveries": player.pending_deliveries,
+                "warehouses": [
+                    {
+                        "level": warehouse.level,
+                        "workers": warehouse.workers,
+                    }
+                    for warehouse in player.warehouses
+                ],
+                "loans": [
+                    {
+                        "lender_name": loan.lender_name,
+                        "principal": loan.principal,
+                        "remaining_balance": loan.remaining_balance,
+                        "interest_rate": loan.interest_rate,
+                        "early_interest_rate": loan.early_interest_rate,
+                        "due_day": loan.due_day,
+                        "taken_day": loan.taken_day,
+                    }
+                    for loan in player.loans
+                ],
+                "price_history": player.price_history,
             }
             for player in game_state.players
         ],
@@ -6173,6 +6426,32 @@ def deserialize_game_state(data: dict) -> GameState:
         # Convert buy_orders back to lists (needed for append operations)
         buy_orders = {k: list(v) for k, v in player_data["buy_orders"].items()}
 
+        # Recreate warehouses
+        warehouses = [
+            Warehouse(
+                level=warehouse_data["level"],
+                workers=warehouse_data["workers"],
+            )
+            for warehouse_data in player_data.get("warehouses", [Warehouse()])
+        ]
+        # Ensure at least 1 warehouse for backward compatibility
+        if not warehouses:
+            warehouses = [Warehouse()]
+
+        # Recreate loans
+        loans = [
+            Loan(
+                lender_name=loan_data["lender_name"],
+                principal=loan_data["principal"],
+                remaining_balance=loan_data["remaining_balance"],
+                interest_rate=loan_data["interest_rate"],
+                early_interest_rate=loan_data["early_interest_rate"],
+                due_day=loan_data["due_day"],
+                taken_day=loan_data["taken_day"],
+            )
+            for loan_data in player_data.get("loans", [])
+        ]
+
         player = Player(
             name=player_data["name"],
             cash=player_data["cash"],
@@ -6193,6 +6472,9 @@ def deserialize_game_state(data: dict) -> GameState:
             allocated_average_fulfillment_pct=player_data.get("allocated_average_fulfillment_pct", 70.0),
             overflow_average_fulfillment_pct=player_data.get("overflow_average_fulfillment_pct", 70.0),
             pending_deliveries=[tuple(delivery) for delivery in player_data.get("pending_deliveries", [])],
+            warehouses=warehouses,
+            loans=loans,
+            price_history=player_data.get("price_history", {}),
         )
         players.append(player)
 
