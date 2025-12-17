@@ -476,9 +476,9 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, List[tuple]] = field(default_factory=dict)  # item_name -> [(quantity, vendor_name), ...] (up to 3 vendors)
-    restockers: int = 0  # Warehouse Workers (renamed in v2.0): Each adds +300 max inventory capacity
+    restockers: int = 0  # Warehouse Workers: Each adds +300 max inventory capacity
     marketing_agents: int = 0  # Marketing agents boost customer attraction
-    store_level: int = 1  # Limits how many different products can be stocked (starts at 3)
+    store_level: int = 1  # Store level (affects inventory capacity)
     experience: float = 0.0  # XP gained from profits
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
     purchased_upgrades: List['Upgrade'] = field(default_factory=list)  # Upgrades bought by this player
@@ -553,20 +553,12 @@ class Player:
         """Get total quantity across all vendors for an item."""
         return sum(q for q, v in self.get_buy_order(item_name))
 
-    def get_max_products(self) -> int:
-        """DEPRECATED: No longer enforced in v2.0. Kept for backward compatibility."""
-        return 999999  # Effectively unlimited
-
     def get_max_inventory(self) -> int:
         """Get max inventory capacity (total items that can be stored)."""
         base = 500 + ((self.store_level - 1) * 100)  # Base 500 items + 100 per level
         bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
-        warehouse_bonus = self.restockers * 300  # Each warehouse worker adds 300 capacity (renamed from restocker in v2.0)
+        warehouse_bonus = self.restockers * 300  # Each warehouse worker adds 300 capacity
         return int(base + bonus + warehouse_bonus)
-
-    def get_max_items_per_day(self) -> int:
-        """DEPRECATED: Use get_max_inventory() instead. Kept for backward compatibility."""
-        return self.get_max_inventory()
 
     def get_xp_multiplier(self) -> float:
         """Get XP gain multiplier from upgrades."""
@@ -660,11 +652,11 @@ class Player:
     def hire_employee(self, employee_type: str) -> bool:
         """
         Hire an employee.
-        - Warehouse Worker (restocker): $1000 upfront, $1000/month, adds +300 max inventory
+        - Warehouse Worker: $1000 upfront, $1000/month, adds +300 max inventory
         - Marketing Agent: 5x scaling cost (1k, 5k, 25k...), $1000/month, requires level 5+
         Returns True if successful, False if not enough cash or requirements not met.
         """
-        if employee_type == "restocker":  # Keep "restocker" for backward compatibility
+        if employee_type == "restocker":
             HIRING_COST = 1000.0
             if self.cash < HIRING_COST:
                 return False
@@ -1492,7 +1484,7 @@ class Customer:
 
 @dataclass
 class GameConfig:
-    """Configuration for the economic simulation (v2.0)."""
+    """Configuration for the economic simulation."""
     starting_cash: float = 10000.0
     num_days: int = 30
     customers_per_day: int = 10
@@ -2053,7 +2045,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     - VIP Goods Co. (high-end items $200+) falls back to Universal Supply Corp.
     - Other vendors fall back to Budget Goods Ltd.
 
-    In v2.0+: Respects max inventory capacity. Buy orders have no per-day limit,
+    Respects max inventory capacity. Buy orders have no per-day limit,
     but purchases stop when inventory would exceed capacity or money runs out.
 
     Returns a dictionary of items purchased: {item_name: quantity_bought}
@@ -3481,7 +3473,7 @@ def calculate_item_stability(player: Player, market_prices: Dict[str, float], it
     """
     Calculate item stability score to reward pricing close to market price and consistent pricing.
 
-    Formula (v2.0):
+    Formula:
     For each item with stock:
     1. Price proximity score:
        - Starts at 5 if at exact market price (0% difference)
@@ -3515,7 +3507,7 @@ def calculate_item_stability(player: Player, market_prices: Dict[str, float], it
         # Calculate price difference percentage
         price_diff_pct = abs((player_price - market_price) / market_price) * 100
 
-        # Calculate proximity score (v2.0: 5 at market price, -1 per 1% difference)
+        # Calculate proximity score: 5 at market price, -1 per 1% difference
         proximity_score = max(0, 5 - price_diff_pct)
 
         # Calculate consistency bonus
@@ -3754,7 +3746,7 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
     print(f"Cash: ${player.cash:.2f}")
 
     xp_needed = player.get_xp_for_next_level()
-    print(f"\nStore Level: {player.store_level} (Max {player.get_max_products()} different products)")
+    print(f"\nStore Level: {player.store_level}")
     print(f"Experience: {player.experience:.0f}/{xp_needed:.0f} XP")
 
     print(f"\nEmployees:")
@@ -3766,7 +3758,9 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
     actual_wage = max(0, monthly_wage - wage_reduction)
     print(f"  Monthly wages: ${total_employees * actual_wage:.2f} (${actual_wage:.2f}/employee)")
 
-    print(f"\nInventory ({len([i for i, q in player.inventory.items() if q > 0])}/{player.get_max_products()} products):")
+    total_items = sum(player.inventory.values())
+    num_products = len([i for i, q in player.inventory.items() if q > 0])
+    print(f"\nInventory ({total_items}/{player.get_max_inventory()} items, {num_products} different products):")
     if player.inventory:
         for item_name, quantity in player.inventory.items():
             if quantity > 0:
@@ -4190,24 +4184,6 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                                     input("Press Enter to continue...")
                                                     continue
 
-                                                # Check product limit
-                                                products_with_orders = 0
-                                                for check_item in game_state.items:
-                                                    check_orders = player.get_buy_order(check_item.name)
-                                                    if check_item.name == item.name:
-                                                        # This item will have an order after we add
-                                                        if len(check_orders) > 0 or quantity > 0:
-                                                            products_with_orders += 1
-                                                    else:
-                                                        if len(check_orders) > 0:
-                                                            products_with_orders += 1
-
-                                                max_products = player.get_max_products()
-                                                if products_with_orders > max_products:
-                                                    print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
-                                                    input("Press Enter to continue...")
-                                                    continue
-
                                                 success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
                                                 if success:
                                                     print(f"\n✓ Added: {quantity} {item.name} from {selected_vendor.name}")
@@ -4310,23 +4286,6 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                                         # Check minimum purchase
                                         if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
                                             print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
-                                            continue
-
-                                        # Check product limit
-                                        products_with_orders = 0
-                                        for check_item in game_state.items:
-                                            check_orders = player.get_buy_order(check_item.name)
-                                            if check_item.name == item.name:
-                                                # This item will have an order after we add
-                                                if len(check_orders) > 0 or vendors_added > 0:
-                                                    products_with_orders += 1
-                                            else:
-                                                if len(check_orders) > 0:
-                                                    products_with_orders += 1
-
-                                        max_products = player.get_max_products()
-                                        if products_with_orders > max_products:
-                                            print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
                                             continue
 
                                         success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
@@ -4674,24 +4633,6 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                                             input("Press Enter to continue...")
                                             continue
 
-                                        # Check product limit
-                                        products_with_orders = 0
-                                        for check_item in game_state.items:
-                                            check_orders = player.get_buy_order(check_item.name)
-                                            if check_item.name == item.name:
-                                                # This item will have an order after we add
-                                                if len(check_orders) > 0 or quantity > 0:
-                                                    products_with_orders += 1
-                                            else:
-                                                if len(check_orders) > 0:
-                                                    products_with_orders += 1
-
-                                        max_products = player.get_max_products()
-                                        if products_with_orders > max_products:
-                                            print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
-                                            input("Press Enter to continue...")
-                                            continue
-
                                         success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
                                         if success:
                                             print(f"\n✓ Added: {quantity} {item.name} from {selected_vendor.name}")
@@ -4793,23 +4734,6 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
                                 # Check minimum purchase
                                 if selected_vendor.min_purchase is not None and quantity < selected_vendor.min_purchase:
                                     print(f"\n✗ {selected_vendor.name} requires minimum {selected_vendor.min_purchase} units")
-                                    continue
-
-                                # Check product limit
-                                products_with_orders = 0
-                                for check_item in game_state.items:
-                                    check_orders = player.get_buy_order(check_item.name)
-                                    if check_item.name == item.name:
-                                        # This item will have an order after we add
-                                        if len(check_orders) > 0 or vendors_added > 0:
-                                            products_with_orders += 1
-                                    else:
-                                        if len(check_orders) > 0:
-                                            products_with_orders += 1
-
-                                max_products = player.get_max_products()
-                                if products_with_orders > max_products:
-                                    print(f"\n✗ Exceeded product limit! Your store can only stock {max_products} different products.")
                                     continue
 
                                 success = player.add_vendor_to_buy_order(item.name, quantity, selected_vendor.name)
