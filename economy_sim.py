@@ -499,6 +499,18 @@ class Upgrade:
 
 
 @dataclass
+class Loan:
+    """Represents a loan taken by a player."""
+    lender_name: str  # Name of the lending institution
+    principal: float  # Original loan amount
+    remaining_balance: float  # Current amount owed (principal + interest)
+    interest_rate: float  # Interest rate (as decimal, e.g., 0.10 for 10%)
+    early_interest_rate: float  # Reduced interest rate for early payoff (as decimal)
+    due_day: int  # Game day when loan must be paid
+    taken_day: int  # Game day when loan was taken
+
+
+@dataclass
 class Player:
     """Represents a company / player in the economic simulation."""
     name: str
@@ -521,6 +533,7 @@ class Player:
     vendor_partnership_expiration: Dict[str, int] = field(default_factory=dict)  # upgrade_name -> expiration_day (for temporary vendor partnerships)
     price_history: Dict[str, float] = field(default_factory=dict)  # item_name -> previous_price (for consistency tracking)
     pending_deliveries: List[tuple] = field(default_factory=list)  # List of (item_name, quantity, cost_per_item, delivery_day) for orders with lead time
+    loans: List['Loan'] = field(default_factory=list)  # Active loans taken by the player
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -1686,10 +1699,10 @@ def create_vendors() -> List[Vendor]:
         lead_time=0
     ))
 
-    # Vendor 3: Universal Supply Corp. - 105% of market price, all items available, instant delivery (no lead time)
+    # Vendor 3: Universal Supply Corp. - 102% of market price, all items available, instant delivery (no lead time)
     vendors.append(Vendor(
         name="Universal Supply Corp.",
-        pricing_multiplier=1.05,
+        pricing_multiplier=1.02,
         selection_type="all",
         selection_params=0,  # No limit
         lead_time=0
@@ -3484,6 +3497,18 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             player.purchased_upgrades.remove(upgrade)
             if player.is_human and show_details:
                 print(f"\n⚠️  {player.name}: '{upgrade.name}' has expired!")
+
+    # Display loan warnings for human players
+    for player in game_state.players:
+        if player.is_human and player.loans and show_details:
+            for loan in player.loans:
+                days_remaining = loan.due_day - game_state.day
+                if days_remaining <= 0:
+                    print(f"\n💸 WARNING: {player.name}'s loan from {loan.lender_name} is OVERDUE!")
+                    print(f"    Amount due: ${loan.remaining_balance:,.2f}")
+                elif days_remaining <= 5:
+                    print(f"\n⏰ REMINDER: {player.name}'s loan from {loan.lender_name} is due in {days_remaining} days")
+                    print(f"    Amount due: ${loan.remaining_balance:,.2f}")
 
     # Step 10: Reset daily vendor purchase tracking
     game_state.vendor_daily_purchases.clear()
@@ -5386,6 +5411,221 @@ def display_customer_forecast(game_state: GameState) -> None:
     print("=" * 60)
 
 
+# -------------------------------------------------------------------
+# Loan System
+# -------------------------------------------------------------------
+
+@dataclass
+class LoanOffer:
+    """Represents a loan offer from a lender."""
+    lender_name: str
+    amount: float
+    days_to_repay: int
+    interest_rate: float  # Full interest rate (e.g., 0.10 for 10%)
+    early_interest_rate: float  # Early payoff interest rate (1/10th of normal)
+
+
+def get_available_loan_offers() -> List[LoanOffer]:
+    """Get list of all available loan offers."""
+    return [
+        LoanOffer("Quick Cash Inc.", 2000.0, 10, 0.10, 0.01),
+        LoanOffer("Medium Lenders Co.", 5000.0, 30, 0.05, 0.005),
+        LoanOffer("Huge Capital Ltd.", 20000.0, 30, 0.02, 0.002),
+        LoanOffer("Tottally Not Shady Deals", 4000.0, 5, 0.20, 0.02),
+        LoanOffer("Government Bank", 50000.0, 60, 0.10, 0.01),
+    ]
+
+
+def loans_menu(game_state: GameState, player: Player) -> None:
+    """Menu for managing loans - taking new loans and paying back existing ones."""
+    while True:
+        print("\n" + "=" * 70)
+        print("LOANS MENU")
+        print("=" * 70)
+        print(f"\nYour Cash: ${player.cash:.2f}")
+
+        # Display active loans
+        if player.loans:
+            total_debt = sum(loan.remaining_balance for loan in player.loans)
+            print(f"\n💳 Active Loans (Total Debt: ${total_debt:,.2f}):")
+            for i, loan in enumerate(player.loans, 1):
+                days_remaining = loan.due_day - game_state.day
+                interest_amount = loan.remaining_balance - loan.principal
+                print(f"\n  {i}. {loan.lender_name}")
+                print(f"     Principal: ${loan.principal:,.2f}")
+                print(f"     Current Balance: ${loan.remaining_balance:,.2f} (includes ${interest_amount:,.2f} interest)")
+                print(f"     Due: Day {loan.due_day} ({days_remaining} days remaining)")
+                if days_remaining < 0:
+                    print(f"     ⚠️  OVERDUE by {abs(days_remaining)} days!")
+        else:
+            print("\n💳 No active loans")
+
+        # Display available loan offers
+        print("\n🏦 Available Loan Offers:")
+        offers = get_available_loan_offers()
+        for i, offer in enumerate(offers, 1):
+            total_with_interest = offer.amount * (1 + offer.interest_rate)
+            early_payoff_interest = offer.amount * offer.early_interest_rate
+            print(f"\n  {i}. {offer.lender_name}")
+            print(f"     Amount: ${offer.amount:,.2f}")
+            print(f"     Repayment Period: {offer.days_to_repay} days")
+            print(f"     Interest Rate: {offer.interest_rate * 100:.1f}% (Total: ${total_with_interest:,.2f})")
+            print(f"     Early Payoff: {offer.early_interest_rate * 100:.1f}% interest (Total: ${offer.amount + early_payoff_interest:,.2f})")
+
+        print("\n  t. Take a new loan")
+        if player.loans:
+            print("  p. Pay back a loan")
+        print("  0. Back to Main Menu")
+
+        try:
+            choice = input("\nSelect option (t, p, 0): ").strip().lower()
+
+            if choice == '0':
+                break
+            elif choice == 't':
+                # Take new loan submenu
+                take_loan_submenu(game_state, player, offers)
+            elif choice == 'p' and player.loans:
+                # Pay back loan submenu
+                pay_loan_submenu(game_state, player)
+            else:
+                print("\n✗ Invalid option!")
+                input("\nPress Enter to continue...")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+            input("\nPress Enter to continue...")
+
+
+def take_loan_submenu(game_state: GameState, player: Player, offers: List[LoanOffer]) -> None:
+    """Submenu for taking a new loan."""
+    print("\n" + "=" * 70)
+    print("TAKE A LOAN")
+    print("=" * 70)
+
+    for i, offer in enumerate(offers, 1):
+        total_with_interest = offer.amount * (1 + offer.interest_rate)
+        print(f"\n  {i}. {offer.lender_name} - ${offer.amount:,.2f}")
+        print(f"     Must repay ${total_with_interest:,.2f} by day {game_state.day + offer.days_to_repay}")
+
+    print("\n  0. Cancel")
+
+    try:
+        choice = input(f"\nSelect loan to take (1-{len(offers)}, 0 to cancel): ").strip()
+        choice_num = int(choice)
+
+        if choice_num == 0:
+            return
+
+        if 1 <= choice_num <= len(offers):
+            offer = offers[choice_num - 1]
+
+            # Confirm loan
+            total_with_interest = offer.amount * (1 + offer.interest_rate)
+            print(f"\n📋 Loan Summary:")
+            print(f"   Lender: {offer.lender_name}")
+            print(f"   Amount: ${offer.amount:,.2f}")
+            print(f"   Interest: {offer.interest_rate * 100:.1f}%")
+            print(f"   Total to repay: ${total_with_interest:,.2f}")
+            print(f"   Due date: Day {game_state.day + offer.days_to_repay}")
+
+            confirm = input("\nConfirm loan? (y/n): ").strip().lower()
+            if confirm == 'y':
+                # Create and add loan
+                loan = Loan(
+                    lender_name=offer.lender_name,
+                    principal=offer.amount,
+                    remaining_balance=total_with_interest,
+                    interest_rate=offer.interest_rate,
+                    early_interest_rate=offer.early_interest_rate,
+                    due_day=game_state.day + offer.days_to_repay,
+                    taken_day=game_state.day
+                )
+                player.loans.append(loan)
+                player.cash += offer.amount
+
+                print(f"\n✓ Loan approved! ${offer.amount:,.2f} added to your cash.")
+                print(f"  Remember to repay ${total_with_interest:,.2f} by day {loan.due_day}!")
+            else:
+                print("\n✗ Loan cancelled.")
+        else:
+            print("\n✗ Invalid loan selection!")
+
+    except (ValueError, IndexError):
+        print("\n✗ Invalid input!")
+
+    input("\nPress Enter to continue...")
+
+
+def pay_loan_submenu(game_state: GameState, player: Player) -> None:
+    """Submenu for paying back a loan."""
+    print("\n" + "=" * 70)
+    print("PAY BACK A LOAN")
+    print("=" * 70)
+    print(f"\nYour Cash: ${player.cash:.2f}")
+
+    for i, loan in enumerate(player.loans, 1):
+        days_remaining = loan.due_day - game_state.day
+        is_early = days_remaining > 0
+
+        # Calculate early payoff amount
+        if is_early:
+            early_payoff_amount = loan.principal * (1 + loan.early_interest_rate)
+        else:
+            early_payoff_amount = loan.remaining_balance
+
+        print(f"\n  {i}. {loan.lender_name}")
+        print(f"     Balance Due: ${loan.remaining_balance:,.2f}")
+        if is_early:
+            print(f"     Early Payoff: ${early_payoff_amount:,.2f} (saves ${loan.remaining_balance - early_payoff_amount:,.2f})")
+        print(f"     Due: Day {loan.due_day} ({days_remaining} days {'remaining' if days_remaining > 0 else 'overdue'})")
+
+    print("\n  0. Cancel")
+
+    try:
+        choice = input(f"\nSelect loan to pay (1-{len(player.loans)}, 0 to cancel): ").strip()
+        choice_num = int(choice)
+
+        if choice_num == 0:
+            return
+
+        if 1 <= choice_num <= len(player.loans):
+            loan = player.loans[choice_num - 1]
+            days_remaining = loan.due_day - game_state.day
+            is_early = days_remaining > 0
+
+            # Determine payment amount
+            if is_early:
+                payment_amount = loan.principal * (1 + loan.early_interest_rate)
+                print(f"\n💰 Early Payoff: ${payment_amount:,.2f}")
+                print(f"   (Saves ${loan.remaining_balance - payment_amount:,.2f} in interest)")
+            else:
+                payment_amount = loan.remaining_balance
+                print(f"\n💰 Full Payment: ${payment_amount:,.2f}")
+
+            if player.cash < payment_amount:
+                print(f"\n✗ Not enough cash! Need ${payment_amount:,.2f}, have ${player.cash:.2f}")
+                input("\nPress Enter to continue...")
+                return
+
+            confirm = input(f"\nPay ${payment_amount:,.2f} to {loan.lender_name}? (y/n): ").strip().lower()
+            if confirm == 'y':
+                player.cash -= payment_amount
+                player.loans.remove(loan)
+                print(f"\n✓ Loan paid off! ${payment_amount:,.2f} paid to {loan.lender_name}.")
+                if is_early:
+                    print(f"  You saved ${loan.remaining_balance - payment_amount:,.2f} by paying early!")
+            else:
+                print("\n✗ Payment cancelled.")
+        else:
+            print("\n✗ Invalid loan selection!")
+
+    except (ValueError, IndexError):
+        print("\n✗ Invalid input!")
+
+    input("\nPress Enter to continue...")
+
+
 def main_menu(game_state: GameState) -> bool:
     """
     Display main menu and handle user choice.
@@ -5399,6 +5639,12 @@ def main_menu(game_state: GameState) -> bool:
         print("=" * 50)
         print(f"Your Cash: ${player.cash:.2f}")
         print(f"Employees: {player.restockers} warehouse workers")
+
+        # Show loan debt if any
+        if player.loans:
+            total_debt = sum(loan.remaining_balance for loan in player.loans)
+            print(f"Total Debt: ${total_debt:,.2f}")
+
         print("\nOptions:")
         print("  1. Pass Day (Simulate)")
         print("  2. View Market Prices")
@@ -5407,12 +5653,13 @@ def main_menu(game_state: GameState) -> bool:
         print("  5. Hire Employees")
         print("  6. View Your Store Status")
         print("  7. Store Upgrades")
+        print("  8. Loans")
         print("  c. Customer Forecast")
         print("  s. Save Game")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-7, c, s): ").strip().lower()
+            choice = input("\nSelect option (0-8, c, s): ").strip().lower()
 
             # Handle customer forecast
             if choice == 'c':
@@ -5473,6 +5720,8 @@ def main_menu(game_state: GameState) -> bool:
                 input("\nPress Enter to continue...")
             elif choice_num == 7:
                 upgrades_menu(game_state, player)
+            elif choice_num == 8:
+                loans_menu(game_state, player)
             else:
                 print("\n✗ Invalid option!")
 
