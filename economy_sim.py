@@ -5557,8 +5557,8 @@ def deserialize_game_state(data: dict) -> GameState:
             for upgrade_data in player_data["purchased_upgrades"]
         ]
 
-        # Convert buy_orders back to tuples
-        buy_orders = {k: tuple(v) for k, v in player_data["buy_orders"].items()}
+        # Convert buy_orders back to lists (needed for append operations)
+        buy_orders = {k: list(v) for k, v in player_data["buy_orders"].items()}
 
         player = Player(
             name=player_data["name"],
