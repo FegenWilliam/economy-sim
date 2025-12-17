@@ -35,6 +35,36 @@ PRODUCT_CATEGORIES = {
     "Luxury": 1,
 }
 
+# Specialty Score Configuration
+# Rewards players for stocking a certain number of items from each category
+# Format: category -> [(threshold, multiplier), ...] sorted by threshold ascending
+# Bonuses are ADDITIVE: 1.2x (20% bonus) + 1.8x (80% bonus) = 2.0x total (100% bonus)
+SPECIALTY_SCORE_THRESHOLDS = {
+    # Essential categories (importance 3) - smaller bonuses
+    "Food & Groceries": [(10, 1.2), (30, 1.5), (60, 2.5)],
+    "Fresh Produce": [(6, 1.1)],
+    "Household Essentials": [(8, 1.2)],
+    "Personal Care": [(8, 1.2)],
+    "Health & Pharmacy": [(6, 1.2)],
+    "Baby Products": [(5, 1.3)],
+
+    # Non-essential categories (importance 2) - medium bonuses
+    "Supplements": [(5, 1.2)],
+    "Pet Supplies": [(6, 1.2)],
+    "Kitchen & Dining": [(8, 1.2), (15, 1.5)],
+    "Office Supplies": [(8, 1.2)],
+    "Electronics": [(10, 1.2), (20, 1.8)],
+    "Appliances": [(10, 1.3)],
+    "Sports & Outdoor": [(6, 1.2), (12, 1.5)],
+    "Home Decor": [(8, 1.3)],
+    "Automotive": [(5, 1.4), (10, 2.0)],
+
+    # Luxury categories (importance 1) - highest bonuses
+    "Gaming": [(5, 1.5)],
+    "Toys & Games": [(6, 1.4), (12, 1.8)],
+    "Luxury": [(5, 1.5), (10, 2.0), (15, 2.5), (18, 3.0)],
+}
+
 
 # -------------------------------------------------------------------
 # Core data models
@@ -1181,7 +1211,7 @@ class Customer:
         all_available_items: List[Item]
     ) -> Optional[Player]:
         """
-        Choose a supplier based on reputation, discount scores, availability, and fulfillment.
+        Choose a supplier based on reputation, discount scores, specialty score, and fulfillment.
 
         Formula:
         - reputation_multiplier = 10 ** (reputation / 100)
@@ -1190,18 +1220,14 @@ class Customer:
         - item_stability = sum of (proximity_score + consistency_bonus) * importance for all stocked items
           * proximity_score: 10 if within 5% of market, -1 per 1% beyond 5%
           * consistency_bonus: +2 if price change <= 5% from previous
-        - availability_multiplier based on % of catalog items in stock (global, not customer-specific):
-          * >= 100%: ×1.2
-          * >= 80%: ×1.1
-          * < 50%: ×0.8
-          * < 20%: ×0.5
+        - specialty_multiplier based on category item counts (additive bonuses)
         - fulfillment_multiplier based on average % customer needs fulfilled (from past performance):
           * <20%: ×0.5
           * 20-50%: ×0.9
           * 50-90%: ×1.0
           * 90-99%: ×1.4
           * 100%: ×2.0
-        - final_score = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+        - final_score = (discount_score + item_stability) * reputation_multiplier * specialty_multiplier * fulfillment_multiplier
 
         Returns the player with the highest score who has capacity to serve customers.
         Only considers players with stock and acceptable prices.
@@ -1253,21 +1279,8 @@ class Customer:
             if not has_any_stock:
                 continue
 
-            # Calculate GLOBAL availability: % of catalog items this store has in stock
-            items_in_stock = sum(1 for qty in player.inventory.values() if qty > 0)
-            availability_pct = (items_in_stock / total_catalog_items) * 100 if total_catalog_items > 0 else 0
-
-            # Calculate availability multiplier
-            if availability_pct >= 100:
-                availability_multiplier = 1.2
-            elif availability_pct >= 80:
-                availability_multiplier = 1.1
-            elif availability_pct < 20:
-                availability_multiplier = 0.5
-            elif availability_pct < 50:
-                availability_multiplier = 0.8
-            else:
-                availability_multiplier = 1.0  # 50-79%
+            # Calculate specialty score (category-based bonuses for item variety)
+            specialty_multiplier_effective, _, _ = calculate_specialty_score(player, items_by_name)
 
             # Calculate fulfillment multiplier based on historical performance
             fulfillment_pct = player.average_fulfillment_pct
@@ -1293,7 +1306,7 @@ class Customer:
             marketing_effect = calculate_marketing_effect(player, market_prices)
 
             # Calculate final score (marketing effect boosts both components)
-            final_score = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+            final_score = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * specialty_multiplier_effective * fulfillment_multiplier
 
             player_scores.append((player, final_score))
 
@@ -2266,9 +2279,9 @@ def calculate_player_cas(
     - reputation_multiplier = 10 ** (reputation / 100)
     - discount_score = sum of discount % for all stocked items
     - item_stability = sum of proximity and consistency scores
-    - availability_multiplier based on % of catalog in stock
+    - specialty_multiplier based on category item counts (additive bonuses)
     - fulfillment_multiplier based on average fulfillment %
-    - CAS = (discount_score + item_stability) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+    - CAS = (discount_score + item_stability) * reputation_multiplier * specialty_multiplier * fulfillment_multiplier
 
     Returns 0 if player has no stock or no acceptable prices.
     """
@@ -2310,20 +2323,8 @@ def calculate_player_cas(
     if not has_any_stock:
         return 0.0
 
-    # Calculate availability multiplier
-    items_in_stock = sum(1 for qty in player.inventory.values() if qty > 0)
-    availability_pct = (items_in_stock / total_catalog_items) * 100 if total_catalog_items > 0 else 0
-
-    if availability_pct >= 100:
-        availability_multiplier = 1.2
-    elif availability_pct >= 80:
-        availability_multiplier = 1.1
-    elif availability_pct < 20:
-        availability_multiplier = 0.5
-    elif availability_pct < 50:
-        availability_multiplier = 0.8
-    else:
-        availability_multiplier = 1.0
+    # Calculate specialty score (category-based bonuses for item variety)
+    specialty_multiplier_effective, _, _ = calculate_specialty_score(player, items_by_name)
 
     # Calculate fulfillment multiplier
     fulfillment_pct = player.average_fulfillment_pct
@@ -2348,7 +2349,7 @@ def calculate_player_cas(
     marketing_effect = calculate_marketing_effect(player, market_prices)
 
     # Calculate final CAS (marketing effect boosts both components)
-    cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+    cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * specialty_multiplier_effective * fulfillment_multiplier
 
     return cas
 
@@ -3359,10 +3360,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     'stability': breakdown["item_stability"],
                     'marketing': breakdown["marketing_effect"],
                     'marketing_agents': breakdown["marketing_agents"],
-                    'avail_mult': breakdown["availability_multiplier"],
-                    'avail_pct': breakdown["availability_pct"],
-                    'items_in_stock': breakdown["items_in_stock"],
-                    'total_items': breakdown["total_catalog_items"],
+                    'specialty_mult': breakdown["specialty_multiplier"],
+                    'specialty_mult_raw': breakdown["specialty_multiplier_raw"],
                     'fulfill_mult': breakdown["fulfillment_multiplier"],
                     'fulfill_pct': breakdown["fulfillment_pct"],
                     'final_cas': breakdown["final_cas"]
@@ -3384,7 +3383,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         print("\n🎯 Customer Attraction Score (CAS):")
         for data in cas_data:
             marketing_text = f", Mkt: {data['marketing']:.1f}" if data['marketing'] > 0 else ""
-            print(f"  {data['name']}: CAS={data['final_cas']:.1f} | Rep: {data['reputation']:.0f}, Disc: {data['discount_pct']:.1f}%, Stab: {data['stability']:.1f}{marketing_text}, Avail: {data['avail_mult']:.2f}x ({data['avail_pct']:.0f}%), Fulfill: {data['fulfill_mult']:.2f}x ({data['fulfill_pct']:.0f}%)")
+            specialty_text = f"{data['specialty_mult']:.2f}x"
+            if data['specialty_mult_raw'] > 0:
+                specialty_text += f" (+{data['specialty_mult_raw']:.2f})"
+            print(f"  {data['name']}: CAS={data['final_cas']:.1f} | Rep: {data['reputation']:.0f}, Disc: {data['discount_pct']:.1f}%, Stab: {data['stability']:.1f}{marketing_text}, Spec: {specialty_text}, Fulfill: {data['fulfill_mult']:.2f}x ({data['fulfill_pct']:.0f}%)")
 
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
@@ -3557,6 +3559,55 @@ def calculate_marketing_effect(player: Player, market_prices: Dict[str, float]) 
     return reputation_bonus + price_bonus
 
 
+def calculate_specialty_score(player: Player, items_by_name: Dict[str, Item]) -> Tuple[float, Dict[str, int], Dict[str, float]]:
+    """
+    Calculate specialty score multiplier based on category item counts.
+
+    Rewards players for stocking a certain number of items from specific categories.
+    Bonuses are ADDITIVE: 1.2x (20% bonus) + 1.8x (80% bonus) = 2.0x total (100% bonus).
+
+    Returns:
+        - Total specialty multiplier (1.0 + sum of all bonus percentages)
+        - Dictionary of category -> count of items in stock
+        - Dictionary of category -> total bonus multiplier for that category
+    """
+    # Count items in stock per category
+    category_counts: Dict[str, int] = {}
+
+    for item_name, qty in player.inventory.items():
+        if qty <= 0:
+            continue
+
+        item = items_by_name.get(item_name)
+        if not item:
+            continue
+
+        category = item.category
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+    # Calculate specialty bonuses for each category
+    category_multipliers: Dict[str, float] = {}
+    total_bonus = 0.0  # Sum of bonus percentages (not full multipliers)
+
+    for category, count in category_counts.items():
+        thresholds = SPECIALTY_SCORE_THRESHOLDS.get(category, [])
+        category_bonus = 0.0
+
+        # Sum all BONUSES for thresholds met (bonus = multiplier - 1.0)
+        for threshold, multiplier in thresholds:
+            if count >= threshold:
+                bonus = multiplier - 1.0  # Extract the bonus percentage
+                category_bonus += bonus
+
+        if category_bonus > 0:
+            category_total_mult = 1.0 + category_bonus  # Convert back to multiplier for display
+            category_multipliers[category] = category_total_mult
+            total_bonus += category_bonus
+
+    total_multiplier = 1.0 + total_bonus
+    return total_multiplier, category_counts, category_multipliers
+
+
 def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], items_by_name: Dict[str, Item], all_available_items: List[Item]) -> Dict[str, Any]:
     """
     Calculate Customer Attraction Score (CAS) breakdown for a player.
@@ -3592,21 +3643,8 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
     # Calculate item stability score
     item_stability = calculate_item_stability(player, market_prices, items_by_name)
 
-    # Calculate global availability multiplier
-    total_catalog_items = len(all_available_items)
-    items_in_stock = sum(1 for qty in player.inventory.values() if qty > 0)
-    availability_pct = (items_in_stock / total_catalog_items) * 100 if total_catalog_items > 0 else 0
-
-    if availability_pct >= 100:
-        availability_multiplier = 1.2
-    elif availability_pct >= 80:
-        availability_multiplier = 1.1
-    elif availability_pct < 20:
-        availability_multiplier = 0.5
-    elif availability_pct < 50:
-        availability_multiplier = 0.8
-    else:
-        availability_multiplier = 1.0
+    # Calculate specialty score (category-based bonuses for item variety)
+    specialty_multiplier_effective, category_counts, category_multipliers = calculate_specialty_score(player, items_by_name)
 
     # Calculate fulfillment multiplier
     fulfillment_pct = player.average_fulfillment_pct
@@ -3624,8 +3662,8 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
     # Calculate marketing effect
     marketing_effect = calculate_marketing_effect(player, market_prices)
 
-    # Calculate final CAS (marketing effect boosts both components)
-    final_cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * availability_multiplier * fulfillment_multiplier
+    # Calculate final CAS
+    final_cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * specialty_multiplier_effective * fulfillment_multiplier
 
     # Return all components as a dictionary
     return {
@@ -3636,10 +3674,10 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
         "item_stability": item_stability,
         "marketing_effect": marketing_effect,
         "marketing_agents": player.marketing_agents,
-        "availability_multiplier": availability_multiplier,
-        "items_in_stock": items_in_stock,
-        "total_catalog_items": total_catalog_items,
-        "availability_pct": availability_pct,
+        "specialty_multiplier": specialty_multiplier_effective,
+        "specialty_multiplier_raw": specialty_multiplier_effective - 1.0,  # Just the bonus amount
+        "category_counts": category_counts,
+        "category_multipliers": category_multipliers,
         "fulfillment_multiplier": fulfillment_multiplier,
         "fulfillment_pct": fulfillment_pct,
         "final_cas": final_cas
@@ -3663,10 +3701,10 @@ def display_cas_breakdown(player: Player, game_state: GameState, breakdown: Dict
     item_stability = breakdown["item_stability"]
     marketing_effect = breakdown["marketing_effect"]
     marketing_agents = breakdown["marketing_agents"]
-    availability_multiplier = breakdown["availability_multiplier"]
-    items_in_stock = breakdown["items_in_stock"]
-    total_catalog_items = breakdown["total_catalog_items"]
-    availability_pct = breakdown["availability_pct"]
+    specialty_multiplier = breakdown["specialty_multiplier"]
+    specialty_multiplier_raw = breakdown["specialty_multiplier_raw"]
+    category_counts = breakdown["category_counts"]
+    category_multipliers = breakdown["category_multipliers"]
     fulfillment_multiplier = breakdown["fulfillment_multiplier"]
     fulfillment_pct = breakdown["fulfillment_pct"]
     final_cas = breakdown["final_cas"]
@@ -3678,7 +3716,16 @@ def display_cas_breakdown(player: Player, game_state: GameState, breakdown: Dict
     print(f"   Item Stability:          {item_stability:.2f}")
     if marketing_effect > 0:
         print(f"   Marketing Effect:        {marketing_effect:.2f} ({marketing_agents} agents)")
-    print(f"   Availability Multiplier: {availability_multiplier:6.2f}x  ({items_in_stock}/{total_catalog_items} = {availability_pct:.0f}%)")
+
+    # Display specialty score with category breakdown
+    print(f"   Specialty Multiplier:    {specialty_multiplier:6.2f}x  (base 1.0 + {specialty_multiplier_raw:.2f} bonus)")
+    if category_multipliers:
+        print(f"      Category Bonuses:")
+        for category, multiplier in sorted(category_multipliers.items(), key=lambda x: x[1], reverse=True):
+            count = category_counts.get(category, 0)
+            bonus = multiplier - 1.0  # Convert full multiplier to bonus for display
+            print(f"        • {category}: {count} items → +{bonus:.2f}x")
+
     print(f"   Fulfillment Multiplier:  {fulfillment_multiplier:6.2f}x  ({fulfillment_pct:.0f}% avg)")
     print(f"   ─────────────────────────────────────────")
     print(f"   📈 FINAL CAS = {final_cas:.2f}")
