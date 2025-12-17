@@ -5423,16 +5423,18 @@ class LoanOffer:
     days_to_repay: int
     interest_rate: float  # Full interest rate (e.g., 0.10 for 10%)
     early_interest_rate: float  # Early payoff interest rate (1/10th of normal)
+    min_level: int = 0  # Minimum store level required (0 = no requirement)
+    min_reputation: float = 0.0  # Minimum reputation required (0 = no requirement)
 
 
 def get_available_loan_offers() -> List[LoanOffer]:
     """Get list of all available loan offers."""
     return [
-        LoanOffer("Quick Cash Inc.", 2000.0, 10, 0.10, 0.01),
-        LoanOffer("Medium Lenders Co.", 5000.0, 30, 0.05, 0.005),
-        LoanOffer("Huge Capital Ltd.", 20000.0, 30, 0.02, 0.002),
-        LoanOffer("Tottally Not Shady Deals", 4000.0, 5, 0.20, 0.02),
-        LoanOffer("Government Bank", 50000.0, 60, 0.10, 0.01),
+        LoanOffer("Quick Cash Inc.", 2000.0, 10, 0.10, 0.01, min_level=0, min_reputation=0.0),
+        LoanOffer("Medium Lenders Co.", 5000.0, 30, 0.05, 0.005, min_level=5, min_reputation=0.0),
+        LoanOffer("Huge Capital Ltd.", 20000.0, 30, 0.02, 0.002, min_level=15, min_reputation=0.0),
+        LoanOffer("Tottally Not Shady Deals", 4000.0, 5, 0.20, 0.02, min_level=0, min_reputation=0.0),
+        LoanOffer("Government Bank", 50000.0, 60, 0.10, 0.01, min_level=20, min_reputation=100.0),
     ]
 
 
@@ -5460,17 +5462,46 @@ def loans_menu(game_state: GameState, player: Player) -> None:
         else:
             print("\n💳 No active loans")
 
-        # Display available loan offers
+        # Display loan offers - separate available and locked
+        all_offers = get_available_loan_offers()
+        available_offers = []
+        locked_offers = []
+
+        for offer in all_offers:
+            meets_level = player.store_level >= offer.min_level
+            meets_reputation = player.reputation >= offer.min_reputation
+            if meets_level and meets_reputation:
+                available_offers.append(offer)
+            else:
+                locked_offers.append(offer)
+
+        # Show available offers
         print("\n🏦 Available Loan Offers:")
-        offers = get_available_loan_offers()
-        for i, offer in enumerate(offers, 1):
-            total_with_interest = offer.amount * (1 + offer.interest_rate)
-            early_payoff_interest = offer.amount * offer.early_interest_rate
-            print(f"\n  {i}. {offer.lender_name}")
-            print(f"     Amount: ${offer.amount:,.2f}")
-            print(f"     Repayment Period: {offer.days_to_repay} days")
-            print(f"     Interest Rate: {offer.interest_rate * 100:.1f}% (Total: ${total_with_interest:,.2f})")
-            print(f"     Early Payoff: {offer.early_interest_rate * 100:.1f}% interest (Total: ${offer.amount + early_payoff_interest:,.2f})")
+        if available_offers:
+            for i, offer in enumerate(available_offers, 1):
+                total_with_interest = offer.amount * (1 + offer.interest_rate)
+                early_payoff_interest = offer.amount * offer.early_interest_rate
+                print(f"\n  {i}. {offer.lender_name}")
+                print(f"     Amount: ${offer.amount:,.2f}")
+                print(f"     Repayment Period: {offer.days_to_repay} days")
+                print(f"     Interest Rate: {offer.interest_rate * 100:.1f}% (Total: ${total_with_interest:,.2f})")
+                print(f"     Early Payoff: {offer.early_interest_rate * 100:.1f}% interest (Total: ${offer.amount + early_payoff_interest:,.2f})")
+        else:
+            print("  (No loans available at your level)")
+
+        # Show locked offers
+        if locked_offers:
+            print("\n🔒 Locked Loan Offers:")
+            for offer in locked_offers:
+                requirements = []
+                if offer.min_level > player.store_level:
+                    requirements.append(f"Level {offer.min_level} (you: {player.store_level})")
+                if offer.min_reputation > player.reputation:
+                    requirements.append(f"Reputation {offer.min_reputation:.0f} (you: {player.reputation:.0f})")
+                req_str = ", ".join(requirements)
+                total_with_interest = offer.amount * (1 + offer.interest_rate)
+                print(f"\n  🔒 {offer.lender_name} - ${offer.amount:,.2f} at {offer.interest_rate * 100:.1f}%")
+                print(f"     Requires: {req_str}")
 
         print("\n  t. Take a new loan")
         if player.loans:
@@ -5483,8 +5514,12 @@ def loans_menu(game_state: GameState, player: Player) -> None:
             if choice == '0':
                 break
             elif choice == 't':
-                # Take new loan submenu
-                take_loan_submenu(game_state, player, offers)
+                # Take new loan submenu - only pass available offers
+                if available_offers:
+                    take_loan_submenu(game_state, player, available_offers)
+                else:
+                    print("\n✗ No loans available at your current level and reputation!")
+                    input("\nPress Enter to continue...")
             elif choice == 'p' and player.loans:
                 # Pay back loan submenu
                 pay_loan_submenu(game_state, player)
