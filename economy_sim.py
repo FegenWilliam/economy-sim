@@ -950,6 +950,7 @@ class Customer:
     customer_type: str = "medium"  # "low", "medium", "high", "uncapped", or special types
     budget: float = 0.0
     day: int = 0  # Current game day for budget scaling
+    specializations: List[str] = field(default_factory=list)  # 2 rolled categories for specialization
 
     def __post_init__(self):
         """Set budget based on customer type if not already set."""
@@ -980,6 +981,35 @@ class Customer:
                 self.budget = 3000.0
             elif self.customer_type == "youtuber":
                 self.budget = 10000.0
+
+    def roll_specializations(self, available_items: List[Item], item_demand: Dict[str, float] = None) -> None:
+        """
+        Roll 2 random categories for customer specialization.
+        Categories are weighted by total demand of items in each category.
+
+        Higher demand categories have higher chance of being rolled.
+        Customers can roll the same category twice.
+        """
+        if item_demand is None:
+            item_demand = {}
+
+        # Calculate total demand for each category
+        category_demands = {}
+        for category in PRODUCT_CATEGORIES.keys():
+            category_items = [item for item in available_items if item.category == category]
+            total_demand = sum(item_demand.get(item.name, 1.0) for item in category_items)
+            if total_demand > 0:
+                category_demands[category] = total_demand
+
+        # If no categories have demand, distribute evenly
+        if not category_demands:
+            category_demands = {category: 1.0 for category in PRODUCT_CATEGORIES.keys()}
+
+        # Roll 2 categories using weighted selection
+        categories = list(category_demands.keys())
+        weights = [category_demands[cat] for cat in categories]
+
+        self.specializations = random.choices(categories, weights=weights, k=2)
 
     def generate_daily_needs(self, available_items: List[Item], market_prices: Dict[str, float] = None, item_demand: Dict[str, float] = None) -> List[CustomerNeed]:
         """
@@ -1127,10 +1157,15 @@ class Customer:
         # Keep buying items until we hit the item limit or run out of budget
         total_items = 0
 
-        while total_items < max_items and remaining_budget > 0 and available_items:
+        # Filter to specialization categories if customer has rolled specializations
+        items_to_shop = available_items
+        if self.specializations:
+            items_to_shop = [item for item in available_items if item.category in self.specializations]
+
+        while total_items < max_items and remaining_budget > 0 and items_to_shop:
             # Filter to only affordable items with valid pricing
             affordable_items = [
-                item for item in available_items
+                item for item in items_to_shop
                 if (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) > 0
                 and (market_prices.get(item.name, item.base_price) if market_prices else item.base_price) <= remaining_budget
             ]
@@ -2391,6 +2426,133 @@ def calculate_player_cas(
     return cas
 
 
+def get_category_specialty_threshold(player: Player, category: str, items_by_name: Dict[str, Item]) -> Optional[int]:
+    """
+    Get the highest threshold a player has reached for a specific category specialization.
+    Returns the threshold number, or None if the category has no specialization bonus.
+    """
+    # Count items in this category that the player has in stock
+    category_count = 0
+    for item_name, qty in player.inventory.items():
+        if qty > 0:
+            item = items_by_name.get(item_name)
+            if item and item.category == category:
+                category_count += 1
+
+    # Get the thresholds for this category
+    thresholds = SPECIALTY_SCORE_THRESHOLDS.get(category, [])
+    if not thresholds:
+        return None
+
+    # Find the highest threshold the player has reached
+    highest_threshold = None
+    for threshold, multiplier in thresholds:
+        if category_count >= threshold:
+            highest_threshold = threshold
+
+    return highest_threshold
+
+
+def choose_best_specialized_player(
+    players: List[Player],
+    category: str,
+    items_by_name: Dict[str, Item]
+) -> Optional[Player]:
+    """
+    Choose the best player for a customer with a category specialization.
+    Implements tie-breaking logic:
+    1. Players with specialization bonus for this category (higher threshold wins)
+    2. If same threshold: player with most products in that category wins
+    3. If both maxed: pick randomly
+    """
+    # Get all players with specialization bonuses for this category
+    candidates = []
+    for player in players:
+        threshold = get_category_specialty_threshold(player, category, items_by_name)
+        if threshold is not None:
+            # Count items in this category
+            category_count = 0
+            for item_name, qty in player.inventory.items():
+                if qty > 0:
+                    item = items_by_name.get(item_name)
+                    if item and item.category == category:
+                        category_count += 1
+            candidates.append((player, threshold, category_count))
+
+    if not candidates:
+        return None
+
+    # Sort by threshold (descending), then by category_count (descending)
+    candidates.sort(key=lambda x: (-x[1], -x[2]))
+
+    # Get the best candidate
+    best = candidates[0]
+    best_threshold = best[1]
+    best_count = best[2]
+
+    # Find all players with the same best score
+    tied_players = [
+        p for p in candidates
+        if p[1] == best_threshold and p[2] == best_count
+    ]
+
+    # If there's a tie, pick randomly
+    return random.choice(tied_players)[0]
+
+
+def assign_customers_by_cas_with_specialization(
+    customers: List[Customer],
+    players: List[Player],
+    market_prices: Dict[str, float],
+    items_by_name: Dict[str, Item],
+    all_available_items: List[Item]
+) -> Tuple[Dict[str, List[Customer]], Dict[str, Dict[str, Any]]]:
+    """
+    Assign customers to players with specialization priority.
+
+    Process:
+    1. Assign customers normally by CAS
+    2. For customers with specializations, check if any player has a specialty bonus for their categories
+    3. If yes, reassign those customers to the best specialized player
+    4. If no player has the specialty, keep the original CAS assignment
+    """
+    # First, do normal CAS assignment
+    assignments, cas_breakdowns = assign_customers_by_cas(customers, players, market_prices, items_by_name, all_available_items)
+
+    # Now, handle specialization-based allocation
+    # Create a new assignment dict
+    specialized_assignments = {player.name: [] for player in players}
+
+    # Track which customers have been reassigned to specialized stores
+    reassigned_customers = set()
+
+    # Process each player's assigned customers
+    for player_name, assigned_customers in assignments.items():
+        for customer in assigned_customers:
+            # Check if customer has specializations and can be reallocated to a better specialized store
+            if customer.specializations:
+                # Try to find a player with specialization bonus for either of the customer's categories
+                best_specialized_player = None
+
+                for category in customer.specializations:
+                    candidate = choose_best_specialized_player(players, category, items_by_name)
+                    if candidate:
+                        best_specialized_player = candidate
+                        break  # Use the first matching category
+
+                # If we found a specialized player and it's different from current assignment, reassign
+                if best_specialized_player and best_specialized_player.name != player_name:
+                    specialized_assignments[best_specialized_player.name].append(customer)
+                    reassigned_customers.add(id(customer))
+                else:
+                    specialized_assignments[player_name].append(customer)
+            else:
+                # No specialization, keep original assignment
+                specialized_assignments[player_name].append(customer)
+
+    return specialized_assignments, cas_breakdowns
+
+
 def assign_customers_by_cas(
     customers: List[Customer],
     players: List[Player],
@@ -2724,6 +2886,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     for i in range(base_customer_count):
         customer_type = get_weighted_customer_type(game_state.day)
         customer = Customer(name=f"Customer_{i+1}", customer_type=customer_type, day=game_state.day)
+        # Roll specializations for regular customers (low, medium, high)
+        if customer_type in ["low", "medium", "high"]:
+            customer.roll_specializations(game_state.items, game_state.item_demand)
         all_customers.append(customer)
         customer_type_stats['spawned'][customer_type] += 1
 
@@ -2734,8 +2899,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Build items dictionary for quick lookup (needed for CAS calculation)
     items_by_name = {item.name: item for item in game_state.items}
 
-    # Assign customers to players based on weighted CAS distribution
-    customer_assignments, cas_breakdowns_pre_shopping = assign_customers_by_cas(
+    # Assign customers to players based on weighted CAS distribution with specialization priority
+    customer_assignments, cas_breakdowns_pre_shopping = assign_customers_by_cas_with_specialization(
         all_customers,
         game_state.players,
         game_state.market_prices,
