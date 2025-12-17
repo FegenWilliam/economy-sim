@@ -26,14 +26,14 @@ def test_specialty_score():
         "Bananas": Item("Bananas", 1.5, 3.5, "Fresh Produce"),
     }
 
-    # Test Case 1: Empty inventory - should have 0 multiplier
+    # Test Case 1: Empty inventory - should have 1.0 multiplier (no bonus)
     print("\nTest Case 1: Empty Inventory")
     player1 = Player("Player1", cash=10000)
     mult, counts, cat_mults = calculate_specialty_score(player1, items_by_name)
-    print(f"  Multiplier: {mult} (expected: 0)")
+    print(f"  Multiplier: {mult} (expected: 1.0)")
     print(f"  Category counts: {counts}")
     print(f"  Category multipliers: {cat_mults}")
-    assert mult == 0, "Empty inventory should have 0 multiplier"
+    assert mult == 1.0, "Empty inventory should have 1.0x multiplier (no bonus)"
     print("  ✓ PASSED")
 
     # Test Case 2: 10 Food & Groceries items - should trigger first threshold (1.2x)
@@ -86,10 +86,11 @@ def test_specialty_score():
         player4.inventory[item_name] = 1  # Already created above
 
     mult, counts, cat_mults = calculate_specialty_score(player4, items_by_name)
-    print(f"  Multiplier: {mult} (expected: 2.7 = 1.2 + 1.5)")
+    print(f"  Multiplier: {mult} (expected: 1.7 = 1.0 + 0.2 + 0.5)")
     print(f"  Category counts: {counts}")
     print(f"  Category multipliers: {cat_mults}")
-    assert mult == 2.7, f"10 Food + 5 Gaming should give 2.7x total (1.2 + 1.5), got {mult}"
+    expected = 1.0 + 0.2 + 0.5  # base + Food bonus + Gaming bonus
+    assert abs(mult - expected) < 0.01, f"10 Food + 5 Gaming should give {expected}x total (1.0 + 0.2 + 0.5), got {mult}"
     print("  ✓ PASSED")
 
     # Test Case 5: Multiple thresholds in same category
@@ -103,12 +104,13 @@ def test_specialty_score():
         player5.inventory[item_name] = 1
 
     mult, counts, cat_mults = calculate_specialty_score(player5, items_by_name)
-    print(f"  Multiplier: {mult} (expected: 2.7 = 1.2 + 1.5)")
+    print(f"  Multiplier: {mult} (expected: 1.7 = 1.0 + 0.2 + 0.5)")
     print(f"  Category counts: {counts}")
     print(f"  Category multipliers: {cat_mults}")
     # Food & Groceries thresholds: [(10, 1.2), (30, 1.5), (60, 2.5)]
-    # With 30 items, should get 1.2 + 1.5 = 2.7
-    assert mult == 2.7, f"30 Food & Groceries should give 2.7x total (1.2 + 1.5), got {mult}"
+    # With 30 items, should get 1.0 base + 0.2 bonus (from 1.2x) + 0.5 bonus (from 1.5x) = 1.7x
+    expected = 1.0 + 0.2 + 0.5
+    assert abs(mult - expected) < 0.01, f"30 Food & Groceries should give {expected}x total (1.0 + 0.2 + 0.5), got {mult}"
     print("  ✓ PASSED")
 
     print("\n🎉 All specialty score tests PASSED!")

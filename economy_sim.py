@@ -38,7 +38,7 @@ PRODUCT_CATEGORIES = {
 # Specialty Score Configuration
 # Rewards players for stocking a certain number of items from each category
 # Format: category -> [(threshold, multiplier), ...] sorted by threshold ascending
-# Multipliers are ADDITIVE (e.g., 1.2x + 1.5x = 2.7x total)
+# Bonuses are ADDITIVE: 1.2x (20% bonus) + 1.8x (80% bonus) = 2.0x total (100% bonus)
 SPECIALTY_SCORE_THRESHOLDS = {
     # Essential categories (importance 3) - smaller bonuses
     "Food & Groceries": [(10, 1.2), (30, 1.5), (60, 2.5)],
@@ -1280,8 +1280,7 @@ class Customer:
                 continue
 
             # Calculate specialty score (category-based bonuses for item variety)
-            specialty_multiplier, _, _ = calculate_specialty_score(player, items_by_name)
-            specialty_multiplier_effective = 1.0 + specialty_multiplier
+            specialty_multiplier_effective, _, _ = calculate_specialty_score(player, items_by_name)
 
             # Calculate fulfillment multiplier based on historical performance
             fulfillment_pct = player.average_fulfillment_pct
@@ -2325,8 +2324,7 @@ def calculate_player_cas(
         return 0.0
 
     # Calculate specialty score (category-based bonuses for item variety)
-    specialty_multiplier, _, _ = calculate_specialty_score(player, items_by_name)
-    specialty_multiplier_effective = 1.0 + specialty_multiplier
+    specialty_multiplier_effective, _, _ = calculate_specialty_score(player, items_by_name)
 
     # Calculate fulfillment multiplier
     fulfillment_pct = player.average_fulfillment_pct
@@ -3566,12 +3564,12 @@ def calculate_specialty_score(player: Player, items_by_name: Dict[str, Item]) ->
     Calculate specialty score multiplier based on category item counts.
 
     Rewards players for stocking a certain number of items from specific categories.
-    All multipliers are ADDITIVE (e.g., 1.2x + 1.5x = 2.7x total).
+    Bonuses are ADDITIVE: 1.2x (20% bonus) + 1.8x (80% bonus) = 2.0x total (100% bonus).
 
     Returns:
-        - Total specialty multiplier (sum of all bonuses, starts at 0)
+        - Total specialty multiplier (1.0 + sum of all bonus percentages)
         - Dictionary of category -> count of items in stock
-        - Dictionary of category -> multiplier earned for that category
+        - Dictionary of category -> total bonus multiplier for that category
     """
     # Count items in stock per category
     category_counts: Dict[str, int] = {}
@@ -3587,23 +3585,26 @@ def calculate_specialty_score(player: Player, items_by_name: Dict[str, Item]) ->
         category = item.category
         category_counts[category] = category_counts.get(category, 0) + 1
 
-    # Calculate specialty multipliers for each category
+    # Calculate specialty bonuses for each category
     category_multipliers: Dict[str, float] = {}
-    total_multiplier = 0.0
+    total_bonus = 0.0  # Sum of bonus percentages (not full multipliers)
 
     for category, count in category_counts.items():
         thresholds = SPECIALTY_SCORE_THRESHOLDS.get(category, [])
         category_bonus = 0.0
 
-        # Sum all multipliers for thresholds met (additive)
+        # Sum all BONUSES for thresholds met (bonus = multiplier - 1.0)
         for threshold, multiplier in thresholds:
             if count >= threshold:
-                category_bonus += multiplier
+                bonus = multiplier - 1.0  # Extract the bonus percentage
+                category_bonus += bonus
 
         if category_bonus > 0:
-            category_multipliers[category] = category_bonus
-            total_multiplier += category_bonus
+            category_total_mult = 1.0 + category_bonus  # Convert back to multiplier for display
+            category_multipliers[category] = category_total_mult
+            total_bonus += category_bonus
 
+    total_multiplier = 1.0 + total_bonus
     return total_multiplier, category_counts, category_multipliers
 
 
@@ -3643,7 +3644,7 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
     item_stability = calculate_item_stability(player, market_prices, items_by_name)
 
     # Calculate specialty score (category-based bonuses for item variety)
-    specialty_multiplier, category_counts, category_multipliers = calculate_specialty_score(player, items_by_name)
+    specialty_multiplier_effective, category_counts, category_multipliers = calculate_specialty_score(player, items_by_name)
 
     # Calculate fulfillment multiplier
     fulfillment_pct = player.average_fulfillment_pct
@@ -3662,8 +3663,6 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
     marketing_effect = calculate_marketing_effect(player, market_prices)
 
     # Calculate final CAS
-    # Specialty multiplier is additive (starts at 0), so add 1.0 to make it a proper multiplier
-    specialty_multiplier_effective = 1.0 + specialty_multiplier
     final_cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * specialty_multiplier_effective * fulfillment_multiplier
 
     # Return all components as a dictionary
@@ -3676,7 +3675,7 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
         "marketing_effect": marketing_effect,
         "marketing_agents": player.marketing_agents,
         "specialty_multiplier": specialty_multiplier_effective,
-        "specialty_multiplier_raw": specialty_multiplier,
+        "specialty_multiplier_raw": specialty_multiplier_effective - 1.0,  # Just the bonus amount
         "category_counts": category_counts,
         "category_multipliers": category_multipliers,
         "fulfillment_multiplier": fulfillment_multiplier,
@@ -3724,7 +3723,8 @@ def display_cas_breakdown(player: Player, game_state: GameState, breakdown: Dict
         print(f"      Category Bonuses:")
         for category, multiplier in sorted(category_multipliers.items(), key=lambda x: x[1], reverse=True):
             count = category_counts.get(category, 0)
-            print(f"        • {category}: {count} items → +{multiplier:.2f}x")
+            bonus = multiplier - 1.0  # Convert full multiplier to bonus for display
+            print(f"        • {category}: {count} items → +{bonus:.2f}x")
 
     print(f"   Fulfillment Multiplier:  {fulfillment_multiplier:6.2f}x  ({fulfillment_pct:.0f}% avg)")
     print(f"   ─────────────────────────────────────────")
