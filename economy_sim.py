@@ -2225,6 +2225,38 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
                 _add_item_to_vendor(vendor, item, market_price)
 
 
+def vendor_would_sell_item(vendor: Vendor, item: Item, market_price: float) -> bool:
+    """
+    Check if a vendor would sell an item based on their selection criteria.
+    This is used for recurring orders and auto-restock to determine availability
+    independent of current inventory state.
+    """
+    # Check category restrictions first
+    if vendor.allowed_categories is not None:
+        if item.category not in vendor.allowed_categories:
+            return False
+
+    # Check selection type criteria
+    if vendor.selection_type == "random_daily":
+        # Random vendors might have it, but it's unpredictable
+        return True
+    elif vendor.selection_type == "price_threshold":
+        return market_price <= vendor.selection_params
+    elif vendor.selection_type == "price_range":
+        if vendor.price_min is not None and market_price < vendor.price_min:
+            return False
+        if vendor.price_max is not None and market_price > vendor.price_max:
+            return False
+        return True
+    elif vendor.selection_type == "all":
+        return True
+    elif vendor.selection_type == "category":
+        # Already checked category above
+        return True
+
+    return False
+
+
 def initialize_market_prices(items: List[Item]) -> Dict[str, float]:
     """
     Initialize market prices based on item base prices.
@@ -5527,7 +5559,6 @@ def recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
                     # Select vendor
                     print("\nAvailable Vendors:")
                     for i, vendor in enumerate(game_state.vendors, 1):
-                        price = vendor.get_price(item.name, 1)  # Show base price
                         min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                         vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
                         req_parts = []
@@ -5540,14 +5571,18 @@ def recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
                         lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                         effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
                         lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
-                        if price:
+
+                        # Check if vendor would sell this item based on their criteria
+                        market_price = game_state.market_prices.get(item.name, item.base_price)
+                        if vendor_would_sell_item(vendor, item, market_price):
+                            # Calculate estimated price
+                            estimated_price = market_price * vendor.pricing_multiplier
                             discount = player.get_vendor_discount(vendor.name, game_state.day)
-                            final_price = price * (1 - discount)
+                            final_price = estimated_price * (1 - discount)
                             discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
-                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ~${final_price:.2f}{discount_text} (lead: {lead_time_str})")
                         else:
-                            status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
+                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - (not available)")
 
                     vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
                     vendor_num = int(vendor_choice)
@@ -5618,8 +5653,13 @@ def recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
                     elif edit_option in ["1", "4"]:
                         # Change vendor
                         print("\nAvailable Vendors:")
+                        # Get the item object for this order
+                        order_item = game_state.items_by_name.get(order_to_edit.item_name)
+                        if not order_item:
+                            print(f"Error: Item {order_to_edit.item_name} not found!")
+                            continue
+
                         for i, vendor in enumerate(game_state.vendors, 1):
-                            price = vendor.get_price(order_to_edit.item_name, 1)  # Show base price
                             min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                             vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
                             req_parts = []
@@ -5632,14 +5672,18 @@ def recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
                             lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                             effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
                             lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
-                            if price:
+
+                            # Check if vendor would sell this item based on their criteria
+                            market_price = game_state.market_prices.get(order_to_edit.item_name, order_item.base_price)
+                            if vendor_would_sell_item(vendor, order_item, market_price):
+                                # Calculate estimated price
+                                estimated_price = market_price * vendor.pricing_multiplier
                                 discount = player.get_vendor_discount(vendor.name, game_state.day)
-                                final_price = price * (1 - discount)
+                                final_price = estimated_price * (1 - discount)
                                 discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
-                                print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                                print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ~${final_price:.2f}{discount_text} (lead: {lead_time_str})")
                             else:
-                                status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                                print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
+                                print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - (not available)")
 
                         vendor_choice = input(f"\nSelect new vendor (1-{len(game_state.vendors)}, 0 to keep current): ").strip()
                         vendor_num = int(vendor_choice)
@@ -5794,7 +5838,6 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
                     # If setting to positive value, select vendor
                     print("\nAvailable Vendors:")
                     for i, vendor in enumerate(game_state.vendors, 1):
-                        price = vendor.get_price(item.name, 1)  # Show base price
                         min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
                         vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
                         req_parts = []
@@ -5807,14 +5850,18 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
                         lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
                         effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
                         lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
-                        if price:
+
+                        # Check if vendor would sell this item based on their criteria
+                        market_price = game_state.market_prices.get(item.name, item.base_price)
+                        if vendor_would_sell_item(vendor, item, market_price):
+                            # Calculate estimated price
+                            estimated_price = market_price * vendor.pricing_multiplier
                             discount = player.get_vendor_discount(vendor.name, game_state.day)
-                            final_price = price * (1 - discount)
+                            final_price = estimated_price * (1 - discount)
                             discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
-                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ~${final_price:.2f}{discount_text} (lead: {lead_time_str})")
                         else:
-                            status = "(not in stock today)" if vendor.selection_type == "random_daily" else "(not available)"
-                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - {status}")
+                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - (not available)")
 
                     # If updating, show option to keep current vendor
                     if existing:
