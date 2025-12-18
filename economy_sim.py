@@ -5854,6 +5854,8 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
 
         print("\nOptions:")
         print("  1. Set/Update Stock Minimum (setting to 0 removes it and costs $500)")
+        print("  2. Bulk Change Vendor for All Set Items")
+        print("  3. Bulk Change Minimum Quantity for All Set Items")
         print("  0. Back to Auto Buy Menu")
 
         try:
@@ -5861,6 +5863,82 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
 
             if choice == "0":
                 break
+            elif choice == "2":
+                # Bulk change vendor for all set items
+                if not player.stock_minimum_restock:
+                    print("\n✗ No auto-restock items configured!")
+                    input("Press Enter to continue...")
+                    continue
+
+                print("\nBulk Change Vendor - This will change the vendor for ALL currently set items")
+                print(f"Currently configured items: {len(player.stock_minimum_restock)}")
+
+                print("\nAvailable Vendors:")
+                for i, vendor in enumerate(game_state.vendors, 1):
+                    min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                    vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                    req_parts = []
+                    if vendor.required_reputation:
+                        req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                    if vendor.required_level:
+                        req_parts.append(f"lvl: {vendor.required_level}")
+                    rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
+                    lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                    effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                    lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+                    print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} (lead: {lead_time_str})")
+
+                vendor_choice = input(f"\nSelect new vendor for all items (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+                vendor_num = int(vendor_choice)
+
+                if vendor_num == 0:
+                    continue
+                elif 1 <= vendor_num <= len(game_state.vendors):
+                    selected_vendor_name = game_state.vendors[vendor_num - 1].name
+
+                    # Update all items
+                    updated_count = 0
+                    for item_name, (minimum, old_vendor) in list(player.stock_minimum_restock.items()):
+                        player.stock_minimum_restock[item_name] = (minimum, selected_vendor_name)
+                        updated_count += 1
+
+                    print(f"\n✓ Updated vendor to '{selected_vendor_name}' for {updated_count} items")
+                    input("Press Enter to continue...")
+                else:
+                    print("\n✗ Invalid vendor selection!")
+                    input("Press Enter to continue...")
+
+            elif choice == "3":
+                # Bulk change minimum quantity for all set items
+                if not player.stock_minimum_restock:
+                    print("\n✗ No auto-restock items configured!")
+                    input("Press Enter to continue...")
+                    continue
+
+                print("\nBulk Change Minimum Quantity - This will change the minimum for ALL currently set items")
+                print(f"Currently configured items: {len(player.stock_minimum_restock)}")
+
+                min_str = input(f"\nSet new minimum quantity for all items (0 to cancel): ").strip()
+                minimum = int(min_str)
+
+                if minimum == 0:
+                    print("\n✗ Bulk change cancelled (use option 1 to remove individual items)")
+                    input("Press Enter to continue...")
+                    continue
+                elif minimum < 0:
+                    print("\n✗ Minimum cannot be negative!")
+                    input("Press Enter to continue...")
+                    continue
+
+                # Update all items
+                updated_count = 0
+                for item_name, (old_minimum, vendor) in list(player.stock_minimum_restock.items()):
+                    player.stock_minimum_restock[item_name] = (minimum, vendor)
+                    updated_count += 1
+
+                print(f"\n✓ Updated minimum quantity to {minimum} for {updated_count} items")
+                input("Press Enter to continue...")
+
             elif choice == "1":
                 # Set/Update stock minimum
                 print("\nSelect item to set/update stock minimum:")
