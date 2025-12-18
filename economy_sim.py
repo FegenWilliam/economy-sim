@@ -65,6 +65,30 @@ SPECIALTY_SCORE_THRESHOLDS = {
     "Luxury": [(5, 1.5), (10, 2.0), (15, 2.5), (18, 3.0)],
 }
 
+# Category Adjacency Mappings
+# Defines which categories are "adjacent" (make sense to be sold together in the same store)
+# Example: Electronics and Gaming are adjacent, but Electronics and Fresh Produce are not
+CATEGORY_ADJACENCY = {
+    "Food & Groceries": {"Fresh Produce", "Household Essentials", "Personal Care", "Health & Pharmacy", "Baby Products", "Pet Supplies"},
+    "Fresh Produce": {"Food & Groceries", "Household Essentials", "Health & Pharmacy"},
+    "Household Essentials": {"Food & Groceries", "Fresh Produce", "Personal Care", "Baby Products", "Kitchen & Dining", "Pet Supplies"},
+    "Personal Care": {"Food & Groceries", "Household Essentials", "Health & Pharmacy", "Baby Products"},
+    "Health & Pharmacy": {"Food & Groceries", "Fresh Produce", "Personal Care", "Baby Products", "Supplements"},
+    "Baby Products": {"Food & Groceries", "Household Essentials", "Personal Care", "Health & Pharmacy", "Toys & Games"},
+    "Supplements": {"Health & Pharmacy", "Sports & Outdoor", "Pet Supplies"},
+    "Pet Supplies": {"Food & Groceries", "Household Essentials", "Supplements"},
+    "Kitchen & Dining": {"Household Essentials", "Appliances", "Home Decor"},
+    "Office Supplies": {"Electronics"},  # Minimal adjacency
+    "Electronics": {"Gaming", "Appliances", "Automotive", "Luxury", "Office Supplies"},
+    "Appliances": {"Electronics", "Kitchen & Dining", "Home Decor"},
+    "Sports & Outdoor": {"Supplements", "Toys & Games", "Automotive"},
+    "Home Decor": {"Kitchen & Dining", "Appliances", "Luxury"},
+    "Automotive": {"Electronics", "Sports & Outdoor"},
+    "Gaming": {"Electronics", "Toys & Games", "Luxury"},
+    "Toys & Games": {"Baby Products", "Gaming", "Sports & Outdoor"},
+    "Luxury": {"Electronics", "Gaming", "Home Decor"},
+}
+
 
 # -------------------------------------------------------------------
 # Core data models
@@ -660,6 +684,8 @@ class Player:
     category_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # category_name -> (minimum_stock_per_item, vendor_name) for category auto-restock
     category_pricing: Dict[str, float] = field(default_factory=dict)  # category -> percentage below market (e.g., 5.0 = 5% below market)
     yesterday_demand: Dict[str, int] = field(default_factory=dict)  # item_name -> total quantity wanted yesterday (for lead time calculation)
+    category_sales_history: Dict[int, Dict[str, float]] = field(default_factory=dict)  # day -> category -> total_sales_value (for main category detection)
+    items_stocked_today: Set[str] = field(default_factory=set)  # Track items that were stocked for the first time today (resets each day)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -1036,13 +1062,18 @@ class Player:
             weighted_cost = ((current_inventory * current_cost) + (quantity * item.base_cost)) / new_total_qty
             self.item_costs[item.name] = weighted_cost
 
+        # Track if this is the first time stocking this item today
+        if current_inventory == 0 and quantity > 0:
+            self.items_stocked_today.add(item.name)
+
         self.inventory[item.name] = current_inventory + quantity
 
-    def sell_to_customer(self, item_name: str, quantity: int, unit_price: float) -> tuple:
+    def sell_to_customer(self, item_name: str, quantity: int, unit_price: float, current_day: int = 1, item_category: Optional[str] = None) -> tuple:
         """
         Attempt to sell 'quantity' units of 'item_name' at 'unit_price'.
         Returns (revenue, profit, units_sold) tuple.
         Profit = revenue - cost
+        Tracks sales by category for adjacency calculations.
         """
         available = self.inventory.get(item_name, 0)
         units_sold = min(quantity, available)
@@ -1058,6 +1089,13 @@ class Player:
 
             # Award +1 XP for each item sold (helps with leveling regardless of profit)
             self.add_experience(units_sold * 1.0)
+
+            # Track sales by category for adjacency calculations
+            if item_category is not None:
+                if current_day not in self.category_sales_history:
+                    self.category_sales_history[current_day] = {}
+                self.category_sales_history[current_day][item_category] = \
+                    self.category_sales_history[current_day].get(item_category, 0.0) + revenue
 
             return (revenue, profit, units_sold)
 
@@ -1193,6 +1231,10 @@ class Player:
                     weighted_cost = ((current_inventory * current_cost) + (total_items * final_price_per_unit)) / new_total_qty
                     self.item_costs[actual_item_name] = weighted_cost
 
+                # Track if this is the first time stocking this item today
+                if current_inventory == 0 and total_items > 0:
+                    self.items_stocked_today.add(actual_item_name)
+
                 self.inventory[actual_item_name] = new_total_qty
         else:
             # Immediate delivery - update inventory and weighted average cost
@@ -1204,6 +1246,10 @@ class Player:
             if new_total_qty > 0:
                 weighted_cost = ((current_inventory * current_cost) + (total_items * final_price_per_unit)) / new_total_qty
                 self.item_costs[actual_item_name] = weighted_cost
+
+            # Track if this is the first time stocking this item today
+            if current_inventory == 0 and total_items > 0:
+                self.items_stocked_today.add(actual_item_name)
 
             self.inventory[actual_item_name] = new_total_qty
 
@@ -3003,11 +3049,126 @@ def get_weighted_special_customer_type() -> str:
     return "hoarder"  # Fallback
 
 
+def get_player_main_category(player: Player, current_day: int) -> Optional[str]:
+    """
+    Determine the player's main category based on sales history from the last 7 days.
+
+    Returns the category with the highest total sales value over the last 7 days.
+    If less than 7 days of data exists, uses all available data.
+    Returns None if no sales history exists.
+    """
+    # Get the range of days to consider (last 7 days, or all available if less than 7)
+    start_day = max(1, current_day - 6)  # Look back 7 days including today
+
+    # Aggregate sales by category across the time period
+    category_totals: Dict[str, float] = {}
+
+    for day in range(start_day, current_day + 1):
+        if day in player.category_sales_history:
+            for category, sales in player.category_sales_history[day].items():
+                category_totals[category] = category_totals.get(category, 0.0) + sales
+
+    if not category_totals:
+        return None
+
+    # Return the category with the highest total sales
+    return max(category_totals.items(), key=lambda x: x[1])[0]
+
+
+def get_non_adjacent_categories(player: Player, items_by_name: Dict[str, Item], current_day: int) -> Set[str]:
+    """
+    Get all categories that are non-adjacent to the player's main category.
+
+    Returns a set of category names that are stocked but not adjacent to the main category.
+    """
+    main_category = get_player_main_category(player, current_day)
+
+    # If no main category (no sales yet), treat all stocked categories as adjacent
+    if main_category is None:
+        return set()
+
+    # Get all categories the player currently stocks
+    stocked_categories = set()
+    for item_name, quantity in player.inventory.items():
+        if quantity > 0 and item_name in items_by_name:
+            stocked_categories.add(items_by_name[item_name].category)
+
+    # Remove the main category itself
+    stocked_categories.discard(main_category)
+
+    # Get adjacent categories for the main category
+    adjacent_categories = CATEGORY_ADJACENCY.get(main_category, set())
+
+    # Return categories that are stocked but not adjacent
+    non_adjacent = stocked_categories - adjacent_categories
+    return non_adjacent
+
+
+def calculate_adjacency_multiplier(
+    player: Player,
+    items_by_name: Dict[str, Item],
+    current_day: int,
+    check_temporary: bool = False
+) -> float:
+    """
+    Calculate the CAS multiplier based on non-adjacent categories.
+
+    Permanent effect based on number of non-adjacent categories:
+    - 1 non-adjacent: 0.9x
+    - 3 non-adjacent: 0.6x
+    - 7 non-adjacent: 0.4x
+    - 10+ non-adjacent: 0.1x
+
+    Temporary effect (today only): 0.9x if a new non-adjacent item was stocked today.
+
+    Args:
+        player: The player to calculate for
+        items_by_name: Dictionary mapping item names to Item objects
+        current_day: Current game day
+        check_temporary: If True, also apply temporary penalty for new items today
+
+    Returns:
+        The multiplier to apply to CAS (e.g., 0.9 for 10% penalty)
+    """
+    multiplier = 1.0
+
+    # Calculate permanent penalty based on non-adjacent category count
+    non_adjacent = get_non_adjacent_categories(player, items_by_name, current_day)
+    non_adjacent_count = len(non_adjacent)
+
+    if non_adjacent_count >= 10:
+        multiplier *= 0.1
+    elif non_adjacent_count >= 7:
+        multiplier *= 0.4
+    elif non_adjacent_count >= 3:
+        multiplier *= 0.6
+    elif non_adjacent_count >= 1:
+        multiplier *= 0.9
+
+    # Check for temporary penalty (new non-adjacent items stocked today)
+    if check_temporary and player.items_stocked_today:
+        main_category = get_player_main_category(player, current_day)
+        if main_category is not None:
+            adjacent_categories = CATEGORY_ADJACENCY.get(main_category, set())
+
+            # Check if any newly stocked item today is from a non-adjacent category
+            for item_name in player.items_stocked_today:
+                if item_name in items_by_name:
+                    item_category = items_by_name[item_name].category
+                    if item_category != main_category and item_category not in adjacent_categories:
+                        # Found a new non-adjacent item, apply temporary 0.9x penalty
+                        multiplier *= 0.9
+                        break  # Only apply once, even if multiple new non-adjacent items
+
+    return multiplier
+
+
 def calculate_player_cas(
     player: Player,
     market_prices: Dict[str, float],
     items_by_name: Dict[str, Item],
-    all_available_items: List[Item]
+    all_available_items: List[Item],
+    current_day: int = 1
 ) -> float:
     """
     Calculate Customer Attraction Score (CAS) for a player based on their overall store.
@@ -3019,7 +3180,8 @@ def calculate_player_cas(
     - item_stability = sum of proximity and consistency scores
     - specialty_multiplier based on category item counts (additive bonuses)
     - fulfillment_multiplier based on average fulfillment %
-    - CAS = (discount_score + item_stability) * reputation_multiplier * specialty_multiplier * fulfillment_multiplier
+    - adjacency_multiplier based on non-adjacent categories (0.1x to 1.0x)
+    - CAS = (discount_score + item_stability) * reputation_multiplier * specialty_multiplier * fulfillment_multiplier * adjacency_multiplier
 
     Returns 0 if player has no stock or no acceptable prices.
     """
@@ -3090,8 +3252,11 @@ def calculate_player_cas(
     # Calculate marketing effect (adds to both discount and stability)
     marketing_effect = calculate_marketing_effect(player, market_prices)
 
+    # Calculate adjacency multiplier (penalty for non-adjacent categories)
+    adjacency_multiplier = calculate_adjacency_multiplier(player, items_by_name, current_day, check_temporary=True)
+
     # Calculate final CAS (marketing effect boosts both components)
-    cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * specialty_multiplier_effective * fulfillment_multiplier
+    cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * specialty_multiplier_effective * fulfillment_multiplier * adjacency_multiplier
 
     return cas
 
@@ -3226,7 +3391,8 @@ def assign_customers_by_cas_with_specialization(
     players: List[Player],
     market_prices: Dict[str, float],
     items_by_name: Dict[str, Item],
-    all_available_items: List[Item]
+    all_available_items: List[Item],
+    current_day: int = 1
 ) -> Tuple[Dict[str, List[Customer]], Dict[str, Dict[str, Any]]]:
     """
     Assign customers to players with CAS-first, then specialization overflow.
@@ -3240,7 +3406,7 @@ def assign_customers_by_cas_with_specialization(
        - If no specialized player exists: keep original CAS assignment
     """
     # First, do normal CAS assignment
-    assignments, cas_breakdowns = assign_customers_by_cas(customers, players, market_prices, items_by_name, all_available_items)
+    assignments, cas_breakdowns = assign_customers_by_cas(customers, players, market_prices, items_by_name, all_available_items, current_day)
 
     # Create a player lookup by name for easier access
     players_by_name = {player.name: player for player in players}
@@ -3288,7 +3454,8 @@ def assign_customers_by_cas(
     players: List[Player],
     market_prices: Dict[str, float],
     items_by_name: Dict[str, Item],
-    all_available_items: List[Item]
+    all_available_items: List[Item],
+    current_day: int = 1
 ) -> Tuple[Dict[str, List[Customer]], Dict[str, Dict[str, Any]]]:
     """
     Assign customers to players based on proportional CAS distribution.
@@ -3304,7 +3471,7 @@ def assign_customers_by_cas(
     player_cas = {}
     cas_breakdowns = {}
     for player in players:
-        breakdown = calculate_cas_breakdown(player, market_prices, items_by_name, all_available_items)
+        breakdown = calculate_cas_breakdown(player, market_prices, items_by_name, all_available_items, current_day)
         cas = breakdown["final_cas"]
         player_cas[player.name] = cas
         cas_breakdowns[player.name] = breakdown
@@ -3492,6 +3659,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[item_name] = original_price
         game_state.event_price_changes.clear()
 
+    # Reset items stocked today for all players (new day starts)
+    for player in game_state.players:
+        player.items_stocked_today.clear()
+
     # Check for special events
     if game_state.day % 30 == 0 and show_details:
         # 30-day event: one item -50%, one item +50%
@@ -3657,7 +3828,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         game_state.players,
         game_state.market_prices,
         items_by_name,
-        game_state.items
+        game_state.items,
+        game_state.day
     )
 
     # Process customers for each player
@@ -3745,8 +3917,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
                                 if affordable_quantity > 0:
                                     # Purchase from current supplier
+                                    item_category = items_by_name.get(need.item_name).category if need.item_name in items_by_name else None
                                     revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
-                                        need.item_name, affordable_quantity, supplier_price
+                                        need.item_name, affordable_quantity, supplier_price, game_state.day, item_category
                                     )
 
                                     if revenue > 0 and actual_units_sold > 0:
@@ -3900,7 +4073,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 if supplier:
                     # Uncapped customers bypass cashier limits
                     price = supplier.prices.get(need.item_name, 0)
-                    revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                    item_category = items_by_name.get(need.item_name).category if need.item_name in items_by_name else None
+                    revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price, game_state.day, item_category)
                     if revenue > 0:
                         daily_sales[supplier.name] += revenue
                         daily_profits[supplier.name] += profit
@@ -4062,7 +4236,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     if need.item_name in supplier.prices:
                         price = supplier.prices[need.item_name]
                         # Special customers bypass the 15% market price rule
-                        revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price)
+                        item_category = items_by_name.get(need.item_name).category if need.item_name in items_by_name else None
+                        revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price, game_state.day, item_category)
 
                         if revenue > 0:
                             daily_sales[supplier.name] += revenue
@@ -4419,6 +4594,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 weighted_cost = ((current_inventory * current_cost) + (quantity * cost_per_item)) / new_total_qty
                 player.item_costs[item_name] = weighted_cost
 
+            # Track if this is the first time stocking this item today
+            if current_inventory == 0 and quantity > 0:
+                player.items_stocked_today.add(item_name)
+
             player.inventory[item_name] = new_total_qty
 
             if player.is_human:
@@ -4618,7 +4797,7 @@ def calculate_specialty_score(player: Player, items_by_name: Dict[str, Item]) ->
     return total_multiplier, category_counts, category_multipliers
 
 
-def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], items_by_name: Dict[str, Item], all_available_items: List[Item]) -> Dict[str, Any]:
+def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], items_by_name: Dict[str, Item], all_available_items: List[Item], current_day: int = 1) -> Dict[str, Any]:
     """
     Calculate Customer Attraction Score (CAS) breakdown for a player.
     Returns a dictionary with all CAS components.
@@ -4676,8 +4855,15 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
     # Calculate marketing effect
     marketing_effect = calculate_marketing_effect(player, market_prices)
 
+    # Calculate adjacency multiplier (penalty for non-adjacent categories)
+    adjacency_multiplier = calculate_adjacency_multiplier(player, items_by_name, current_day, check_temporary=True)
+
+    # Get non-adjacent categories for display
+    non_adjacent_categories = get_non_adjacent_categories(player, items_by_name, current_day)
+    main_category = get_player_main_category(player, current_day)
+
     # Calculate final CAS
-    final_cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * specialty_multiplier_effective * fulfillment_multiplier
+    final_cas = (discount_score + marketing_effect + item_stability + marketing_effect) * reputation_multiplier * specialty_multiplier_effective * fulfillment_multiplier * adjacency_multiplier
 
     # Return all components as a dictionary
     return {
@@ -4694,6 +4880,9 @@ def calculate_cas_breakdown(player: Player, market_prices: Dict[str, float], ite
         "category_multipliers": category_multipliers,
         "fulfillment_multiplier": fulfillment_multiplier,
         "fulfillment_pct": fulfillment_pct,
+        "adjacency_multiplier": adjacency_multiplier,
+        "non_adjacent_categories": non_adjacent_categories,
+        "main_category": main_category,
         "final_cas": final_cas
     }
 
@@ -4706,7 +4895,7 @@ def display_cas_breakdown(player: Player, game_state: GameState, breakdown: Dict
     if breakdown is None:
         # Build items_by_name dict for item_stability calculation
         items_by_name = {item.name: item for item in game_state.items}
-        breakdown = calculate_cas_breakdown(player, game_state.market_prices, items_by_name, game_state.items)
+        breakdown = calculate_cas_breakdown(player, game_state.market_prices, items_by_name, game_state.items, game_state.day)
 
     # Extract values from breakdown
     discount_score = breakdown["discount_score"]
@@ -4721,6 +4910,9 @@ def display_cas_breakdown(player: Player, game_state: GameState, breakdown: Dict
     category_multipliers = breakdown["category_multipliers"]
     fulfillment_multiplier = breakdown["fulfillment_multiplier"]
     fulfillment_pct = breakdown["fulfillment_pct"]
+    adjacency_multiplier = breakdown.get("adjacency_multiplier", 1.0)
+    non_adjacent_categories = breakdown.get("non_adjacent_categories", set())
+    main_category = breakdown.get("main_category", None)
     final_cas = breakdown["final_cas"]
     reputation = breakdown["reputation"]
 
@@ -4741,6 +4933,16 @@ def display_cas_breakdown(player: Player, game_state: GameState, breakdown: Dict
             print(f"        • {category}: {count} items → +{bonus:.2f}x")
 
     print(f"   Fulfillment Multiplier:  {fulfillment_multiplier:6.2f}x  ({fulfillment_pct:.0f}% avg)")
+
+    # Display adjacency multiplier information
+    print(f"   Adjacency Multiplier:    {adjacency_multiplier:6.2f}x", end="")
+    if main_category:
+        print(f"  (main: {main_category})")
+        if non_adjacent_categories:
+            print(f"      Non-adjacent categories: {', '.join(sorted(non_adjacent_categories))}")
+    else:
+        print("  (no main category yet)")
+
     print(f"   ─────────────────────────────────────────")
     print(f"   📈 FINAL CAS = {final_cas:.2f}")
 
@@ -7705,6 +7907,8 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "stock_minimum_restock": {k: list(v) for k, v in player.stock_minimum_restock.items()},
                 "category_minimum_restock": {k: list(v) for k, v in player.category_minimum_restock.items()},
                 "category_pricing": player.category_pricing,
+                "category_sales_history": {str(k): v for k, v in player.category_sales_history.items()},  # Convert day (int) to str for JSON
+                "items_stocked_today": list(player.items_stocked_today),
             }
             for player in game_state.players
         ],
@@ -7875,6 +8079,13 @@ def deserialize_game_state(data: dict) -> GameState:
         # Load category pricing
         category_pricing = player_data.get("category_pricing", {})
 
+        # Load category sales history (convert str keys back to int)
+        category_sales_history_raw = player_data.get("category_sales_history", {})
+        category_sales_history = {int(k): v for k, v in category_sales_history_raw.items()}
+
+        # Load items stocked today
+        items_stocked_today = set(player_data.get("items_stocked_today", []))
+
         player = Player(
             name=player_data["name"],
             cash=player_data["cash"],
@@ -7902,6 +8113,8 @@ def deserialize_game_state(data: dict) -> GameState:
             stock_minimum_restock=stock_minimum_restock,
             category_minimum_restock=category_minimum_restock,
             category_pricing=category_pricing,
+            category_sales_history=category_sales_history,
+            items_stocked_today=items_stocked_today,
         )
         players.append(player)
 
