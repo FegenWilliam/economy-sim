@@ -299,13 +299,6 @@ Employees are paid **every 30 days**:
 
 Permanent improvements to your store. One-time purchase.
 
-### Capacity Upgrades
-
-| Upgrade | Cost | Benefit |
-|---------|------|---------|
-| **Warehouse Extension** | $5,000 | +400 item restocking capacity |
-| **Loading Dock** | $10,000 | +600 item restocking capacity |
-
 ### Progression Upgrades
 
 | Upgrade | Cost | Benefit |
