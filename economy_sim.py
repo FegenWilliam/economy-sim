@@ -6811,8 +6811,9 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
     items_by_name = {item.name: item for item in game_state.items}
 
     while True:
-        # Get items from both inventory and buy orders
+        # Get items from inventory, buy orders, and auto-features
         relevant_item_names = set()
+        relevant_categories = set()
 
         # Add items from inventory
         for item_name, qty in player.inventory.items():
@@ -6825,7 +6826,19 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
             if total_qty > 0:
                 relevant_item_names.add(item_name)
 
-        # Get categories that have items in inventory or buy orders
+        # Add items from recurring buy orders
+        for order in player.recurring_buy_orders:
+            relevant_item_names.add(order.item_name)
+
+        # Add items from auto-restock
+        for item_name in player.stock_minimum_restock.keys():
+            relevant_item_names.add(item_name)
+
+        # Add categories from category auto-restock
+        for category_name in player.category_minimum_restock.keys():
+            relevant_categories.add(category_name)
+
+        # Get categories that have items in inventory, buy orders, or auto-features
         categories_with_items = {}
         for item_name in relevant_item_names:
             if item_name in items_by_name:
@@ -6834,11 +6847,20 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
                     categories_with_items[item.category] = []
                 categories_with_items[item.category].append(item)
 
+        # Add categories from category auto-restock (include all items in those categories)
+        for category_name in relevant_categories:
+            if category_name not in categories_with_items:
+                categories_with_items[category_name] = []
+            # Add all items from this category
+            for item in game_state.items:
+                if item.category == category_name and item not in categories_with_items[category_name]:
+                    categories_with_items[category_name].append(item)
+
         if not categories_with_items:
             print("\n" + "=" * 70)
             print("CATEGORY PRICING - Set Prices by Category")
             print("=" * 70)
-            print("\nYou have no items in inventory or buy orders to price.")
+            print("\nYou have no items in inventory, buy orders, or auto-features to price.")
             input("\nPress Enter to return to main menu...")
             break
 
@@ -7404,7 +7426,7 @@ def serialize_game_state(game_state: GameState) -> dict:
             "customers_per_day": game_state.config.customers_per_day,
         },
         "items": [
-            {"name": item.name, "base_cost": item.base_cost, "base_price": item.base_price, "category": item.category}
+            {"name": item.name, "base_cost": item.base_cost, "base_price": item.base_price, "category": item.category, "size": item.size}
             for item in game_state.items
         ],
         "market_prices": game_state.market_prices,
@@ -7489,6 +7511,8 @@ def serialize_game_state(game_state: GameState) -> dict:
                     for order in player.recurring_buy_orders
                 ],
                 "stock_minimum_restock": {k: list(v) for k, v in player.stock_minimum_restock.items()},
+                "category_minimum_restock": {k: list(v) for k, v in player.category_minimum_restock.items()},
+                "category_pricing": player.category_pricing,
             }
             for player in game_state.players
         ],
@@ -7504,6 +7528,7 @@ def serialize_game_state(game_state: GameState) -> dict:
         ],
         "vendor_daily_purchases": game_state.vendor_daily_purchases,
         "players_passed": list(game_state.players_passed),
+        "item_demand": game_state.item_demand,
     }
 
 
@@ -7530,7 +7555,8 @@ def deserialize_game_state(data: dict) -> GameState:
             name=item_data["name"],
             base_cost=item_data["base_cost"],
             base_price=item_data["base_price"],
-            category=category
+            category=category,
+            size=item_data.get("size", 1.0)  # Backward compatibility: default to 1.0
         ))
 
     # Recreate vendors with backward compatibility for lead_time
@@ -7643,6 +7669,14 @@ def deserialize_game_state(data: dict) -> GameState:
             k: tuple(v) for k, v in player_data.get("stock_minimum_restock", {}).items()
         }
 
+        # Recreate category minimum restock (convert lists back to tuples)
+        category_minimum_restock = {
+            k: tuple(v) for k, v in player_data.get("category_minimum_restock", {}).items()
+        }
+
+        # Load category pricing
+        category_pricing = player_data.get("category_pricing", {})
+
         player = Player(
             name=player_data["name"],
             cash=player_data["cash"],
@@ -7668,6 +7702,8 @@ def deserialize_game_state(data: dict) -> GameState:
             price_history=player_data.get("price_history", {}),
             recurring_buy_orders=recurring_buy_orders,
             stock_minimum_restock=stock_minimum_restock,
+            category_minimum_restock=category_minimum_restock,
+            category_pricing=category_pricing,
         )
         players.append(player)
 
@@ -7689,7 +7725,17 @@ def deserialize_game_state(data: dict) -> GameState:
         unlocked_product_indices=data.get("unlocked_product_indices", []),
         vendor_daily_purchases=data.get("vendor_daily_purchases", {}),
         players_passed=set(data.get("players_passed", [])),
+        item_demand=data.get("item_demand", {}),
     )
+
+    # Backward compatibility: Initialize item_demand for any items that don't have it
+    if game_state.item_demand:
+        for item in game_state.items:
+            if item.name not in game_state.item_demand:
+                game_state.item_demand[item.name] = 1.0
+    else:
+        # If no item_demand data at all, initialize it
+        game_state.item_demand = initialize_item_demand(game_state.items)
 
     return game_state
 
