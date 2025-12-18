@@ -1452,9 +1452,9 @@ class Customer:
         if self.customer_type == "low":
             max_items = 5
         elif self.customer_type == "medium":
-            max_items = 10
-        elif self.customer_type == "high":
             max_items = 15
+        elif self.customer_type == "high":
+            max_items = 30
         else:
             max_items = 5  # Default fallback
 
@@ -2362,8 +2362,8 @@ def update_item_demand(game_state: GameState) -> List[str]:
             game_state.item_demand[item.name] = 0.5
             updated_items.append(item.name)
 
-    # Step 2: Apply random changes to 1/4 of items
-    num_items_to_update = max(1, (len(game_state.items) + 3) // 4)  # Ceiling division
+    # Step 2: Apply random changes to 5 items
+    num_items_to_update = min(5, len(game_state.items))  # Flat 5 items (or all if less than 5)
 
     # Randomly select items to update (may include items already reset)
     items_to_update = random.sample(game_state.items, min(num_items_to_update, len(game_state.items)))
@@ -4055,18 +4055,35 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             level_up_text = f" 🎉LVL{level_ups[player.name]}!" if player.name in level_ups else ""
             print(f"  {player.name}: Sales ${sales:.2f}, Profit ${profit:.2f}, Lvl {player.store_level} ({player.experience:.0f}/{xp_needed:.0f}XP){level_up_text}, Cust {served} (A:{allocated_served}/{allocated_assigned}, O:{overflow_served}{uncapped_text}), Items {total_items_sold}, Cash ${player.cash:.2f}")
 
-            # Show per-item sales breakdown
+            # Show per-category sales breakdown
             if per_item_sales[player.name]:
-                items_breakdown = []
-                for item_name, data in sorted(per_item_sales[player.name].items()):
-                    if data['units_sold'] > 0:
-                        items_breakdown.append(f"{item_name}: {data['units_sold']}")
-                if items_breakdown:
-                    print(f"    Sales: {', '.join(items_breakdown)}")
+                # Create item name to category mapping
+                item_to_category = {item.name: item.category for item in game_state.items}
 
-            # Show inventory (end of day)
+                # Aggregate sales by category
+                category_sales = {}
+                for item_name, data in per_item_sales[player.name].items():
+                    if data['units_sold'] > 0:
+                        category = item_to_category.get(item_name, "Unknown")
+                        category_sales[category] = category_sales.get(category, 0) + data['units_sold']
+
+                if category_sales:
+                    categories_breakdown = [f"{cat}: {qty}" for cat, qty in sorted(category_sales.items())]
+                    print(f"    Sales: {', '.join(categories_breakdown)}")
+
+            # Show inventory by category (end of day)
             if player.inventory:
-                inventory_items = [f"{item}: {qty}" for item, qty in sorted(player.inventory.items())]
+                # Create item name to category mapping (reuse if already created above)
+                if 'item_to_category' not in locals():
+                    item_to_category = {item.name: item.category for item in game_state.items}
+
+                # Aggregate inventory by category
+                category_inventory = {}
+                for item_name, qty in player.inventory.items():
+                    category = item_to_category.get(item_name, "Unknown")
+                    category_inventory[category] = category_inventory.get(category, 0) + qty
+
+                inventory_items = [f"{cat}: {qty}" for cat, qty in sorted(category_inventory.items())]
                 print(f"    Inv: {', '.join(inventory_items)}")
 
             # Show pricing for sold items only
