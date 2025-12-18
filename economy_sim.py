@@ -7316,6 +7316,17 @@ def deserialize_game_state(data: dict) -> GameState:
         for vendor_data in data["vendors"]
     ]
 
+    # Backward compatibility: Add any missing vendors from the current vendor list
+    # This ensures that if new vendors are added to the game, old save files will get them
+    current_vendor_names = {v.name for v in vendors}
+    all_vendors = create_vendors()  # Get the current full vendor list
+
+    for default_vendor in all_vendors:
+        if default_vendor.name not in current_vendor_names:
+            # Add the missing vendor
+            vendors.append(default_vendor)
+            print(f"✓ Added new vendor to saved game: {default_vendor.name}")
+
     # Regenerate available upgrades (don't load from save to ensure balance changes are applied)
     available_upgrades = create_default_upgrades(vendors)
 
