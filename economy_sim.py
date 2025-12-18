@@ -7015,7 +7015,7 @@ def main_menu(game_state: GameState) -> bool:
 # Save/Load System
 # -------------------------------------------------------------------
 
-SAVE_FILE = "economy_sim_save.json"
+SAVE_FILE = "economy_sim_save_2_0.json"
 
 def serialize_game_state(game_state: GameState) -> dict:
     """Convert GameState to a JSON-serializable dictionary."""
