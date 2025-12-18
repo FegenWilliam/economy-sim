@@ -7541,22 +7541,28 @@ def deserialize_game_state(data: dict) -> GameState:
         customers_per_day=data["config"]["customers_per_day"],
     )
 
-    # Recreate items with backward compatibility for missing category
+    # Recreate items with backward compatibility for missing category and size
     items = []
     for item_data in data["items"]:
+        # Try to find matching item in PRODUCT_CATALOG for backward compatibility
+        matching_item = next((item for item in PRODUCT_CATALOG if item.name == item_data["name"]), None)
+
         # Get category from saved data, or look it up in PRODUCT_CATALOG, or use default
         category = item_data.get("category")
         if not category:
-            # Try to find matching item in PRODUCT_CATALOG for backward compatibility
-            matching_item = next((item for item in PRODUCT_CATALOG if item.name == item_data["name"]), None)
             category = matching_item.category if matching_item else "Food & Groceries"
+
+        # Get size from saved data, or look it up in PRODUCT_CATALOG, or use default
+        size = item_data.get("size")
+        if size is None:
+            size = matching_item.size if matching_item else 1.0
 
         items.append(Item(
             name=item_data["name"],
             base_cost=item_data["base_cost"],
             base_price=item_data["base_price"],
             category=category,
-            size=item_data.get("size", 1.0)  # Backward compatibility: default to 1.0
+            size=size
         ))
 
     # Recreate vendors with backward compatibility for lead_time
