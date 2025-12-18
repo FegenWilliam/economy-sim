@@ -7453,6 +7453,8 @@ def run_game() -> None:
             game_state = load_game()
             if game_state:
                 print("✓ Game loaded successfully!")
+                # Refresh vendor inventory to ensure vendors have proper stock for current day
+                refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
                 _current_game_state = game_state
             else:
                 print("✗ Failed to load game. Starting new game...")
