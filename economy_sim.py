@@ -4111,16 +4111,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     updated_items = update_item_demand(game_state)
     if show_details and updated_items:
         print(f"\n📊 DEMAND UPDATE: {len(updated_items)} items had demand changes")
-        # Show top 3 demand changes if there are any
-        demand_changes = [(item_name, game_state.item_demand[item_name]) for item_name in updated_items[:3]]
-        for item_name, demand in demand_changes:
-            if demand >= 1.5:
-                emoji = "📈"
-            elif demand <= 0.5:
-                emoji = "📉"
-            else:
-                emoji = "➡️"
-            print(f"   {emoji} {item_name}: {demand:.2f}x demand")
+        # Show demand changes in compact format (5 items per line)
+        demand_changes = [(item_name, game_state.item_demand[item_name]) for item_name in updated_items]
+        items_per_line = 5
+        for i in range(0, len(demand_changes), items_per_line):
+            line_items = demand_changes[i:i+items_per_line]
+            formatted_items = []
+            for item_name, demand in line_items:
+                if demand >= 1.5:
+                    emoji = "📈"
+                elif demand <= 0.5:
+                    emoji = "📉"
+                else:
+                    emoji = "➡️"
+                formatted_items.append(f"{emoji}{item_name}:{demand:.2f}x")
+            print(f"   {' | '.join(formatted_items)}")
 
     # Apply price fluctuations for next day (before other end-of-day processing)
     # Done here so we can display it near demand changes
