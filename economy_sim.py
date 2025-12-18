@@ -117,12 +117,17 @@ def get_package_info(item: Item, package_type: str = "standard") -> tuple:
         Tuple of (package_name, quantity_in_package, package_size)
 
     For items with size >= 5, returns the item as-is (no packaging).
+    For luxury items, returns the item as-is (no packaging).
     For items with size < 5:
     - Standard package: 5 size total
     - Bulk package: 20 size total (only available at Bulk Master Co.)
     """
     # Items >= 5 size are not packaged
     if item.size >= 5.0:
+        return (item.name, 1, item.size)
+
+    # Luxury items are not packaged (nobody buys 50x diamond earrings)
+    if item.category == "Luxury":
         return (item.name, 1, item.size)
 
     # Determine target package size

@@ -36,12 +36,19 @@ large_item = next(item for item in PRODUCT_CATALOG if item.size >= 5.0)
 large_package, large_qty, large_size = get_package_info(large_item, "standard")
 print(f"  {large_item.name} (size {large_item.size}): {large_package} (no packaging, size: {large_size})")
 
+# Luxury items should NOT be packaged regardless of size
+luxury_item = next(item for item in PRODUCT_CATALOG if item.category == "Luxury" and item.size < 5.0)
+luxury_package, luxury_qty, luxury_size = get_package_info(luxury_item, "standard")
+print(f"  {luxury_item.name} (size {luxury_item.size}, Luxury): {luxury_package} (no packaging, size: {luxury_size})")
+
 assert pens_qty == 50, f"Expected 50 pens in package, got {pens_qty}"
 assert batteries_qty == 16, f"Expected 16 batteries in package, got {batteries_qty}"
 assert pens_bulk_qty == 200, f"Expected 200 pens in bulk package, got {pens_bulk_qty}"
 assert bread_qty == 5, f"Expected 5 bread in package, got {bread_qty}"
 assert large_package == large_item.name, "Large items should not be packaged"
 assert large_qty == 1, "Large items should have quantity of 1"
+assert luxury_package == luxury_item.name, "Luxury items should not be packaged"
+assert luxury_qty == 1, "Luxury items should have quantity of 1"
 print("  ✓ Package info generation works correctly")
 
 # Test 2: Package name parsing
@@ -86,6 +93,10 @@ assert "Bread" not in test_vendor.items, "Test vendor should not have individual
 
 # Check that large items are not packaged
 assert large_item.name in test_vendor.items, f"Test vendor should have unpacked {large_item.name}"
+
+# Check that luxury items are not packaged
+assert luxury_item.name in test_vendor.items, f"Test vendor should have unpacked {luxury_item.name}"
+print(f"  Luxury item ({luxury_item.name}) correctly NOT packaged")
 
 # Check package pricing
 pens_market_price = market_prices["Pens"]
