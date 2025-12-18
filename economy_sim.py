@@ -2501,7 +2501,7 @@ def apply_daily_price_fluctuation(market_prices: Dict[str, float], items: List[I
 # Buy order execution
 # -------------------------------------------------------------------
 
-def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
+def execute_buy_orders(player: Player, game_state: GameState) -> tuple[Dict[str, int], float]:
     """
     Execute a player's buy orders, purchasing from cheapest to most expensive items.
 
@@ -2518,7 +2518,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     NEW: Manual buy orders only execute if total warehouse space required >= 1000.
     If below 1000, the entire manual buy order is cancelled for the day.
 
-    Returns a dictionary of items purchased: {item_name: quantity_bought}
+    Returns a tuple of (items purchased: {item_name: quantity_bought}, inventory_size_used: float)
     """
     purchases = {}
 
@@ -2533,7 +2533,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     # Check if total space required meets minimum threshold
     if total_space_required < 1000:
         # Cancel entire manual buy order
-        return purchases
+        return purchases, 0.0
 
     total_size_bought = 0.0
     max_inventory = player.get_max_inventory()
@@ -2631,16 +2631,17 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
                     purchases[item_name] = affordable_quantity
                     total_size_bought += affordable_quantity * item_size
 
-    return purchases
+    return purchases, total_size_bought
 
 
-def execute_recurring_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
+def execute_recurring_buy_orders(player: Player, game_state: GameState) -> tuple[Dict[str, int], float]:
     """
     Execute recurring buy orders that are due (based on interval_days).
 
-    Returns a dictionary of items purchased: {item_name: quantity_bought}
+    Returns a tuple of (items purchased: {item_name: quantity_bought}, inventory_size_used: float)
     """
     purchases = {}
+    total_size_used = 0.0
     current_day = game_state.day
 
     for order in player.recurring_buy_orders:
@@ -2689,18 +2690,21 @@ def execute_recurring_buy_orders(player: Player, game_state: GameState) -> Dict[
                 items_added = packages_to_buy * items_per_package
                 purchases[order.item_name] = purchases.get(order.item_name, 0) + items_added
                 order.last_executed_day = current_day
+                # Track inventory size used
+                total_size_used += items_added * item.size
 
-    return purchases
+    return purchases, total_size_used
 
 
-def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Dict[str, int]:
+def execute_stock_minimum_restock(player: Player, game_state: GameState) -> tuple[Dict[str, int], float]:
     """
     Execute stock minimum restock orders for items below their minimum threshold.
     Respects packaging system - buys at least 1 package if the item is packaged.
 
-    Returns a dictionary of items purchased: {item_name: quantity_bought}
+    Returns a tuple of (items purchased: {item_name: quantity_bought}, inventory_size_used: float)
     """
     purchases = {}
+    total_size_used = 0.0
 
     for item_name, (minimum_stock, vendor_name) in player.stock_minimum_restock.items():
         # Check current inventory
@@ -2754,11 +2758,13 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Dict
             # Track actual items added to inventory (not packages)
             items_added = packages_to_buy * items_per_package
             purchases[item_name] = purchases.get(item_name, 0) + items_added
+            # Track inventory size used
+            total_size_used += items_added * item.size
 
-    return purchases
+    return purchases, total_size_used
 
 
-def execute_category_minimum_restock(player: Player, game_state: GameState) -> Dict[str, int]:
+def execute_category_minimum_restock(player: Player, game_state: GameState) -> tuple[Dict[str, int], float]:
     """
     Execute category minimum restock orders for all items in a category below their minimum threshold.
     For each category with auto-restock enabled, ensures all items in that category have at least
@@ -2766,9 +2772,10 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> D
 
     Respects packaging system - buys at least 1 package if the item is packaged.
 
-    Returns a dictionary of items purchased: {item_name: quantity_bought}
+    Returns a tuple of (items purchased: {item_name: quantity_bought}, inventory_size_used: float)
     """
     purchases = {}
+    total_size_used = 0.0
 
     for category_name, (minimum_stock, vendor_name) in player.category_minimum_restock.items():
         # Find the vendor
@@ -2823,8 +2830,10 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> D
                 # Track actual items added to inventory (not packages)
                 items_added = packages_to_buy * items_per_package
                 purchases[item_name] = purchases.get(item_name, 0) + items_added
+                # Track inventory size used
+                total_size_used += items_added * item.size
 
-    return purchases
+    return purchases, total_size_used
 
 
 # -------------------------------------------------------------------
@@ -3456,21 +3465,27 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Track daily spending per player for accurate profit calculation
     daily_spending = {player.name: 0.0 for player in game_state.players}
 
+    # Track inventory space used per player (for buy orders)
+    daily_inventory_used = {player.name: 0.0 for player in game_state.players}
+
     for player in game_state.players:
         # Track actual cash spent (accounts for vendor fallbacks, discounts, etc.)
         cash_before = player.cash
 
         # Execute recurring buy orders first
-        recurring_purchases = execute_recurring_buy_orders(player, game_state)
+        recurring_purchases, recurring_size = execute_recurring_buy_orders(player, game_state)
 
         # Execute stock minimum restock
-        restock_purchases = execute_stock_minimum_restock(player, game_state)
+        restock_purchases, restock_size = execute_stock_minimum_restock(player, game_state)
 
         # Execute category minimum restock
-        category_restock_purchases = execute_category_minimum_restock(player, game_state)
+        category_restock_purchases, category_restock_size = execute_category_minimum_restock(player, game_state)
 
         # Execute manual buy orders
-        manual_purchases = execute_buy_orders(player, game_state)
+        manual_purchases, manual_size = execute_buy_orders(player, game_state)
+
+        # Track total inventory space used
+        daily_inventory_used[player.name] = recurring_size + restock_size + category_restock_size + manual_size
 
         # Combine all purchases
         all_purchases = {}
@@ -4084,7 +4099,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     category_inventory[category] = category_inventory.get(category, 0) + qty
 
                 inventory_items = [f"{cat}: {qty}" for cat, qty in sorted(category_inventory.items())]
-                print(f"    Inv: {', '.join(inventory_items)}")
+                # Add inventory space used from buy orders
+                inv_used = daily_inventory_used[player.name]
+                if inv_used > 0:
+                    print(f"    Inv: {', '.join(inventory_items)} (bought: {inv_used:.1f} space)")
+                else:
+                    print(f"    Inv: {', '.join(inventory_items)}")
 
             # Show pricing by category (% below market)
             if player.category_pricing:
