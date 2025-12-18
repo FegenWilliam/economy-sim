@@ -4086,15 +4086,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 inventory_items = [f"{cat}: {qty}" for cat, qty in sorted(category_inventory.items())]
                 print(f"    Inv: {', '.join(inventory_items)}")
 
-            # Show pricing for sold items only
-            sold_items = per_item_sales[player.name].keys()
-            if sold_items:
-                pricing_items = []
-                for item_name in sorted(sold_items):
-                    if item_name in player.prices:
-                        pricing_items.append(f"{item_name}: ${player.prices[item_name]:.2f}")
-                if pricing_items:
-                    print(f"    Price: {', '.join(pricing_items)}")
+            # Show pricing by category (% below market)
+            if player.category_pricing:
+                pricing_items = [f"{cat}: {pct:.0f}%" for cat, pct in sorted(player.category_pricing.items())]
+                print(f"    Price: {', '.join(pricing_items)}")
 
         if unmet_demand > 0:
             print(f"\nUnmet regular demand: {unmet_demand} items")
@@ -4121,8 +4116,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"\nItem Demand Today (Total Quantity Wanted):")
             # Sort by demand (highest first), then by item name
             sorted_demand = sorted(daily_demand_per_item.items(), key=lambda x: (-x[1], x[0]))
-            for item_name, quantity in sorted_demand:
-                print(f"  {item_name}: {quantity} units")
+            # Show 7 items per line
+            items_per_line = 7
+            for i in range(0, len(sorted_demand), items_per_line):
+                line_items = sorted_demand[i:i+items_per_line]
+                formatted_items = [f"{item_name}: {quantity}" for item_name, quantity in line_items]
+                print(f"  {', '.join(formatted_items)}")
 
     # Update item demand for next day (after everything has sold)
     updated_items = update_item_demand(game_state)
