@@ -8,8 +8,8 @@ def test_vendors():
     vendors = create_vendors()
 
     print("Testing vendor changes...")
-    print(f"Total vendors: {len(vendors)} (expected: 7)")
-    assert len(vendors) == 7, f"Expected 7 vendors, got {len(vendors)}"
+    print(f"Total vendors: {len(vendors)} (expected: 8)")
+    assert len(vendors) == 8, f"Expected 8 vendors, got {len(vendors)}"
 
     # Check each vendor
     vendor_specs = {
@@ -20,11 +20,12 @@ def test_vendors():
             "selection_type": "price_threshold",
             "selection_params": 40.0,
         },
-        "Universal Supply Corp.": {"pricing": 1.05, "lead_time": 0},
+        "Universal Supply Corp.": {"pricing": 1.02, "lead_time": 0},
         "Bulk Master Co.": {"pricing": 1.10, "lead_time": 1},
         "Stock Masters Ltd": {"pricing": 0.80, "lead_time": 2},
         "Luxury House Co.": {"pricing": 0.98, "lead_time": 1},
         "Daily Essentials Co.": {"pricing": 0.90, "lead_time": 1},
+        "Restocking Essentials Co.": {"pricing": 0.90, "lead_time": 1},
     }
 
     for vendor in vendors:

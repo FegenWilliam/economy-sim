@@ -2014,19 +2014,18 @@ def create_customers(num_customers: int) -> List[Customer]:
 
 def create_vendors() -> List[Vendor]:
     """
-    Create 7 vendors with different pricing and selection strategies.
+    Create 8 vendors with different pricing and selection strategies.
 
     Vendor inventory is refreshed daily based on their selection type.
     """
     vendors = []
 
-    # Vendor 1: Bulk Goods Co. - 85% of market price, min 100 per purchase, items $30 or less, 1 day lead time
+    # Vendor 1: Bulk Goods Co. - 85% of market price, items $30 or less, 1 day lead time, big bulk only (20 size)
     vendors.append(Vendor(
         name="Bulk Goods Co.",
         pricing_multiplier=0.85,
         selection_type="price_range",
         selection_params=0,
-        min_purchase=100,
         price_max=30.0,
         lead_time=1
     ))
@@ -2109,6 +2108,25 @@ def create_vendors() -> List[Vendor]:
         ]
     ))
 
+    # Vendor 8: Restocking Essentials Co. - Everything EXCEPT Food & Groceries and Fresh Produce
+    # Base: 90% market, 80% at 1000+ items (reverse of vendor 7)
+    vendors.append(Vendor(
+        name="Restocking Essentials Co.",
+        pricing_multiplier=0.90,
+        selection_type="category",
+        selection_params=0,
+        allowed_categories=[
+            "Household Essentials", "Personal Care", "Health & Pharmacy", "Baby Products",
+            "Supplements", "Pet Supplies", "Kitchen & Dining", "Office Supplies",
+            "Electronics", "Appliances", "Sports & Outdoor", "Home Decor",
+            "Automotive", "Gaming", "Toys & Games", "Luxury"
+        ],
+        lead_time=1,
+        volume_pricing_tiers=[
+            (1000, 0.80)
+        ]
+    ))
+
     return vendors
 
 
@@ -2117,8 +2135,8 @@ def _add_item_to_vendor(vendor: Vendor, item: Item, market_price: float) -> None
     Add an item to a vendor's inventory, using packaging if the item size < 5.
 
     For items with size < 5:
-    - All vendors: Add standard package (5 size)
-    - Bulk Master Co.: Also add bulk package (20 size)
+    - Bulk Master Co. and Bulk Goods Co.: Only add bulk package (20 size)
+    - All other vendors: Add standard package (5 size)
 
     For items with size >= 5:
     - Add as-is without packaging
@@ -2129,16 +2147,16 @@ def _add_item_to_vendor(vendor: Vendor, item: Item, market_price: float) -> None
         return
 
     # For items < 5 size, use packaging
-    # Standard package (5 size) - all vendors
-    package_name, quantity, _ = get_package_info(item, "standard")
-    package_price = market_price * quantity  # Total price for the package
-    vendor.items[package_name] = package_price * vendor.pricing_multiplier
-
-    # Bulk package (20 size) - only Bulk Master Co.
-    if vendor.name == "Bulk Master Co.":
+    # Bulk package (20 size) - only Bulk Master Co. and Bulk Goods Co.
+    if vendor.name in ["Bulk Master Co.", "Bulk Goods Co."]:
         bulk_package_name, bulk_quantity, _ = get_package_info(item, "bulk")
         bulk_package_price = market_price * bulk_quantity
         vendor.items[bulk_package_name] = bulk_package_price * vendor.pricing_multiplier
+    else:
+        # Standard package (5 size) - all other vendors
+        package_name, quantity, _ = get_package_info(item, "standard")
+        package_price = market_price * quantity  # Total price for the package
+        vendor.items[package_name] = package_price * vendor.pricing_multiplier
 
 
 def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_prices: Dict[str, float]) -> None:
@@ -4527,32 +4545,6 @@ def display_vendor_table(game_state: GameState) -> None:
         # Display minimum purchase requirement if it exists
         if vendor.min_purchase is not None:
             print(f"   MINIMUM BUY: {vendor.min_purchase} units per purchase")
-
-        # Display current inventory
-        print(f"   Current stock ({len(vendor.items)} items):")
-        if vendor.items:
-            for item_name, price in sorted(vendor.items.items()):
-                # Handle packaged items - get market price for base item
-                base_item_name = parse_package_name(item_name)
-                if base_item_name:
-                    # This is a package, calculate market price for the package
-                    individual_market_price = game_state.market_prices.get(base_item_name, 0)
-                    item_obj = next((i for i in PRODUCT_CATALOG if i.name == base_item_name), None)
-                    if item_obj:
-                        # Determine package type and quantity
-                        if item_name.startswith("Case") or item_name.startswith("Carton") or item_name.startswith("Crate"):
-                            _, qty, _ = get_package_info(item_obj, "bulk")
-                        else:
-                            _, qty, _ = get_package_info(item_obj, "standard")
-                        market_price = individual_market_price * qty
-                    else:
-                        market_price = 0
-                else:
-                    # Not a package, use regular market price
-                    market_price = game_state.market_prices.get(item_name, 0)
-                print(f"      - {item_name}: ${price:.2f} (market: ${market_price:.2f})")
-        else:
-            print(f"      (no items available)")
 
     print("=" * 80)
 
