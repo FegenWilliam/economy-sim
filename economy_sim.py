@@ -2501,7 +2501,7 @@ def apply_daily_price_fluctuation(market_prices: Dict[str, float], items: List[I
 # Buy order execution
 # -------------------------------------------------------------------
 
-def execute_buy_orders(player: Player, game_state: GameState) -> tuple[Dict[str, int], float]:
+def execute_buy_orders(player: Player, game_state: GameState) -> Tuple[Dict[str, int], float]:
     """
     Execute a player's buy orders, purchasing from cheapest to most expensive items.
 
@@ -2634,7 +2634,7 @@ def execute_buy_orders(player: Player, game_state: GameState) -> tuple[Dict[str,
     return purchases, total_size_bought
 
 
-def execute_recurring_buy_orders(player: Player, game_state: GameState) -> tuple[Dict[str, int], float]:
+def execute_recurring_buy_orders(player: Player, game_state: GameState) -> Tuple[Dict[str, int], float]:
     """
     Execute recurring buy orders that are due (based on interval_days).
 
@@ -2696,7 +2696,7 @@ def execute_recurring_buy_orders(player: Player, game_state: GameState) -> tuple
     return purchases, total_size_used
 
 
-def execute_stock_minimum_restock(player: Player, game_state: GameState) -> tuple[Dict[str, int], float]:
+def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Tuple[Dict[str, int], float]:
     """
     Execute stock minimum restock orders for items below their minimum threshold.
     Respects packaging system - buys at least 1 package if the item is packaged.
@@ -2764,7 +2764,7 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> tupl
     return purchases, total_size_used
 
 
-def execute_category_minimum_restock(player: Player, game_state: GameState) -> tuple[Dict[str, int], float]:
+def execute_category_minimum_restock(player: Player, game_state: GameState) -> Tuple[Dict[str, int], float]:
     """
     Execute category minimum restock orders for all items in a category below their minimum threshold.
     For each category with auto-restock enabled, ensures all items in that category have at least
