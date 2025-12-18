@@ -1917,6 +1917,13 @@ class GameState:
                 return vendor
         return None
 
+    @property
+    def items_by_name(self) -> Dict[str, Item]:
+        """
+        Returns a dictionary mapping item names to Item objects.
+        """
+        return {item.name: item for item in self.items}
+
 
 # -------------------------------------------------------------------
 # Initialization helpers
