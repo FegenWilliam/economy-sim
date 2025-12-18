@@ -101,6 +101,108 @@ class Item:
         return PRODUCT_CATEGORIES[self.category]
 
 
+# -------------------------------------------------------------------
+# Product Packaging System
+# -------------------------------------------------------------------
+
+def get_package_info(item: Item, package_type: str = "standard") -> tuple:
+    """
+    Get packaging information for an item.
+
+    Args:
+        item: The item to package
+        package_type: Either "standard" (5 size) or "bulk" (20 size)
+
+    Returns:
+        Tuple of (package_name, quantity_in_package, package_size)
+
+    For items with size >= 5, returns the item as-is (no packaging).
+    For luxury items, returns the item as-is (no packaging).
+    For items with size < 5:
+    - Standard package: 5 size total
+    - Bulk package: 20 size total (only available at Bulk Master Co.)
+    """
+    # Items >= 5 size are not packaged
+    if item.size >= 5.0:
+        return (item.name, 1, item.size)
+
+    # Luxury items are not packaged (nobody buys 50x diamond earrings)
+    if item.category == "Luxury":
+        return (item.name, 1, item.size)
+
+    # Determine target package size
+    target_size = 5.0 if package_type == "standard" else 20.0
+
+    # Calculate how many items fit in the package
+    quantity_in_package = int(target_size / item.size)
+
+    # Determine package name based on item category and type
+    package_prefix = _get_package_prefix(item, package_type)
+    package_name = f"{package_prefix} of {item.name}"
+
+    return (package_name, quantity_in_package, target_size)
+
+
+def _get_package_prefix(item: Item, package_type: str) -> str:
+    """
+    Get the appropriate package prefix based on item category and package type.
+
+    Standard packages (5 size): Box, Pack, Tray, Set, Bundle
+    Bulk packages (20 size): Case, Carton, Crate, Pallet
+    """
+    if package_type == "bulk":
+        # Bulk package prefixes
+        if item.category in ["Food & Groceries", "Fresh Produce"]:
+            return "Case"
+        elif item.category in ["Personal Care", "Health & Pharmacy"]:
+            return "Carton"
+        elif item.category in ["Electronics", "Gaming"]:
+            return "Crate"
+        else:
+            return "Case"
+    else:
+        # Standard package prefixes
+        if item.category in ["Food & Groceries", "Fresh Produce"]:
+            return "Tray"
+        elif item.category in ["Office Supplies"]:
+            return "Box"
+        elif item.category in ["Personal Care", "Health & Pharmacy", "Baby Products"]:
+            return "Pack"
+        elif item.category in ["Electronics", "Gaming"]:
+            return "Set"
+        elif item.category in ["Household Essentials", "Pet Supplies"]:
+            return "Bundle"
+        else:
+            return "Pack"
+
+
+def parse_package_name(package_name: str) -> Optional[str]:
+    """
+    Parse a package name to extract the base item name.
+
+    Args:
+        package_name: Name like "Box of Pens" or "Case of Batteries"
+
+    Returns:
+        Base item name (e.g., "Pens", "Batteries"), or None if not a package
+    """
+    # List of known package prefixes
+    prefixes = ["Box", "Pack", "Tray", "Set", "Bundle", "Case", "Carton", "Crate", "Pallet"]
+
+    for prefix in prefixes:
+        pattern = f"{prefix} of "
+        if package_name.startswith(pattern):
+            return package_name[len(pattern):]
+
+    # Not a package name, return None
+    return None
+
+
+def is_package(name: str) -> bool:
+    """Check if a name is a package name."""
+    return parse_package_name(name) is not None
+
+
 # Product catalog - items that can be unlocked over time
 PRODUCT_CATALOG = [
     # Groceries & Food
@@ -921,9 +1023,30 @@ class Player:
         Applies vendor discount upgrades and production line pricing.
         Enforces vendor-specific purchase limits (min/max per player).
         Checks reputation requirements.
+
+        Handles packaged items: If item_name is a package (e.g., "Box of Pens"),
+        the purchase adds individual items to inventory, not the package itself.
         """
         if quantity <= 0:
             return False
+
+        # Check if this is a packaged item
+        base_item_name = parse_package_name(item_name)
+        items_per_package = 1
+        actual_item_name = item_name
+
+        if base_item_name is not None:
+            # This is a package, so we need to convert to individual items
+            actual_item_name = base_item_name
+
+            # Find the item in the catalog to get package info
+            item_obj = next((i for i in PRODUCT_CATALOG if i.name == base_item_name), None)
+            if item_obj:
+                # Determine package type based on package name prefix
+                if item_name.startswith("Case") or item_name.startswith("Carton") or item_name.startswith("Crate"):
+                    _, items_per_package, _ = get_package_info(item_obj, "bulk")
+                else:
+                    _, items_per_package, _ = get_package_info(item_obj, "standard")
 
         # Check reputation requirement
         if vendor.required_reputation is not None and self.reputation < vendor.required_reputation:
@@ -945,7 +1068,7 @@ class Player:
             if vendor.name not in game_state.vendor_daily_purchases[self.name]:
                 game_state.vendor_daily_purchases[self.name][vendor.name] = {}
 
-            # Get current purchases for this item today
+            # Get current purchases for this item today (track by package name)
             current_purchases = game_state.vendor_daily_purchases[self.name][vendor.name].get(item_name, 0)
 
             # Check if this purchase would exceed the limit
@@ -953,11 +1076,13 @@ class Player:
                 return False
 
         # Check if player owns production line for this item (takes priority)
-        production_price = self.get_production_line_price(item_name, market_price) if market_price > 0 else None
+        # Production lines work on the base item, not packages
+        production_price = self.get_production_line_price(actual_item_name, market_price) if market_price > 0 else None
 
         if production_price is not None:
             # Use production line pricing (50% of market)
-            final_price = production_price
+            # For packages, this is the price per individual item
+            final_price_per_unit = production_price
         else:
             # Use vendor pricing with volume discounts
             vendor_price = vendor.get_price(item_name, quantity)
@@ -967,7 +1092,7 @@ class Player:
             # Apply vendor discount
             current_day = game_state.day if game_state else 0
             discount = self.get_vendor_discount(vendor.name, current_day)
-            final_price = vendor_price * (1.0 - discount)
+            final_price_package = vendor_price * (1.0 - discount)
 
             # Apply catch-up discount for non-dominating players (starts day 10)
             if game_state and game_state.day >= 10:
@@ -978,17 +1103,24 @@ class Player:
                 if self.store_level < highest_level:
                     if vendor.name == "Daily Essentials Co.":
                         # 10% additional discount: 90% → 80% market price
-                        final_price *= (0.80 / 0.90)
+                        final_price_package *= (0.80 / 0.90)
                     elif vendor.name == "Instant Goods Ltd.":
                         # 3% additional discount: 98% → 95% market price
-                        final_price *= (0.95 / 0.98)
+                        final_price_package *= (0.95 / 0.98)
 
-        total_cost = final_price * quantity
+            # Calculate price per individual item (for packages, this divides by items_per_package)
+            final_price_per_unit = final_price_package / items_per_package
+
+        # Total cost is for buying 'quantity' packages
+        total_cost = final_price_per_unit * items_per_package * quantity
 
         if self.cash < total_cost:
             return False
 
         self.cash -= total_cost
+
+        # Calculate total individual items to add to inventory
+        total_items = quantity * items_per_package
 
         # Check if vendor has lead time
         if vendor.lead_time > 0 and game_state is not None:
@@ -999,33 +1131,34 @@ class Player:
             # Add to pending deliveries instead of inventory (or immediate if lead time reduced to 0)
             if effective_lead_time > 0:
                 delivery_day = game_state.day + effective_lead_time
-                self.pending_deliveries.append((item_name, quantity, final_price, delivery_day))
+                # Store as individual items, not packages
+                self.pending_deliveries.append((actual_item_name, total_items, final_price_per_unit, delivery_day))
             else:
                 # Lead time reduced to 0, deliver immediately
-                current_inventory = self.inventory.get(item_name, 0)
-                current_cost = self.item_costs.get(item_name, 0)
+                current_inventory = self.inventory.get(actual_item_name, 0)
+                current_cost = self.item_costs.get(actual_item_name, 0)
 
                 # Weighted average: (old_qty * old_cost + new_qty * new_cost) / total_qty
-                new_total_qty = current_inventory + quantity
+                new_total_qty = current_inventory + total_items
                 if new_total_qty > 0:
-                    weighted_cost = ((current_inventory * current_cost) + (quantity * final_price)) / new_total_qty
-                    self.item_costs[item_name] = weighted_cost
+                    weighted_cost = ((current_inventory * current_cost) + (total_items * final_price_per_unit)) / new_total_qty
+                    self.item_costs[actual_item_name] = weighted_cost
 
-                self.inventory[item_name] = new_total_qty
+                self.inventory[actual_item_name] = new_total_qty
         else:
             # Immediate delivery - update inventory and weighted average cost
-            current_inventory = self.inventory.get(item_name, 0)
-            current_cost = self.item_costs.get(item_name, 0)
+            current_inventory = self.inventory.get(actual_item_name, 0)
+            current_cost = self.item_costs.get(actual_item_name, 0)
 
             # Weighted average: (old_qty * old_cost + new_qty * new_cost) / total_qty
-            new_total_qty = current_inventory + quantity
+            new_total_qty = current_inventory + total_items
             if new_total_qty > 0:
-                weighted_cost = ((current_inventory * current_cost) + (quantity * final_price)) / new_total_qty
-                self.item_costs[item_name] = weighted_cost
+                weighted_cost = ((current_inventory * current_cost) + (total_items * final_price_per_unit)) / new_total_qty
+                self.item_costs[actual_item_name] = weighted_cost
 
-            self.inventory[item_name] = new_total_qty
+            self.inventory[actual_item_name] = new_total_qty
 
-        # Track purchase for max-per-player limits
+        # Track purchase for max-per-player limits (track by package name)
         if vendor.max_per_item_per_player is not None and game_state is not None:
             game_state.vendor_daily_purchases[self.name][vendor.name][item_name] = \
                 game_state.vendor_daily_purchases[self.name][vendor.name].get(item_name, 0) + quantity
@@ -1929,11 +2062,44 @@ def create_vendors() -> List[Vendor]:
     return vendors
 
 
+def _add_item_to_vendor(vendor: Vendor, item: Item, market_price: float) -> None:
+    """
+    Add an item to a vendor's inventory, using packaging if the item size < 5.
+
+    For items with size < 5:
+    - All vendors: Add standard package (5 size)
+    - Bulk Master Co.: Also add bulk package (20 size)
+
+    For items with size >= 5:
+    - Add as-is without packaging
+    """
+    # For items >= 5 size, no packaging
+    if item.size >= 5.0:
+        vendor.items[item.name] = market_price * vendor.pricing_multiplier
+        return
+
+    # For items < 5 size, use packaging
+    # Standard package (5 size) - all vendors
+    package_name, quantity, _ = get_package_info(item, "standard")
+    package_price = market_price * quantity  # Total price for the package
+    vendor.items[package_name] = package_price * vendor.pricing_multiplier
+
+    # Bulk package (20 size) - only Bulk Master Co.
+    if vendor.name == "Bulk Master Co.":
+        bulk_package_name, bulk_quantity, _ = get_package_info(item, "bulk")
+        bulk_package_price = market_price * bulk_quantity
+        vendor.items[bulk_package_name] = bulk_package_price * vendor.pricing_multiplier
+
+
 def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_prices: Dict[str, float]) -> None:
     """
     Refresh vendor inventory based on their selection type and current market prices.
 
     This should be called at the start of each day.
+
+    Items with size < 5 will be sold as packages:
+    - Standard packages (5 size): Available at all vendors
+    - Bulk packages (20 size): Only available at Bulk Master Co.
     """
     for vendor in vendors:
         vendor.items.clear()
@@ -1950,7 +2116,7 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
                 selected_items = random.sample(available_items, min(num_items, len(available_items)))
                 for item in selected_items:
                     market_price = market_prices.get(item.name, item.base_price)
-                    vendor.items[item.name] = market_price * vendor.pricing_multiplier
+                    _add_item_to_vendor(vendor, item, market_price)
 
         elif vendor.selection_type == "price_threshold":
             # Select all items where market price is at or under threshold
@@ -1958,7 +2124,7 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
             for item in available_items:
                 market_price = market_prices.get(item.name, item.base_price)
                 if market_price <= price_threshold:
-                    vendor.items[item.name] = market_price * vendor.pricing_multiplier
+                    _add_item_to_vendor(vendor, item, market_price)
 
         elif vendor.selection_type == "price_range":
             # Select items within a price range (min and/or max)
@@ -1969,19 +2135,19 @@ def refresh_vendor_inventory(vendors: List[Vendor], items: List[Item], market_pr
                     continue
                 if vendor.price_max is not None and market_price > vendor.price_max:
                     continue
-                vendor.items[item.name] = market_price * vendor.pricing_multiplier
+                _add_item_to_vendor(vendor, item, market_price)
 
         elif vendor.selection_type == "all":
             # Include all items
             for item in available_items:
                 market_price = market_prices.get(item.name, item.base_price)
-                vendor.items[item.name] = market_price * vendor.pricing_multiplier
+                _add_item_to_vendor(vendor, item, market_price)
 
         elif vendor.selection_type == "category":
             # Select items from allowed categories only (already filtered above)
             for item in available_items:
                 market_price = market_prices.get(item.name, item.base_price)
-                vendor.items[item.name] = market_price * vendor.pricing_multiplier
+                _add_item_to_vendor(vendor, item, market_price)
 
 
 def initialize_market_prices(items: List[Item]) -> Dict[str, float]:
@@ -4171,7 +4337,24 @@ def display_vendor_table(game_state: GameState) -> None:
         print(f"   Current stock ({len(vendor.items)} items):")
         if vendor.items:
             for item_name, price in sorted(vendor.items.items()):
-                market_price = game_state.market_prices.get(item_name, 0)
+                # Handle packaged items - get market price for base item
+                base_item_name = parse_package_name(item_name)
+                if base_item_name:
+                    # This is a package, calculate market price for the package
+                    individual_market_price = game_state.market_prices.get(base_item_name, 0)
+                    item_obj = next((i for i in PRODUCT_CATALOG if i.name == base_item_name), None)
+                    if item_obj:
+                        # Determine package type and quantity
+                        if item_name.startswith("Case") or item_name.startswith("Carton") or item_name.startswith("Crate"):
+                            _, qty, _ = get_package_info(item_obj, "bulk")
+                        else:
+                            _, qty, _ = get_package_info(item_obj, "standard")
+                        market_price = individual_market_price * qty
+                    else:
+                        market_price = 0
+                else:
+                    # Not a package, use regular market price
+                    market_price = game_state.market_prices.get(item_name, 0)
                 print(f"      - {item_name}: ${price:.2f} (market: ${market_price:.2f})")
         else:
             print(f"      (no items available)")
