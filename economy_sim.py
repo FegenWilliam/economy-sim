@@ -659,6 +659,7 @@ class Player:
     stock_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (minimum_stock, vendor_name) for auto-restock
     category_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # category_name -> (minimum_stock_per_item, vendor_name) for category auto-restock
     category_pricing: Dict[str, float] = field(default_factory=dict)  # category -> percentage below market (e.g., 5.0 = 5% below market)
+    yesterday_demand: Dict[str, int] = field(default_factory=dict)  # item_name -> total quantity wanted yesterday (for lead time calculation)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -2727,13 +2728,24 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Tupl
         # Check current inventory
         current_stock = player.inventory.get(item_name, 0)
 
-        if current_stock >= minimum_stock:
-            # Stock is sufficient, skip
-            continue
-
         # Find the vendor
         vendor = game_state.get_vendor(vendor_name)
         if not vendor:
+            continue
+
+        # Calculate effective lead time with any reductions from upgrades
+        lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+        effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+
+        # Adjust minimum stock for vendors with lead time
+        # If vendor has lead time, add yesterday's demand to account for expected demand during delivery period
+        adjusted_minimum = minimum_stock
+        if effective_lead_time > 0:
+            yesterday_item_demand = player.yesterday_demand.get(item_name, 0)
+            adjusted_minimum = minimum_stock + yesterday_item_demand
+
+        if current_stock >= adjusted_minimum:
+            # Stock is sufficient, skip
             continue
 
         # Get item object first
@@ -2754,11 +2766,11 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Tupl
             purchase_item_name = package_name
 
             # Calculate how many packages to buy
-            needed = minimum_stock - current_stock
+            needed = adjusted_minimum - current_stock
             packages_to_buy = (needed + items_per_package - 1) // items_per_package
         else:
             # Item is not packaged - buy exactly what's needed
-            packages_to_buy = minimum_stock - current_stock
+            packages_to_buy = adjusted_minimum - current_stock
 
         # Get the price from this vendor using the package name
         price = vendor.get_price(purchase_item_name, packages_to_buy)
@@ -2812,6 +2824,10 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> T
         if not vendor:
             continue
 
+        # Calculate effective lead time with any reductions from upgrades
+        lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+        effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+
         # Get all items in this category
         category_items = [item for item in game_state.items if item.category == category_name]
 
@@ -2821,7 +2837,14 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> T
             # Check current inventory
             current_stock = player.inventory.get(item_name, 0)
 
-            if current_stock >= minimum_stock:
+            # Adjust minimum stock for vendors with lead time
+            # If vendor has lead time, add yesterday's demand to account for expected demand during delivery period
+            adjusted_minimum = minimum_stock
+            if effective_lead_time > 0:
+                yesterday_item_demand = player.yesterday_demand.get(item_name, 0)
+                adjusted_minimum = minimum_stock + yesterday_item_demand
+
+            if current_stock >= adjusted_minimum:
                 # Stock is sufficient, skip
                 continue
 
@@ -2838,11 +2861,11 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> T
                 purchase_item_name = package_name
 
                 # Calculate how many packages to buy
-                needed = minimum_stock - current_stock
+                needed = adjusted_minimum - current_stock
                 packages_to_buy = (needed + items_per_package - 1) // items_per_package
             else:
                 # Item is not packaged - buy exactly what's needed
-                packages_to_buy = minimum_stock - current_stock
+                packages_to_buy = adjusted_minimum - current_stock
 
             # Get the price from this vendor using the package name
             price = vendor.get_price(purchase_item_name, packages_to_buy)
@@ -4429,7 +4452,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     print(f"\n⏰ REMINDER: {player.name}'s loan from {loan.lender_name} is due in {days_remaining} days")
                     print(f"    Amount due: ${loan.remaining_balance:,.2f}")
 
-    # Step 10: Reset daily vendor purchase tracking
+    # Step 10: Save yesterday's demand per item for each player (used for lead time calculations)
+    # Use global demand (what all customers wanted) rather than individual sales (which may be limited by stock)
+    for player in game_state.players:
+        player.yesterday_demand = dict(daily_demand_per_item)  # Copy the global demand data
+
+    # Step 11: Reset daily vendor purchase tracking
     game_state.vendor_daily_purchases.clear()
 
     return daily_sales
