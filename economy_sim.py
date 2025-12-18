@@ -2637,12 +2637,17 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Tuple[Dict[str,
 def execute_recurring_buy_orders(player: Player, game_state: GameState) -> Tuple[Dict[str, int], float]:
     """
     Execute recurring buy orders that are due (based on interval_days).
+    Respects inventory capacity - stops buying when player reaches max inventory.
 
     Returns a tuple of (items purchased: {item_name: quantity_bought}, inventory_size_used: float)
     """
     purchases = {}
     total_size_used = 0.0
     current_day = game_state.day
+
+    # Get current inventory size and max capacity
+    current_inventory_size = player.get_inventory_size_used(game_state.items_by_name)
+    max_inventory = player.get_max_inventory()
 
     for order in player.recurring_buy_orders:
         # Check if this order is due (current_day - last_executed >= interval)
@@ -2683,15 +2688,22 @@ def execute_recurring_buy_orders(player: Player, game_state: GameState) -> Tuple
             # Get market price for production line check
             market_price = game_state.market_prices.get(order.item_name, 0)
 
+            # Check if we have enough inventory space before buying
+            items_added = packages_to_buy * items_per_package
+            size_needed = items_added * item.size
+
+            if current_inventory_size + total_size_used + size_needed > max_inventory:
+                # Not enough space, skip this purchase
+                continue
+
             # Try to purchase (purchase_from_vendor handles package conversion)
             success = player.purchase_from_vendor(vendor, purchase_item_name, packages_to_buy, market_price, game_state)
             if success:
                 # Track actual items added to inventory (not packages)
-                items_added = packages_to_buy * items_per_package
                 purchases[order.item_name] = purchases.get(order.item_name, 0) + items_added
                 order.last_executed_day = current_day
                 # Track inventory size used
-                total_size_used += items_added * item.size
+                total_size_used += size_needed
 
     return purchases, total_size_used
 
@@ -2700,11 +2712,16 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Tupl
     """
     Execute stock minimum restock orders for items below their minimum threshold.
     Respects packaging system - buys at least 1 package if the item is packaged.
+    Respects inventory capacity - stops buying when player reaches max inventory.
 
     Returns a tuple of (items purchased: {item_name: quantity_bought}, inventory_size_used: float)
     """
     purchases = {}
     total_size_used = 0.0
+
+    # Get current inventory size and max capacity
+    current_inventory_size = player.get_inventory_size_used(game_state.items_by_name)
+    max_inventory = player.get_max_inventory()
 
     for item_name, (minimum_stock, vendor_name) in player.stock_minimum_restock.items():
         # Check current inventory
@@ -2752,14 +2769,21 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Tupl
         # Get market price for production line check
         market_price = game_state.market_prices.get(item_name, 0)
 
+        # Check if we have enough inventory space before buying
+        items_added = packages_to_buy * items_per_package
+        size_needed = items_added * item.size
+
+        if current_inventory_size + total_size_used + size_needed > max_inventory:
+            # Not enough space, skip this purchase
+            continue
+
         # Try to purchase (purchase_from_vendor handles package conversion)
         success = player.purchase_from_vendor(vendor, purchase_item_name, packages_to_buy, market_price, game_state)
         if success:
             # Track actual items added to inventory (not packages)
-            items_added = packages_to_buy * items_per_package
             purchases[item_name] = purchases.get(item_name, 0) + items_added
             # Track inventory size used
-            total_size_used += items_added * item.size
+            total_size_used += size_needed
 
     return purchases, total_size_used
 
@@ -2771,11 +2795,16 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> T
     the specified minimum stock.
 
     Respects packaging system - buys at least 1 package if the item is packaged.
+    Respects inventory capacity - stops buying when player reaches max inventory.
 
     Returns a tuple of (items purchased: {item_name: quantity_bought}, inventory_size_used: float)
     """
     purchases = {}
     total_size_used = 0.0
+
+    # Get current inventory size and max capacity
+    current_inventory_size = player.get_inventory_size_used(game_state.items_by_name)
+    max_inventory = player.get_max_inventory()
 
     for category_name, (minimum_stock, vendor_name) in player.category_minimum_restock.items():
         # Find the vendor
@@ -2824,14 +2853,21 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> T
             # Get market price for production line check
             market_price = game_state.market_prices.get(item_name, 0)
 
+            # Check if we have enough inventory space before buying
+            items_added = packages_to_buy * items_per_package
+            size_needed = items_added * item.size
+
+            if current_inventory_size + total_size_used + size_needed > max_inventory:
+                # Not enough space, skip this purchase
+                continue
+
             # Try to purchase (purchase_from_vendor handles package conversion)
             success = player.purchase_from_vendor(vendor, purchase_item_name, packages_to_buy, market_price, game_state)
             if success:
                 # Track actual items added to inventory (not packages)
-                items_added = packages_to_buy * items_per_package
                 purchases[item_name] = purchases.get(item_name, 0) + items_added
                 # Track inventory size used
-                total_size_used += items_added * item.size
+                total_size_used += size_needed
 
     return purchases, total_size_used
 
@@ -3503,7 +3539,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         daily_spending[player.name] = actual_spent
         if show_details and all_purchases:
-            print(f"  {player.name}: Purchased {sum(all_purchases.values())} items (spent ${actual_spent:.2f})")
+            print(f"  {player.name}: Purchased {sum(all_purchases.values())} items (bought: {daily_inventory_used[player.name]:.1f} space)(spent ${actual_spent:.2f})")
             if recurring_purchases:
                 print(f"    - Recurring orders: {sum(recurring_purchases.values())} items")
             if restock_purchases:
