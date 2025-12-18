@@ -621,6 +621,16 @@ class Loan:
 
 
 @dataclass
+class RecurringBuyOrder:
+    """Represents a recurring buy order that executes every N days."""
+    item_name: str
+    vendor_name: str
+    quantity: int
+    interval_days: int  # Execute every N days
+    last_executed_day: int = 0  # Last day this order was executed
+
+
+@dataclass
 class Player:
     """Represents a company / player in the economic simulation."""
     name: str
@@ -645,6 +655,8 @@ class Player:
     pending_deliveries: List[tuple] = field(default_factory=list)  # List of (item_name, quantity, cost_per_item, delivery_day) for orders with lead time
     loans: List['Loan'] = field(default_factory=list)  # Active loans taken by the player
     warehouses: List['Warehouse'] = field(default_factory=lambda: [Warehouse()])  # List of warehouses (starts with 1)
+    recurring_buy_orders: List[RecurringBuyOrder] = field(default_factory=list)  # Recurring buy orders (scheduled)
+    stock_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (minimum_stock, vendor_name) for auto-restock
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -2418,9 +2430,26 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
     Respects max inventory capacity. Buy orders have no per-day limit,
     but purchases stop when inventory would exceed capacity or money runs out.
 
+    NEW: Manual buy orders only execute if total warehouse space required >= 1000.
+    If below 1000, the entire manual buy order is cancelled for the day.
+
     Returns a dictionary of items purchased: {item_name: quantity_bought}
     """
     purchases = {}
+
+    # Calculate total warehouse space required for all manual buy orders
+    total_space_required = 0.0
+    for item_name, vendor_list in player.buy_orders.items():
+        item = game_state.items_by_name.get(item_name)
+        if item:
+            for quantity, vendor_name in vendor_list:
+                total_space_required += quantity * item.size
+
+    # Check if total space required meets minimum threshold
+    if total_space_required < 1000:
+        # Cancel entire manual buy order
+        return purchases
+
     total_size_bought = 0.0
     max_inventory = player.get_max_inventory()
     current_inventory_size = player.get_inventory_size_used(game_state.items_by_name)
@@ -2519,6 +2548,106 @@ def execute_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
 
     return purchases
 
+
+def execute_recurring_buy_orders(player: Player, game_state: GameState) -> Dict[str, int]:
+    """
+    Execute recurring buy orders that are due (based on interval_days).
+
+    Returns a dictionary of items purchased: {item_name: quantity_bought}
+    """
+    purchases = {}
+    current_day = game_state.day
+
+    for order in player.recurring_buy_orders:
+        # Check if this order is due (current_day - last_executed >= interval)
+        days_since_last = current_day - order.last_executed_day
+
+        if days_since_last >= order.interval_days:
+            # Find the vendor
+            vendor = game_state.get_vendor(order.vendor_name)
+            if not vendor:
+                continue
+
+            # Get the price from this vendor
+            price = vendor.get_price(order.item_name)
+            if price is None:
+                # Vendor doesn't have this item, skip
+                continue
+
+            # Get item
+            item = game_state.items_by_name.get(order.item_name)
+            if not item:
+                continue
+
+            # Get market price for production line check
+            market_price = game_state.market_prices.get(order.item_name, 0)
+
+            # Try to purchase
+            success = player.purchase_from_vendor(vendor, order.item_name, order.quantity, market_price, game_state)
+            if success:
+                purchases[order.item_name] = purchases.get(order.item_name, 0) + order.quantity
+                order.last_executed_day = current_day
+
+    return purchases
+
+
+def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Dict[str, int]:
+    """
+    Execute stock minimum restock orders for items below their minimum threshold.
+    Respects packaging system - buys at least 1 package if the item is packaged.
+
+    Returns a dictionary of items purchased: {item_name: quantity_bought}
+    """
+    purchases = {}
+
+    for item_name, (minimum_stock, vendor_name) in player.stock_minimum_restock.items():
+        # Check current inventory
+        current_stock = player.inventory.get(item_name, 0)
+
+        if current_stock >= minimum_stock:
+            # Stock is sufficient, skip
+            continue
+
+        # Find the vendor
+        vendor = game_state.get_vendor(vendor_name)
+        if not vendor:
+            continue
+
+        # Get the price from this vendor
+        price = vendor.get_price(item_name)
+        if price is None:
+            # Vendor doesn't have this item, skip
+            continue
+
+        # Get item
+        item = game_state.items_by_name.get(item_name)
+        if not item:
+            continue
+
+        # Calculate how much to buy
+        needed = minimum_stock - current_stock
+
+        # Check if item is packaged (small items with size < 5, excluding luxury)
+        if item.size < 5.0 and item.category != "Luxury":
+            # Item is packaged - buy at least 1 package
+            _, items_per_package, _ = get_package_info(item, "standard")
+
+            # Calculate packages needed (round up)
+            packages_needed = (needed + items_per_package - 1) // items_per_package
+            quantity_to_buy = packages_needed * items_per_package
+        else:
+            # Item is not packaged - buy exactly what's needed
+            quantity_to_buy = needed
+
+        # Get market price for production line check
+        market_price = game_state.market_prices.get(item_name, 0)
+
+        # Try to purchase
+        success = player.purchase_from_vendor(vendor, item_name, quantity_to_buy, market_price, game_state)
+        if success:
+            purchases[item_name] = purchases.get(item_name, 0) + quantity_to_buy
+
+    return purchases
 
 
 # -------------------------------------------------------------------
@@ -3166,13 +3295,35 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     for player in game_state.players:
         # Track actual cash spent (accounts for vendor fallbacks, discounts, etc.)
         cash_before = player.cash
-        purchases = execute_buy_orders(player, game_state)
+
+        # Execute recurring buy orders first
+        recurring_purchases = execute_recurring_buy_orders(player, game_state)
+
+        # Execute stock minimum restock
+        restock_purchases = execute_stock_minimum_restock(player, game_state)
+
+        # Execute manual buy orders
+        manual_purchases = execute_buy_orders(player, game_state)
+
+        # Combine all purchases
+        all_purchases = {}
+        for item, qty in recurring_purchases.items():
+            all_purchases[item] = all_purchases.get(item, 0) + qty
+        for item, qty in restock_purchases.items():
+            all_purchases[item] = all_purchases.get(item, 0) + qty
+        for item, qty in manual_purchases.items():
+            all_purchases[item] = all_purchases.get(item, 0) + qty
+
         cash_after = player.cash
         actual_spent = cash_before - cash_after
 
         daily_spending[player.name] = actual_spent
-        if show_details and purchases:
-            print(f"  {player.name}: Purchased {sum(purchases.values())} items (spent ${actual_spent:.2f})")
+        if show_details and all_purchases:
+            print(f"  {player.name}: Purchased {sum(all_purchases.values())} items (spent ${actual_spent:.2f})")
+            if recurring_purchases:
+                print(f"    - Recurring orders: {sum(recurring_purchases.values())} items")
+            if restock_purchases:
+                print(f"    - Auto-restock: {sum(restock_purchases.values())} items")
 
     # Track daily statistics
     daily_sales = {player.name: 0.0 for player in game_state.players}
@@ -5072,9 +5223,22 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
 
 def buy_order_menu(game_state: GameState, player: Player) -> None:
     """Menu for setting buy orders (quantity and vendor selection per item) - supports up to 3 vendors per item."""
+    # Check level requirement
+    if player.store_level < 10:
+        print("\n" + "=" * 100)
+        print("MANUAL BUY ORDERS - LOCKED")
+        print("=" * 100)
+        print(f"\n⚠ Manual buy orders require Store Level 10 or higher.")
+        print(f"Your current level: {player.store_level}")
+        print(f"\nConsider using Auto Buy Orders instead (available at all levels)!")
+        input("\nPress Enter to continue...")
+        return
+
     while True:
         print("\n" + "=" * 100)
-        print("BUY ORDER MENU - Configure Automatic Purchasing (Up to 3 Vendors Per Item)")
+        print("MANUAL BUY ORDER MENU - Configure Automatic Purchasing (Up to 3 Vendors Per Item)")
+        print("=" * 100)
+        print("⚠ REQUIREMENT: Total warehouse space in orders must be ≥ 1000 to execute")
         print("=" * 100)
         print("\nCurrent Buy Orders:")
         print(f"{'Item':<15} {'Total Qty':>10} {'Vendors':<70}")
@@ -5392,6 +5556,368 @@ def buy_order_menu(game_state: GameState, player: Player) -> None:
 
         except (ValueError, IndexError):
             print("\n✗ Invalid input!")
+
+
+def recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
+    """Menu for managing recurring buy orders (scheduled auto-buy every N days)."""
+    while True:
+        print("\n" + "=" * 100)
+        print("RECURRING BUY ORDERS - Automatic Purchasing Every N Days")
+        print("=" * 100)
+        print("\nCurrent Recurring Orders:")
+
+        if not player.recurring_buy_orders:
+            print("  (no recurring orders set)")
+        else:
+            print(f"{'#':<4} {'Item':<20} {'Vendor':<25} {'Qty':>8} {'Every':>8} {'Last Run':>10}")
+            print("-" * 100)
+            for i, order in enumerate(player.recurring_buy_orders, 1):
+                days_since = game_state.day - order.last_executed_day
+                last_run_str = f"Day {order.last_executed_day}" if order.last_executed_day > 0 else "Never"
+                print(f"{i:<4} {order.item_name:<20} {order.vendor_name:<25} {order.quantity:>8} {order.interval_days}d {last_run_str:>10}")
+
+        print("\nOptions:")
+        print("  1. Add New Recurring Order")
+        if player.recurring_buy_orders:
+            print("  2. Edit Existing Recurring Order (change vendor/qty/interval)")
+            print("  3. Cancel Recurring Order (costs $500)")
+        print("  0. Back to Auto Buy Menu")
+
+        try:
+            choice = input("\nSelect option: ").strip()
+
+            if choice == "0":
+                break
+            elif choice == "1":
+                # Add new recurring order
+                print("\nSelect item for recurring order:")
+                for i, item in enumerate(game_state.items, 1):
+                    current_inv = player.inventory.get(item.name, 0)
+                    print(f"  {i}. {item.name} (current stock: {current_inv})")
+                print("  0. Cancel")
+
+                item_choice = input(f"\nSelect item (0-{len(game_state.items)}): ").strip()
+                item_num = int(item_choice)
+
+                if item_num == 0:
+                    continue
+                elif 1 <= item_num <= len(game_state.items):
+                    item = game_state.items[item_num - 1]
+
+                    # Select vendor
+                    print("\nAvailable Vendors:")
+                    for i, vendor in enumerate(game_state.vendors, 1):
+                        price = vendor.get_price(item.name, 1)
+                        if price:
+                            print(f"  {i}. {vendor.name} - ${price:.2f}")
+                        else:
+                            status = "(not in stock)" if vendor.selection_type == "random_daily" else "(not available)"
+                            print(f"  {i}. {vendor.name} - {status}")
+
+                    vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+                    vendor_num = int(vendor_choice)
+
+                    if vendor_num == 0:
+                        continue
+                    elif 1 <= vendor_num <= len(game_state.vendors):
+                        vendor = game_state.vendors[vendor_num - 1]
+
+                        # Get quantity
+                        quantity_str = input("Enter quantity to buy: ").strip()
+                        quantity = int(quantity_str)
+
+                        if quantity <= 0:
+                            print("\n✗ Quantity must be positive!")
+                            input("Press Enter to continue...")
+                            continue
+
+                        # Get interval
+                        interval_str = input("Execute every how many days? (e.g., 3 for every 3 days): ").strip()
+                        interval = int(interval_str)
+
+                        if interval <= 0:
+                            print("\n✗ Interval must be positive!")
+                            input("Press Enter to continue...")
+                            continue
+
+                        # Create the order (no cost to set up)
+                        new_order = RecurringBuyOrder(
+                            item_name=item.name,
+                            vendor_name=vendor.name,
+                            quantity=quantity,
+                            interval_days=interval,
+                            last_executed_day=0
+                        )
+                        player.recurring_buy_orders.append(new_order)
+                        print(f"\n✓ Added recurring order: {quantity} {item.name} from {vendor.name} every {interval} days")
+                        input("Press Enter to continue...")
+
+            elif choice == "2" and player.recurring_buy_orders:
+                # Edit existing recurring order
+                print("\nSelect recurring order to edit:")
+                for i, order in enumerate(player.recurring_buy_orders, 1):
+                    print(f"  {i}. {order.item_name} ({order.quantity} from {order.vendor_name} every {order.interval_days}d)")
+                print("  0. Back")
+
+                edit_choice = input(f"\nSelect order to edit (0-{len(player.recurring_buy_orders)}): ").strip()
+                edit_num = int(edit_choice)
+
+                if edit_num == 0:
+                    continue
+                elif 1 <= edit_num <= len(player.recurring_buy_orders):
+                    order_to_edit = player.recurring_buy_orders[edit_num - 1]
+
+                    print(f"\n--- Editing Recurring Order for {order_to_edit.item_name} ---")
+                    print(f"Current: {order_to_edit.quantity} from {order_to_edit.vendor_name} every {order_to_edit.interval_days} days")
+                    print("\nWhat would you like to change?")
+                    print("  1. Change Vendor")
+                    print("  2. Change Quantity")
+                    print("  3. Change Interval (days)")
+                    print("  4. Change All")
+                    print("  0. Cancel")
+
+                    edit_option = input("\nSelect option: ").strip()
+
+                    if edit_option == "0":
+                        continue
+                    elif edit_option in ["1", "4"]:
+                        # Change vendor
+                        print("\nAvailable Vendors:")
+                        for i, vendor in enumerate(game_state.vendors, 1):
+                            price = vendor.get_price(order_to_edit.item_name, 1)
+                            if price:
+                                print(f"  {i}. {vendor.name} - ${price:.2f}")
+                            else:
+                                status = "(not in stock)" if vendor.selection_type == "random_daily" else "(not available)"
+                                print(f"  {i}. {vendor.name} - {status}")
+
+                        vendor_choice = input(f"\nSelect new vendor (1-{len(game_state.vendors)}, 0 to keep current): ").strip()
+                        vendor_num = int(vendor_choice)
+
+                        if vendor_num > 0 and 1 <= vendor_num <= len(game_state.vendors):
+                            order_to_edit.vendor_name = game_state.vendors[vendor_num - 1].name
+
+                    if edit_option in ["2", "4"]:
+                        # Change quantity
+                        quantity_str = input(f"Enter new quantity (current: {order_to_edit.quantity}, 0 to keep): ").strip()
+                        quantity = int(quantity_str)
+                        if quantity > 0:
+                            order_to_edit.quantity = quantity
+
+                    if edit_option in ["3", "4"]:
+                        # Change interval
+                        interval_str = input(f"Enter new interval in days (current: {order_to_edit.interval_days}, 0 to keep): ").strip()
+                        interval = int(interval_str)
+                        if interval > 0:
+                            order_to_edit.interval_days = interval
+
+                    print(f"\n✓ Updated recurring order for {order_to_edit.item_name}")
+                    print(f"New settings: {order_to_edit.quantity} from {order_to_edit.vendor_name} every {order_to_edit.interval_days} days")
+                    input("Press Enter to continue...")
+
+            elif choice == "3" and player.recurring_buy_orders:
+                # Cancel recurring order
+                print("\nSelect recurring order to cancel:")
+                for i, order in enumerate(player.recurring_buy_orders, 1):
+                    print(f"  {i}. {order.item_name} ({order.quantity} from {order.vendor_name} every {order.interval_days}d)")
+                print("  0. Back")
+
+                cancel_choice = input(f"\nSelect order to cancel (0-{len(player.recurring_buy_orders)}): ").strip()
+                cancel_num = int(cancel_choice)
+
+                if cancel_num == 0:
+                    continue
+                elif 1 <= cancel_num <= len(player.recurring_buy_orders):
+                    order_to_cancel = player.recurring_buy_orders[cancel_num - 1]
+                    cancellation_cost = 500
+
+                    print(f"\n⚠ WARNING: Canceling this order will cost ${cancellation_cost:.2f}")
+                    print(f"Order: {order_to_cancel.quantity} {order_to_cancel.item_name} from {order_to_cancel.vendor_name}")
+                    confirm = input("Type 'yes' to confirm cancellation: ").strip().lower()
+
+                    if confirm == "yes":
+                        if player.cash >= cancellation_cost:
+                            player.cash -= cancellation_cost
+                            player.recurring_buy_orders.pop(cancel_num - 1)
+                            print(f"\n✓ Recurring order cancelled. Paid ${cancellation_cost:.2f} cancellation fee.")
+                        else:
+                            print(f"\n✗ Insufficient cash! Need ${cancellation_cost:.2f}, have ${player.cash:.2f}")
+                        input("Press Enter to continue...")
+                    else:
+                        print("\nCancellation aborted.")
+                        input("Press Enter to continue...")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+            input("Press Enter to continue...")
+
+
+def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
+    """Menu for managing stock minimum auto-restock (threshold-based auto-buy)."""
+    while True:
+        print("\n" + "=" * 100)
+        print("STOCK MINIMUM AUTO-RESTOCK - Automatic Reordering When Stock Falls Below Threshold")
+        print("=" * 100)
+        print("\nCurrent Stock Minimum Settings:")
+
+        if not player.stock_minimum_restock:
+            print("  (no auto-restock rules set)")
+        else:
+            print(f"{'Item':<20} {'Current Stock':>15} {'Minimum':>10} {'Vendor':<25}")
+            print("-" * 100)
+            for item_name, (minimum, vendor_name) in player.stock_minimum_restock.items():
+                current = player.inventory.get(item_name, 0)
+                status = "✓ OK" if current >= minimum else "⚠ LOW"
+                print(f"{item_name:<20} {current:>15} {minimum:>10} {vendor_name:<25} {status}")
+
+        print("\nOptions:")
+        print("  1. Set/Update Stock Minimum (setting to 0 removes it and costs $500)")
+        print("  0. Back to Auto Buy Menu")
+
+        try:
+            choice = input("\nSelect option: ").strip()
+
+            if choice == "0":
+                break
+            elif choice == "1":
+                # Set/Update stock minimum
+                print("\nSelect item to set/update stock minimum:")
+                for i, item in enumerate(game_state.items, 1):
+                    current_inv = player.inventory.get(item.name, 0)
+                    existing = player.stock_minimum_restock.get(item.name)
+                    if existing:
+                        min_qty, vendor = existing
+                        print(f"  {i}. {item.name} (stock: {current_inv}, min: {min_qty}, vendor: {vendor})")
+                    else:
+                        print(f"  {i}. {item.name} (stock: {current_inv}, no auto-restock set)")
+                print("  0. Cancel")
+
+                item_choice = input(f"\nSelect item (0-{len(game_state.items)}): ").strip()
+                item_num = int(item_choice)
+
+                if item_num == 0:
+                    continue
+                elif 1 <= item_num <= len(game_state.items):
+                    item = game_state.items[item_num - 1]
+                    existing = player.stock_minimum_restock.get(item.name)
+
+                    # Show current settings if any
+                    if existing:
+                        min_qty, current_vendor = existing
+                        print(f"\nCurrent settings: Minimum {min_qty} from {current_vendor}")
+                        print("(Enter 0 for minimum to remove auto-restock - costs $500)")
+                    else:
+                        print(f"\nNo auto-restock currently set for {item.name}")
+
+                    # Get minimum stock level
+                    min_str = input(f"Set minimum stock level for {item.name} (0 to remove): ").strip()
+                    minimum = int(min_str)
+
+                    if minimum < 0:
+                        print("\n✗ Minimum cannot be negative!")
+                        input("Press Enter to continue...")
+                        continue
+
+                    # If setting to 0, this is a removal (costs $500)
+                    if minimum == 0:
+                        if item.name in player.stock_minimum_restock:
+                            cancellation_cost = 500
+                            print(f"\n⚠ WARNING: Removing auto-restock costs ${cancellation_cost:.2f}")
+                            confirm = input("Type 'yes' to confirm removal: ").strip().lower()
+
+                            if confirm == "yes":
+                                if player.cash >= cancellation_cost:
+                                    player.cash -= cancellation_cost
+                                    del player.stock_minimum_restock[item.name]
+                                    print(f"\n✓ Auto-restock removed for {item.name}. Paid ${cancellation_cost:.2f} cancellation fee.")
+                                else:
+                                    print(f"\n✗ Insufficient cash! Need ${cancellation_cost:.2f}, have ${player.cash:.2f}")
+                                input("Press Enter to continue...")
+                            else:
+                                print("\nRemoval aborted.")
+                                input("Press Enter to continue...")
+                        else:
+                            print(f"\n✗ {item.name} doesn't have auto-restock set!")
+                            input("Press Enter to continue...")
+                        continue
+
+                    # If setting to positive value, select vendor
+                    print("\nAvailable Vendors:")
+                    for i, vendor in enumerate(game_state.vendors, 1):
+                        price = vendor.get_price(item.name, 1)
+                        if price:
+                            print(f"  {i}. {vendor.name} - ${price:.2f}")
+                        else:
+                            status = "(not in stock)" if vendor.selection_type == "random_daily" else "(not available)"
+                            print(f"  {i}. {vendor.name} - {status}")
+
+                    # If updating, show option to keep current vendor
+                    if existing:
+                        print(f"\nCurrent vendor: {current_vendor}")
+                        vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to keep current): ").strip()
+                    else:
+                        vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+
+                    vendor_num = int(vendor_choice)
+
+                    if vendor_num == 0:
+                        if existing:
+                            # Keep current vendor
+                            selected_vendor_name = current_vendor
+                        else:
+                            # Cancel
+                            continue
+                    elif 1 <= vendor_num <= len(game_state.vendors):
+                        selected_vendor_name = game_state.vendors[vendor_num - 1].name
+                    else:
+                        print("\n✗ Invalid vendor selection!")
+                        input("Press Enter to continue...")
+                        continue
+
+                    # Check if item is packaged
+                    package_info = ""
+                    if item.size < 5.0 and item.category != "Luxury":
+                        _, items_per_package, _ = get_package_info(item, "standard")
+                        package_info = f" (will buy in packages of {items_per_package})"
+
+                    # Set/update the minimum (free to set up or update)
+                    action = "Updated" if existing else "Set"
+                    player.stock_minimum_restock[item.name] = (minimum, selected_vendor_name)
+                    print(f"\n✓ {action} auto-restock: {item.name} minimum {minimum} from {selected_vendor_name}{package_info}")
+                    input("Press Enter to continue...")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+            input("Press Enter to continue...")
+
+
+def auto_buy_orders_menu(game_state: GameState, player: Player) -> None:
+    """Main menu for auto buy order features (recurring orders and stock minimum restock)."""
+    while True:
+        print("\n" + "=" * 80)
+        print("AUTO BUY ORDERS - Automated Purchasing Management")
+        print("=" * 80)
+        print("\nOptions:")
+        print("  1. Recurring Buy Orders (Schedule orders every N days)")
+        print("  2. Stock Minimum Auto-Restock (Auto-buy when stock falls below threshold)")
+        print("  0. Back to Main Menu")
+
+        try:
+            choice = input("\nSelect option (0-2): ").strip()
+
+            if choice == "0":
+                break
+            elif choice == "1":
+                recurring_buy_order_menu(game_state, player)
+            elif choice == "2":
+                stock_minimum_restock_menu(game_state, player)
+            else:
+                print("\n✗ Invalid choice!")
+                input("Press Enter to continue...")
+
+        except ValueError:
+            print("\n✗ Invalid input!")
+            input("Press Enter to continue...")
 
 
 def warehouse_menu(game_state: GameState, player: Player) -> None:
@@ -6459,19 +6985,21 @@ def main_menu(game_state: GameState) -> bool:
         print("  1. Pass Day (Simulate)")
         print("  2. View Market Prices")
         print("  3. View Vendors")
-        print("  4. Configure Buy Orders & Sale Prices")
-        print("  5. Hire Employees")
-        print("  6. View Your Store Status")
-        print("  7. Store Upgrades")
-        print("  8. Loans")
-        print("  9. Warehouse Management")
-        print(" 10. Discard Inventory")
+        print("  4. Auto Buy Orders (Recurring & Stock Minimum)")
+        print("  5. Manual Buy Orders (Level 10+, 1000 space minimum)")
+        print("  6. Set Sale Prices")
+        print("  7. Hire Employees")
+        print("  8. View Your Store Status")
+        print("  9. Store Upgrades")
+        print(" 10. Loans")
+        print(" 11. Warehouse Management")
+        print(" 12. Discard Inventory")
         print("  c. Customer Forecast")
         print("  s. Save Game")
         print("  0. Quit Game")
 
         try:
-            choice = input("\nSelect option (0-10, c, s): ").strip().lower()
+            choice = input("\nSelect option (0-12, c, s): ").strip().lower()
 
             # Handle customer forecast
             if choice == 'c':
@@ -6524,19 +7052,23 @@ def main_menu(game_state: GameState) -> bool:
                 display_vendor_table(game_state)
                 input("\nPress Enter to continue...")
             elif choice_num == 4:
-                configure_orders_and_prices_menu(game_state, player)
+                auto_buy_orders_menu(game_state, player)
             elif choice_num == 5:
-                employee_menu(game_state, player)
+                buy_order_menu(game_state, player)
             elif choice_num == 6:
+                pricing_menu(game_state, player)
+            elif choice_num == 7:
+                employee_menu(game_state, player)
+            elif choice_num == 8:
                 display_player_status(player, game_state)
                 input("\nPress Enter to continue...")
-            elif choice_num == 7:
-                upgrades_menu(game_state, player)
-            elif choice_num == 8:
-                loans_menu(game_state, player)
             elif choice_num == 9:
-                warehouse_menu(game_state, player)
+                upgrades_menu(game_state, player)
             elif choice_num == 10:
+                loans_menu(game_state, player)
+            elif choice_num == 11:
+                warehouse_menu(game_state, player)
+            elif choice_num == 12:
                 discard_inventory_menu(game_state, player)
             else:
                 print("\n✗ Invalid option!")
@@ -6637,6 +7169,17 @@ def serialize_game_state(game_state: GameState) -> dict:
                     for loan in player.loans
                 ],
                 "price_history": player.price_history,
+                "recurring_buy_orders": [
+                    {
+                        "item_name": order.item_name,
+                        "vendor_name": order.vendor_name,
+                        "quantity": order.quantity,
+                        "interval_days": order.interval_days,
+                        "last_executed_day": order.last_executed_day,
+                    }
+                    for order in player.recurring_buy_orders
+                ],
+                "stock_minimum_restock": {k: list(v) for k, v in player.stock_minimum_restock.items()},
             }
             for player in game_state.players
         ],
@@ -6763,6 +7306,23 @@ def deserialize_game_state(data: dict) -> GameState:
             for loan_data in player_data.get("loans", [])
         ]
 
+        # Recreate recurring buy orders
+        recurring_buy_orders = [
+            RecurringBuyOrder(
+                item_name=order_data["item_name"],
+                vendor_name=order_data["vendor_name"],
+                quantity=order_data["quantity"],
+                interval_days=order_data["interval_days"],
+                last_executed_day=order_data["last_executed_day"],
+            )
+            for order_data in player_data.get("recurring_buy_orders", [])
+        ]
+
+        # Recreate stock minimum restock (convert lists back to tuples)
+        stock_minimum_restock = {
+            k: tuple(v) for k, v in player_data.get("stock_minimum_restock", {}).items()
+        }
+
         player = Player(
             name=player_data["name"],
             cash=player_data["cash"],
@@ -6786,6 +7346,8 @@ def deserialize_game_state(data: dict) -> GameState:
             warehouses=warehouses,
             loans=loans,
             price_history=player_data.get("price_history", {}),
+            recurring_buy_orders=recurring_buy_orders,
+            stock_minimum_restock=stock_minimum_restock,
         )
         players.append(player)
 
