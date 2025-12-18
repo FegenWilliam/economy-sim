@@ -5579,7 +5579,8 @@ def recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
         print("\nOptions:")
         print("  1. Add New Recurring Order")
         if player.recurring_buy_orders:
-            print("  2. Cancel Recurring Order (costs $500 per item)")
+            print("  2. Edit Existing Recurring Order (change vendor/qty/interval)")
+            print("  3. Cancel Recurring Order (costs $500)")
         print("  0. Back to Auto Buy Menu")
 
         try:
@@ -5652,6 +5653,69 @@ def recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
                         input("Press Enter to continue...")
 
             elif choice == "2" and player.recurring_buy_orders:
+                # Edit existing recurring order
+                print("\nSelect recurring order to edit:")
+                for i, order in enumerate(player.recurring_buy_orders, 1):
+                    print(f"  {i}. {order.item_name} ({order.quantity} from {order.vendor_name} every {order.interval_days}d)")
+                print("  0. Back")
+
+                edit_choice = input(f"\nSelect order to edit (0-{len(player.recurring_buy_orders)}): ").strip()
+                edit_num = int(edit_choice)
+
+                if edit_num == 0:
+                    continue
+                elif 1 <= edit_num <= len(player.recurring_buy_orders):
+                    order_to_edit = player.recurring_buy_orders[edit_num - 1]
+
+                    print(f"\n--- Editing Recurring Order for {order_to_edit.item_name} ---")
+                    print(f"Current: {order_to_edit.quantity} from {order_to_edit.vendor_name} every {order_to_edit.interval_days} days")
+                    print("\nWhat would you like to change?")
+                    print("  1. Change Vendor")
+                    print("  2. Change Quantity")
+                    print("  3. Change Interval (days)")
+                    print("  4. Change All")
+                    print("  0. Cancel")
+
+                    edit_option = input("\nSelect option: ").strip()
+
+                    if edit_option == "0":
+                        continue
+                    elif edit_option in ["1", "4"]:
+                        # Change vendor
+                        print("\nAvailable Vendors:")
+                        for i, vendor in enumerate(game_state.vendors, 1):
+                            price = vendor.get_price(order_to_edit.item_name, 1)
+                            if price:
+                                print(f"  {i}. {vendor.name} - ${price:.2f}")
+                            else:
+                                status = "(not in stock)" if vendor.selection_type == "random_daily" else "(not available)"
+                                print(f"  {i}. {vendor.name} - {status}")
+
+                        vendor_choice = input(f"\nSelect new vendor (1-{len(game_state.vendors)}, 0 to keep current): ").strip()
+                        vendor_num = int(vendor_choice)
+
+                        if vendor_num > 0 and 1 <= vendor_num <= len(game_state.vendors):
+                            order_to_edit.vendor_name = game_state.vendors[vendor_num - 1].name
+
+                    if edit_option in ["2", "4"]:
+                        # Change quantity
+                        quantity_str = input(f"Enter new quantity (current: {order_to_edit.quantity}, 0 to keep): ").strip()
+                        quantity = int(quantity_str)
+                        if quantity > 0:
+                            order_to_edit.quantity = quantity
+
+                    if edit_option in ["3", "4"]:
+                        # Change interval
+                        interval_str = input(f"Enter new interval in days (current: {order_to_edit.interval_days}, 0 to keep): ").strip()
+                        interval = int(interval_str)
+                        if interval > 0:
+                            order_to_edit.interval_days = interval
+
+                    print(f"\n✓ Updated recurring order for {order_to_edit.item_name}")
+                    print(f"New settings: {order_to_edit.quantity} from {order_to_edit.vendor_name} every {order_to_edit.interval_days} days")
+                    input("Press Enter to continue...")
+
+            elif choice == "3" and player.recurring_buy_orders:
                 # Cancel recurring order
                 print("\nSelect recurring order to cancel:")
                 for i, order in enumerate(player.recurring_buy_orders, 1):
@@ -5707,9 +5771,7 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
                 print(f"{item_name:<20} {current:>15} {minimum:>10} {vendor_name:<25} {status}")
 
         print("\nOptions:")
-        print("  1. Set Stock Minimum for Item")
-        if player.stock_minimum_restock:
-            print("  2. Remove Stock Minimum (costs $500 per item)")
+        print("  1. Set/Update Stock Minimum (setting to 0 removes it and costs $500)")
         print("  0. Back to Auto Buy Menu")
 
         try:
@@ -5718,16 +5780,16 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
             if choice == "0":
                 break
             elif choice == "1":
-                # Set stock minimum
-                print("\nSelect item to set stock minimum:")
+                # Set/Update stock minimum
+                print("\nSelect item to set/update stock minimum:")
                 for i, item in enumerate(game_state.items, 1):
                     current_inv = player.inventory.get(item.name, 0)
                     existing = player.stock_minimum_restock.get(item.name)
                     if existing:
                         min_qty, vendor = existing
-                        print(f"  {i}. {item.name} (current: {current_inv}, min: {min_qty}, vendor: {vendor})")
+                        print(f"  {i}. {item.name} (stock: {current_inv}, min: {min_qty}, vendor: {vendor})")
                     else:
-                        print(f"  {i}. {item.name} (current: {current_inv})")
+                        print(f"  {i}. {item.name} (stock: {current_inv}, no auto-restock set)")
                 print("  0. Cancel")
 
                 item_choice = input(f"\nSelect item (0-{len(game_state.items)}): ").strip()
@@ -5737,17 +5799,49 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
                     continue
                 elif 1 <= item_num <= len(game_state.items):
                     item = game_state.items[item_num - 1]
+                    existing = player.stock_minimum_restock.get(item.name)
+
+                    # Show current settings if any
+                    if existing:
+                        min_qty, current_vendor = existing
+                        print(f"\nCurrent settings: Minimum {min_qty} from {current_vendor}")
+                        print("(Enter 0 for minimum to remove auto-restock - costs $500)")
+                    else:
+                        print(f"\nNo auto-restock currently set for {item.name}")
 
                     # Get minimum stock level
-                    min_str = input(f"Set minimum stock level for {item.name}: ").strip()
+                    min_str = input(f"Set minimum stock level for {item.name} (0 to remove): ").strip()
                     minimum = int(min_str)
 
-                    if minimum <= 0:
-                        print("\n✗ Minimum must be positive!")
+                    if minimum < 0:
+                        print("\n✗ Minimum cannot be negative!")
                         input("Press Enter to continue...")
                         continue
 
-                    # Select vendor
+                    # If setting to 0, this is a removal (costs $500)
+                    if minimum == 0:
+                        if item.name in player.stock_minimum_restock:
+                            cancellation_cost = 500
+                            print(f"\n⚠ WARNING: Removing auto-restock costs ${cancellation_cost:.2f}")
+                            confirm = input("Type 'yes' to confirm removal: ").strip().lower()
+
+                            if confirm == "yes":
+                                if player.cash >= cancellation_cost:
+                                    player.cash -= cancellation_cost
+                                    del player.stock_minimum_restock[item.name]
+                                    print(f"\n✓ Auto-restock removed for {item.name}. Paid ${cancellation_cost:.2f} cancellation fee.")
+                                else:
+                                    print(f"\n✗ Insufficient cash! Need ${cancellation_cost:.2f}, have ${player.cash:.2f}")
+                                input("Press Enter to continue...")
+                            else:
+                                print("\nRemoval aborted.")
+                                input("Press Enter to continue...")
+                        else:
+                            print(f"\n✗ {item.name} doesn't have auto-restock set!")
+                            input("Press Enter to continue...")
+                        continue
+
+                    # If setting to positive value, select vendor
                     print("\nAvailable Vendors:")
                     for i, vendor in enumerate(game_state.vendors, 1):
                         price = vendor.get_price(item.name, 1)
@@ -5757,58 +5851,40 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
                             status = "(not in stock)" if vendor.selection_type == "random_daily" else "(not available)"
                             print(f"  {i}. {vendor.name} - {status}")
 
-                    vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+                    # If updating, show option to keep current vendor
+                    if existing:
+                        print(f"\nCurrent vendor: {current_vendor}")
+                        vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to keep current): ").strip()
+                    else:
+                        vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+
                     vendor_num = int(vendor_choice)
 
                     if vendor_num == 0:
-                        continue
-                    elif 1 <= vendor_num <= len(game_state.vendors):
-                        vendor = game_state.vendors[vendor_num - 1]
-
-                        # Check if item is packaged
-                        package_info = ""
-                        if item.size < 5.0 and item.category != "Luxury":
-                            _, items_per_package, _ = get_package_info(item, "standard")
-                            package_info = f" (will buy in packages of {items_per_package})"
-
-                        # Set the minimum (no cost to set up)
-                        player.stock_minimum_restock[item.name] = (minimum, vendor.name)
-                        print(f"\n✓ Set auto-restock: {item.name} minimum {minimum} from {vendor.name}{package_info}")
-                        input("Press Enter to continue...")
-
-            elif choice == "2" and player.stock_minimum_restock:
-                # Remove stock minimum
-                print("\nSelect item to remove auto-restock:")
-                items_list = list(player.stock_minimum_restock.keys())
-                for i, item_name in enumerate(items_list, 1):
-                    minimum, vendor_name = player.stock_minimum_restock[item_name]
-                    print(f"  {i}. {item_name} (min: {minimum}, vendor: {vendor_name})")
-                print("  0. Back")
-
-                remove_choice = input(f"\nSelect item (0-{len(items_list)}): ").strip()
-                remove_num = int(remove_choice)
-
-                if remove_num == 0:
-                    continue
-                elif 1 <= remove_num <= len(items_list):
-                    item_to_remove = items_list[remove_num - 1]
-                    cancellation_cost = 500
-
-                    print(f"\n⚠ WARNING: Removing auto-restock will cost ${cancellation_cost:.2f}")
-                    print(f"Item: {item_to_remove}")
-                    confirm = input("Type 'yes' to confirm removal: ").strip().lower()
-
-                    if confirm == "yes":
-                        if player.cash >= cancellation_cost:
-                            player.cash -= cancellation_cost
-                            del player.stock_minimum_restock[item_to_remove]
-                            print(f"\n✓ Auto-restock removed for {item_to_remove}. Paid ${cancellation_cost:.2f} cancellation fee.")
+                        if existing:
+                            # Keep current vendor
+                            selected_vendor_name = current_vendor
                         else:
-                            print(f"\n✗ Insufficient cash! Need ${cancellation_cost:.2f}, have ${player.cash:.2f}")
-                        input("Press Enter to continue...")
+                            # Cancel
+                            continue
+                    elif 1 <= vendor_num <= len(game_state.vendors):
+                        selected_vendor_name = game_state.vendors[vendor_num - 1].name
                     else:
-                        print("\nRemoval aborted.")
+                        print("\n✗ Invalid vendor selection!")
                         input("Press Enter to continue...")
+                        continue
+
+                    # Check if item is packaged
+                    package_info = ""
+                    if item.size < 5.0 and item.category != "Luxury":
+                        _, items_per_package, _ = get_package_info(item, "standard")
+                        package_info = f" (will buy in packages of {items_per_package})"
+
+                    # Set/update the minimum (free to set up or update)
+                    action = "Updated" if existing else "Set"
+                    player.stock_minimum_restock[item.name] = (minimum, selected_vendor_name)
+                    print(f"\n✓ {action} auto-restock: {item.name} minimum {minimum} from {selected_vendor_name}{package_info}")
+                    input("Press Enter to continue...")
 
         except (ValueError, IndexError):
             print("\n✗ Invalid input!")
