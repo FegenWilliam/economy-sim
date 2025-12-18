@@ -657,6 +657,7 @@ class Player:
     warehouses: List['Warehouse'] = field(default_factory=lambda: [Warehouse()])  # List of warehouses (starts with 1)
     recurring_buy_orders: List[RecurringBuyOrder] = field(default_factory=list)  # Recurring buy orders (scheduled)
     stock_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (minimum_stock, vendor_name) for auto-restock
+    category_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # category_name -> (minimum_stock_per_item, vendor_name) for category auto-restock
     category_pricing: Dict[str, float] = field(default_factory=dict)  # category -> percentage below market (e.g., 5.0 = 5% below market)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
@@ -2768,6 +2769,75 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Dict
     return purchases
 
 
+def execute_category_minimum_restock(player: Player, game_state: GameState) -> Dict[str, int]:
+    """
+    Execute category minimum restock orders for all items in a category below their minimum threshold.
+    For each category with auto-restock enabled, ensures all items in that category have at least
+    the specified minimum stock.
+
+    Respects packaging system - buys at least 1 package if the item is packaged.
+
+    Returns a dictionary of items purchased: {item_name: quantity_bought}
+    """
+    purchases = {}
+
+    for category_name, (minimum_stock, vendor_name) in player.category_minimum_restock.items():
+        # Find the vendor
+        vendor = game_state.get_vendor(vendor_name)
+        if not vendor:
+            continue
+
+        # Get all items in this category
+        category_items = [item for item in game_state.items if item.category == category_name]
+
+        for item in category_items:
+            item_name = item.name
+
+            # Check current inventory
+            current_stock = player.inventory.get(item_name, 0)
+
+            if current_stock >= minimum_stock:
+                # Stock is sufficient, skip
+                continue
+
+            # Determine the package name to use when querying the vendor
+            # For small items (size < 5, excluding luxury), vendors sell packages
+            purchase_item_name = item_name
+            packages_to_buy = 1
+            items_per_package = 1
+
+            if item.size < 5.0 and item.category != "Luxury":
+                # Item is packaged - determine package type based on vendor
+                package_type = "bulk" if vendor.name in ["Bulk Master Co.", "Bulk Goods Co."] else "standard"
+                package_name, items_per_package, _ = get_package_info(item, package_type)
+                purchase_item_name = package_name
+
+                # Calculate how many packages to buy
+                needed = minimum_stock - current_stock
+                packages_to_buy = (needed + items_per_package - 1) // items_per_package
+            else:
+                # Item is not packaged - buy exactly what's needed
+                packages_to_buy = minimum_stock - current_stock
+
+            # Get the price from this vendor using the package name
+            price = vendor.get_price(purchase_item_name, packages_to_buy)
+            if price is None:
+                # Vendor doesn't have this item, skip
+                continue
+
+            # Get market price for production line check
+            market_price = game_state.market_prices.get(item_name, 0)
+
+            # Try to purchase (purchase_from_vendor handles package conversion)
+            success = player.purchase_from_vendor(vendor, purchase_item_name, packages_to_buy, market_price, game_state)
+            if success:
+                # Track actual items added to inventory (not packages)
+                items_added = packages_to_buy * items_per_package
+                purchases[item_name] = purchases.get(item_name, 0) + items_added
+
+    return purchases
+
+
 # -------------------------------------------------------------------
 # Daily simulation logic
 # -------------------------------------------------------------------
@@ -3407,6 +3477,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Execute stock minimum restock
         restock_purchases = execute_stock_minimum_restock(player, game_state)
 
+        # Execute category minimum restock
+        category_restock_purchases = execute_category_minimum_restock(player, game_state)
+
         # Execute manual buy orders
         manual_purchases = execute_buy_orders(player, game_state)
 
@@ -3415,6 +3488,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         for item, qty in recurring_purchases.items():
             all_purchases[item] = all_purchases.get(item, 0) + qty
         for item, qty in restock_purchases.items():
+            all_purchases[item] = all_purchases.get(item, 0) + qty
+        for item, qty in category_restock_purchases.items():
             all_purchases[item] = all_purchases.get(item, 0) + qty
         for item, qty in manual_purchases.items():
             all_purchases[item] = all_purchases.get(item, 0) + qty
@@ -3429,6 +3504,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 print(f"    - Recurring orders: {sum(recurring_purchases.values())} items")
             if restock_purchases:
                 print(f"    - Auto-restock: {sum(restock_purchases.values())} items")
+            if category_restock_purchases:
+                print(f"    - Category auto-restock: {sum(category_restock_purchases.values())} items")
 
     # Track daily statistics
     daily_sales = {player.name: 0.0 for player in game_state.players}
@@ -5920,8 +5997,191 @@ def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
             input("Press Enter to continue...")
 
 
+def category_minimum_restock_menu(game_state: GameState, player: Player) -> None:
+    """Menu for managing category-wide stock minimum auto-restock."""
+    while True:
+        print("\n" + "=" * 100)
+        print("CATEGORY AUTO-RESTOCK - Automatic Reordering For All Items In A Category")
+        print("=" * 100)
+        print("\nCurrent Category Auto-Restock Settings:")
+
+        if not player.category_minimum_restock:
+            print("  (no category auto-restock rules set)")
+        else:
+            print(f"{'Category':<25} {'Items in Category':>18} {'Minimum Per Item':>18} {'Vendor':<25}")
+            print("-" * 100)
+            for category_name, (minimum, vendor_name) in player.category_minimum_restock.items():
+                # Count items in this category
+                category_items = [item for item in game_state.items if item.category == category_name]
+                item_count = len(category_items)
+                print(f"{category_name:<25} {item_count:>18} {minimum:>18} {vendor_name:<25}")
+
+        print("\nOptions:")
+        print("  1. Set/Update Category Auto-Restock (setting to 0 removes it and costs $500)")
+        print("  0. Back to Auto Buy Menu")
+
+        try:
+            choice = input("\nSelect option: ").strip()
+
+            if choice == "0":
+                break
+            elif choice == "1":
+                # Set/Update category minimum
+                print("\nSelect category to set/update auto-restock:")
+
+                # Get all unique categories sorted by importance
+                categories_sorted = sorted(PRODUCT_CATEGORIES.keys(), key=lambda c: PRODUCT_CATEGORIES[c], reverse=True)
+
+                for i, category in enumerate(categories_sorted, 1):
+                    # Count items in this category
+                    category_items = [item for item in game_state.items if item.category == category]
+                    item_count = len(category_items)
+
+                    # Check if auto-restock is set
+                    existing = player.category_minimum_restock.get(category)
+                    if existing:
+                        min_qty, vendor = existing
+                        # Calculate average stock
+                        total_stock = sum(player.inventory.get(item.name, 0) for item in category_items)
+                        avg_stock = total_stock / item_count if item_count > 0 else 0
+                        print(f"  {i}. {category} ({item_count} items, avg stock: {avg_stock:.1f}, min: {min_qty}, vendor: {vendor})")
+                    else:
+                        # Calculate average stock
+                        total_stock = sum(player.inventory.get(item.name, 0) for item in category_items)
+                        avg_stock = total_stock / item_count if item_count > 0 else 0
+                        print(f"  {i}. {category} ({item_count} items, avg stock: {avg_stock:.1f}, no auto-restock set)")
+
+                print("  0. Cancel")
+
+                cat_choice = input(f"\nSelect category (0-{len(categories_sorted)}): ").strip()
+                cat_num = int(cat_choice)
+
+                if cat_num == 0:
+                    continue
+                elif 1 <= cat_num <= len(categories_sorted):
+                    category = categories_sorted[cat_num - 1]
+                    existing = player.category_minimum_restock.get(category)
+
+                    # Show current settings if any
+                    if existing:
+                        min_qty, current_vendor = existing
+                        print(f"\nCurrent settings: Minimum {min_qty} per item from {current_vendor}")
+                        print("(Enter 0 for minimum to remove auto-restock - costs $500)")
+                    else:
+                        print(f"\nNo auto-restock currently set for {category}")
+
+                    # Get minimum stock level
+                    min_str = input(f"Set minimum stock level PER ITEM for {category} (0 to remove): ").strip()
+                    minimum = int(min_str)
+
+                    if minimum < 0:
+                        print("\n✗ Minimum cannot be negative!")
+                        input("Press Enter to continue...")
+                        continue
+
+                    # If setting to 0, this is a removal (costs $500)
+                    if minimum == 0:
+                        if category in player.category_minimum_restock:
+                            cancellation_cost = 500
+                            print(f"\n⚠ WARNING: Removing category auto-restock costs ${cancellation_cost:.2f}")
+                            confirm = input("Type 'yes' to confirm removal: ").strip().lower()
+
+                            if confirm == "yes":
+                                if player.cash >= cancellation_cost:
+                                    player.cash -= cancellation_cost
+                                    del player.category_minimum_restock[category]
+                                    print(f"\n✓ Category auto-restock removed for {category}. Paid ${cancellation_cost:.2f} cancellation fee.")
+                                else:
+                                    print(f"\n✗ Insufficient cash! Need ${cancellation_cost:.2f}, have ${player.cash:.2f}")
+                                input("Press Enter to continue...")
+                            else:
+                                print("\nRemoval aborted.")
+                                input("Press Enter to continue...")
+                        else:
+                            print(f"\n✗ {category} doesn't have category auto-restock set!")
+                            input("Press Enter to continue...")
+                        continue
+
+                    # If setting to positive value, select vendor
+                    print("\nAvailable Vendors:")
+
+                    # Get a sample item from this category to check vendor compatibility
+                    category_items = [item for item in game_state.items if item.category == category]
+                    sample_item = category_items[0] if category_items else None
+
+                    for i, vendor in enumerate(game_state.vendors, 1):
+                        min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                        vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                        req_parts = []
+                        if vendor.required_reputation:
+                            req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                        if vendor.required_level:
+                            req_parts.append(f"lvl: {vendor.required_level}")
+                        rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
+                        # Calculate effective lead time with player's upgrades
+                        lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                        effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                        lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+
+                        # Check if vendor would sell items from this category
+                        if sample_item:
+                            market_price = game_state.market_prices.get(sample_item.name, sample_item.base_price)
+                            if vendor_would_sell_item(vendor, sample_item, market_price):
+                                # Calculate estimated price for sample item
+                                estimated_price = market_price * vendor.pricing_multiplier
+                                discount = player.get_vendor_discount(vendor.name, game_state.day)
+                                final_price = estimated_price * (1 - discount)
+                                discount_text = f" (-{discount*100:.0f}%)" if discount > 0 else ""
+                                print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - ~${final_price:.2f}{discount_text} (lead: {lead_time_str})")
+                            else:
+                                print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} - (may not have all items)")
+                        else:
+                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} (lead: {lead_time_str})")
+
+                    # If updating, show option to keep current vendor
+                    if existing:
+                        print(f"\nCurrent vendor: {current_vendor}")
+                        vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to keep current): ").strip()
+                    else:
+                        vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+
+                    vendor_num = int(vendor_choice)
+
+                    if vendor_num == 0:
+                        if existing:
+                            # Keep current vendor
+                            selected_vendor_name = current_vendor
+                        else:
+                            # Cancel
+                            continue
+                    elif 1 <= vendor_num <= len(game_state.vendors):
+                        selected_vendor_name = game_state.vendors[vendor_num - 1].name
+                    else:
+                        print("\n✗ Invalid vendor selection!")
+                        input("Press Enter to continue...")
+                        continue
+
+                    # Set/update the minimum (free to set up or update)
+                    action = "Updated" if existing else "Set"
+                    player.category_minimum_restock[category] = (minimum, selected_vendor_name)
+                    item_count = len(category_items)
+                    print(f"\n✓ {action} category auto-restock: {category} minimum {minimum} per item from {selected_vendor_name}")
+                    print(f"   This applies to {item_count} items in the {category} category")
+                    input("Press Enter to continue...")
+                else:
+                    print("\n✗ Invalid category selection!")
+                    input("Press Enter to continue...")
+            else:
+                print("\n✗ Invalid choice!")
+                input("Press Enter to continue...")
+
+        except ValueError:
+            print("\n✗ Invalid input!")
+            input("Press Enter to continue...")
+
+
 def auto_buy_orders_menu(game_state: GameState, player: Player) -> None:
-    """Main menu for auto buy order features (recurring orders and stock minimum restock)."""
+    """Main menu for auto buy order features (recurring orders, stock minimum restock, and category restock)."""
     while True:
         print("\n" + "=" * 80)
         print("AUTO BUY ORDERS - Automated Purchasing Management")
@@ -5929,10 +6189,11 @@ def auto_buy_orders_menu(game_state: GameState, player: Player) -> None:
         print("\nOptions:")
         print("  1. Recurring Buy Orders (Schedule orders every N days)")
         print("  2. Stock Minimum Auto-Restock (Auto-buy when stock falls below threshold)")
+        print("  3. Category Auto-Restock (Auto-restock all items in a category)")
         print("  0. Back to Main Menu")
 
         try:
-            choice = input("\nSelect option (0-2): ").strip()
+            choice = input("\nSelect option (0-3): ").strip()
 
             if choice == "0":
                 break
@@ -5940,6 +6201,8 @@ def auto_buy_orders_menu(game_state: GameState, player: Player) -> None:
                 recurring_buy_order_menu(game_state, player)
             elif choice == "2":
                 stock_minimum_restock_menu(game_state, player)
+            elif choice == "3":
+                category_minimum_restock_menu(game_state, player)
             else:
                 print("\n✗ Invalid choice!")
                 input("Press Enter to continue...")
