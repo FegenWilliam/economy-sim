@@ -657,6 +657,7 @@ class Player:
     warehouses: List['Warehouse'] = field(default_factory=lambda: [Warehouse()])  # List of warehouses (starts with 1)
     recurring_buy_orders: List[RecurringBuyOrder] = field(default_factory=list)  # Recurring buy orders (scheduled)
     stock_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (minimum_stock, vendor_name) for auto-restock
+    category_pricing: Dict[str, float] = field(default_factory=dict)  # category -> percentage below market (e.g., 5.0 = 5% below market)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -958,19 +959,56 @@ class Player:
         warehouse.level += 1
         return True
 
-    def set_price(self, item_name: str, price: float) -> None:
+    def set_category_pricing(self, category: str, percent_below_market: float, market_prices: Dict[str, float], items_by_name: Dict[str, 'Item']) -> None:
         """
-        Set the selling price for an item in the player's store.
-        Tracks previous price for consistency bonus calculation.
+        Set pricing for an entire category as a percentage below market price.
+        Updates all item prices in that category immediately.
+
+        Args:
+            category: Category name (e.g., "Food & Groceries")
+            percent_below_market: Percentage below market (e.g., 5.0 = 5% below market, -5.0 = 5% above market)
+            market_prices: Current market prices
+            items_by_name: Dictionary mapping item names to Item objects
         """
-        if price <= 0:
-            raise ValueError(f"Price must be positive: {price}")
+        if category not in PRODUCT_CATEGORIES:
+            raise ValueError(f"Invalid category: {category}")
 
-        # Save previous price for consistency tracking
-        if item_name in self.prices:
-            self.price_history[item_name] = self.prices[item_name]
+        # Store the category pricing rule
+        self.category_pricing[category] = percent_below_market
 
-        self.prices[item_name] = price
+        # Update all prices for items in this category
+        for item_name, item in items_by_name.items():
+            if item.category == category:
+                if item_name in market_prices:
+                    new_price = market_prices[item_name] * (1 - percent_below_market / 100.0)
+                    if new_price > 0:
+                        # Track price history for consistency bonus
+                        if item_name in self.prices:
+                            self.price_history[item_name] = self.prices[item_name]
+                        self.prices[item_name] = new_price
+
+    def update_prices_from_market(self, market_prices: Dict[str, float], items_by_name: Dict[str, 'Item']) -> None:
+        """
+        Update all item prices based on current market prices and category pricing rules.
+        Called when market prices change to keep player prices synchronized.
+
+        Args:
+            market_prices: Current market prices
+            items_by_name: Dictionary mapping item names to Item objects
+        """
+        for category, percent_below in self.category_pricing.items():
+            for item_name, item in items_by_name.items():
+                if item.category == category and item_name in market_prices:
+                    new_price = market_prices[item_name] * (1 - percent_below / 100.0)
+                    if new_price > 0:
+                        # Track price history for consistency bonus
+                        if item_name in self.prices:
+                            self.price_history[item_name] = self.prices[item_name]
+                        self.prices[item_name] = new_price
+
+    def get_category_pricing_percent(self, category: str) -> Optional[float]:
+        """Get the pricing percentage for a category, or None if not set."""
+        return self.category_pricing.get(category)
 
     def produce_item(self, item: Item, quantity: int) -> None:
         """
@@ -3954,6 +3992,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Apply price fluctuations for next day (before other end-of-day processing)
     # Done here so we can display it near demand changes
     price_changes = apply_daily_price_fluctuation(game_state.market_prices, game_state.items)
+
+    # Update all player prices based on their category pricing rules
+    items_by_name = {item.name: item for item in game_state.items}
+    for player in game_state.players:
+        player.update_prices_from_market(game_state.market_prices, items_by_name)
+
     if show_details and price_changes:
         print(f"\n💰 MARKET PRICE UPDATE: {len(price_changes)} items had price changes")
         for item_name, old_price, new_price, change_percent in price_changes:
@@ -4770,12 +4814,11 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
 
         print("\nOptions:")
         print("  b. Configure Buy Order (select item)")
-        print("  p. Set Sale Price (select item)")
-        print("  c. Change All Prices (one by one)")
         print("  0. Back to Main Menu")
+        print("\nNote: Set prices by category in the Pricing Menu (option 6 from main menu)")
 
         try:
-            choice = input("\nSelect option (b/p/c/0): ").strip().lower()
+            choice = input("\nSelect option (b/0): ").strip().lower()
 
             if choice == '0':
                 break
@@ -5092,128 +5135,6 @@ def configure_orders_and_prices_menu(game_state: GameState, player: Player) -> N
                 else:
                     print("\n✗ Invalid item selection!")
 
-            elif choice == 'p':
-                # Set sale price
-                print("\nSelect item to set sale price:")
-                for i, item in enumerate(game_state.items, 1):
-                    print(f"  {i}. {item.name}")
-                print("  0. Cancel")
-
-                item_choice = input(f"\nSelect item (0-{len(game_state.items)}): ")
-                item_num = int(item_choice)
-
-                if item_num == 0:
-                    continue
-
-                if 1 <= item_num <= len(game_state.items):
-                    item = game_state.items[item_num - 1]
-                    market_price = game_state.market_prices.get(item.name, 0)
-                    current_price = player.prices.get(item.name, 0)
-
-                    # Get vendor buy price for reference (cheapest among all vendors)
-                    vendor_orders = player.get_buy_order(item.name)
-                    vendor_buy_price = 0.0
-
-                    own_price = player.get_production_line_price(item.name, market_price)
-                    if own_price is not None:
-                        vendor_buy_price = own_price
-                    elif vendor_orders:
-                        # Find cheapest vendor price
-                        cheapest_price = float('inf')
-                        for qty, vendor_name in vendor_orders:
-                            for vendor in game_state.vendors:
-                                if vendor.name == vendor_name:
-                                    price = vendor.get_price(item.name)
-                                    if price:
-                                        discount = player.get_vendor_discount(vendor_name, game_state.day)
-                                        actual_price = price * (1 - discount)
-                                        if actual_price < cheapest_price:
-                                            cheapest_price = actual_price
-                                    break
-                        if cheapest_price < float('inf'):
-                            vendor_buy_price = cheapest_price
-
-                    print(f"\n=== Setting Sale Price for {item.name} ===")
-                    print(f"Market price: ${market_price:.2f}")
-                    if vendor_buy_price > 0:
-                        print(f"Your buy price: ${vendor_buy_price:.2f}")
-                    print(f"Current sale price: ${current_price:.2f}")
-
-                    price_str = input(f"Enter new sale price: $")
-                    price = float(price_str)
-
-                    if price >= 0:
-                        player.set_price(item.name, price)
-                        print(f"\n✓ Sale price set to ${price:.2f}")
-                        if vendor_buy_price > 0:
-                            margin = price - vendor_buy_price
-                            margin_pct = (margin / vendor_buy_price) * 100 if vendor_buy_price > 0 else 0
-                            print(f"  Margin: ${margin:.2f} ({margin_pct:.1f}%)")
-                    else:
-                        print("\n✗ Price must be positive!")
-                else:
-                    print("\n✗ Invalid item selection!")
-
-            elif choice == 'c':
-                # Change all prices
-                print("\n" + "=" * 50)
-                print("CHANGE ALL SALE PRICES")
-                print("=" * 50)
-                print("Press Enter to skip an item without changing its price.\n")
-
-                for item in game_state.items:
-                    market_price = game_state.market_prices.get(item.name, 0)
-                    current_price = player.prices.get(item.name, 0)
-
-                    # Get vendor buy price for reference (cheapest among all vendors)
-                    vendor_orders = player.get_buy_order(item.name)
-                    vendor_buy_price = 0.0
-
-                    own_price = player.get_production_line_price(item.name, market_price)
-                    if own_price is not None:
-                        vendor_buy_price = own_price
-                    elif vendor_orders:
-                        # Find cheapest vendor price
-                        cheapest_price = float('inf')
-                        for qty, vendor_name in vendor_orders:
-                            for vendor in game_state.vendors:
-                                if vendor.name == vendor_name:
-                                    price = vendor.get_price(item.name)
-                                    if price:
-                                        discount = player.get_vendor_discount(vendor_name, game_state.day)
-                                        actual_price = price * (1 - discount)
-                                        if actual_price < cheapest_price:
-                                            cheapest_price = actual_price
-                                    break
-                        if cheapest_price < float('inf'):
-                            vendor_buy_price = cheapest_price
-
-                    print(f"\n{item.name}")
-                    print(f"  Market: ${market_price:.2f}")
-                    if vendor_buy_price > 0:
-                        print(f"  Your buy price: ${vendor_buy_price:.2f}")
-                    print(f"  Current sale price: ${current_price:.2f}")
-
-                    price_str = input(f"  New sale price (or Enter to skip): $").strip()
-
-                    if price_str:
-                        try:
-                            price = float(price_str)
-                            if price >= 0:
-                                player.set_price(item.name, price)
-                                if vendor_buy_price > 0:
-                                    margin = price - vendor_buy_price
-                                    margin_pct = (margin / vendor_buy_price) * 100 if vendor_buy_price > 0 else 0
-                                    print(f"  ✓ Price set to ${price:.2f} (margin: ${margin:.2f}, {margin_pct:.1f}%)")
-                                else:
-                                    print(f"  ✓ Price set to ${price:.2f}")
-                            else:
-                                print("  ✗ Price must be positive! Skipping...")
-                        except ValueError:
-                            print("  ✗ Invalid price! Skipping...")
-
-                print("\n✓ Finished updating prices!")
-                input("\nPress Enter to continue...")
             else:
                 print("\n✗ Invalid option!")
 
@@ -6527,7 +6448,9 @@ def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
 
 
 def pricing_menu(game_state: GameState, player: Player) -> None:
-    """Menu for setting prices."""
+    """Menu for setting category-based pricing as a percentage below market."""
+    items_by_name = {item.name: item for item in game_state.items}
+
     while True:
         # Get items from both inventory and buy orders
         relevant_item_names = set()
@@ -6543,122 +6466,141 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
             if total_qty > 0:
                 relevant_item_names.add(item_name)
 
-        # Filter game items to only those relevant
-        priceable_items = [item for item in game_state.items if item.name in relevant_item_names]
+        # Get categories that have items in inventory or buy orders
+        categories_with_items = {}
+        for item_name in relevant_item_names:
+            if item_name in items_by_name:
+                item = items_by_name[item_name]
+                if item.category not in categories_with_items:
+                    categories_with_items[item.category] = []
+                categories_with_items[item.category].append(item)
 
-        if not priceable_items:
-            print("\n" + "=" * 50)
-            print("PRICING MENU - Set Your Prices")
-            print("=" * 50)
+        if not categories_with_items:
+            print("\n" + "=" * 70)
+            print("CATEGORY PRICING - Set Prices by Category")
+            print("=" * 70)
             print("\nYou have no items in inventory or buy orders to price.")
             input("\nPress Enter to return to main menu...")
             break
 
-        print("\n" + "=" * 50)
-        print("PRICING MENU - Set Your Prices")
-        print("=" * 50)
+        print("\n" + "=" * 70)
+        print("CATEGORY PRICING - Set Prices by Category")
+        print("=" * 70)
+        print("\nSet pricing as a percentage below market price for all items in a category.")
+        print("Prices will automatically update when market prices change.")
 
-        # Show current market prices and player's prices
-        print(f"\n{'Item':<15} {'Qty':>6} {'Market Price':>12} {'Your Price':>12}")
-        print("-" * 60)
-        for item in priceable_items:
-            market_price = game_state.market_prices.get(item.name, 0)
-            your_price = player.prices.get(item.name, 0)
+        # Display categories with their info
+        print(f"\n{'Category':<25} {'Imp':>3} {'Items':>5} {'Pricing':>12} {'Price Range'}")
+        print("-" * 70)
 
-            # Show inventory quantity, or "Ordered" if only in buy orders
-            inv_qty = player.inventory.get(item.name, 0)
-            if inv_qty > 0:
-                qty_str = str(inv_qty)
+        # Sort categories by importance (descending) then name
+        sorted_categories = sorted(categories_with_items.keys(),
+                                  key=lambda c: (-PRODUCT_CATEGORIES.get(c, 0), c))
+
+        for category in sorted_categories:
+            items_in_cat = categories_with_items[category]
+            importance = PRODUCT_CATEGORIES.get(category, 0)
+            num_items = len(items_in_cat)
+
+            # Get current pricing percentage
+            pricing_pct = player.get_category_pricing_percent(category)
+            if pricing_pct is not None:
+                if pricing_pct > 0:
+                    pricing_str = f"{pricing_pct:.1f}% below"
+                elif pricing_pct < 0:
+                    pricing_str = f"{abs(pricing_pct):.1f}% above"
+                else:
+                    pricing_str = "At market"
             else:
-                # Item is only in buy orders
-                vendor_list = player.buy_orders.get(item.name, [])
-                order_qty = sum(q for q, v in vendor_list)
-                qty_str = f"({order_qty})"
+                pricing_str = "Not set"
 
-            print(f"{item.name:<15} {qty_str:>6} ${market_price:>11.2f} ${your_price:>11.2f}")
+            # Calculate price range for items in this category
+            market_prices_in_cat = [game_state.market_prices.get(item.name, 0) for item in items_in_cat]
+            if market_prices_in_cat:
+                min_price = min(market_prices_in_cat)
+                max_price = max(market_prices_in_cat)
+                if min_price == max_price:
+                    price_range = f"${min_price:.2f}"
+                else:
+                    price_range = f"${min_price:.2f}-${max_price:.2f}"
+            else:
+                price_range = "N/A"
 
-        print("\nOptions:")
-        print(f"  C. Change All (one by one)")
-        print("\nSelect item to price:")
-        for i, item in enumerate(priceable_items, 1):
-            print(f"  {i}. {item.name}")
+            print(f"{category:<25} {importance:>3} {num_items:>5} {pricing_str:>12} {price_range}")
+
+        print("\n" + "-" * 70)
+        print("Importance levels: 3 = Essentials, 2 = Non-essentials, 1 = Luxury")
+        print("\nSelect a category to set pricing:")
+        for i, category in enumerate(sorted_categories, 1):
+            print(f"  {i}. {category}")
         print(f"  0. Back to Main Menu")
 
         try:
-            choice = input(f"\nSelect option (0-{len(priceable_items)}, or C): ").strip()
-
-            # Handle "Change All" option
-            if choice.upper() == 'C':
-                print("\n" + "=" * 50)
-                print("CHANGE ALL PRICES")
-                print("=" * 50)
-                print("Press Enter to skip an item without changing its price.\n")
-
-                for item in priceable_items:
-                    market_price = game_state.market_prices.get(item.name, 0)
-                    current_price = player.prices.get(item.name, 0)
-                    inv_qty = player.inventory.get(item.name, 0)
-
-                    # Display quantity info
-                    if inv_qty > 0:
-                        qty_display = f"Qty: {inv_qty}"
-                    else:
-                        vendor_list = player.buy_orders.get(item.name, [])
-                        order_qty = sum(q for q, v in vendor_list)
-                        qty_display = f"Ordered: {order_qty}"
-
-                    print(f"\n{item.name} ({qty_display})")
-                    print(f"Market price: ${market_price:.2f}")
-                    print(f"Current price: ${current_price:.2f}")
-
-                    price_str = input(f"New price (or Enter to skip): $").strip()
-
-                    if price_str:  # Only update if user entered something
-                        try:
-                            price = float(price_str)
-                            if price >= 0:
-                                player.set_price(item.name, price)
-                                print(f"✓ Price set to ${price:.2f}")
-                            else:
-                                print("✗ Price must be positive! Skipping...")
-                        except ValueError:
-                            print("✗ Invalid price! Skipping...")
-
-                print("\n✓ Finished updating prices!")
-                input("\nPress Enter to continue...")
-                continue
-
+            choice = input(f"\nSelect category (0-{len(sorted_categories)}): ").strip()
             choice_num = int(choice)
 
             if choice_num == 0:
                 break
 
-            if 1 <= choice_num <= len(priceable_items):
-                item = priceable_items[choice_num - 1]
-                market_price = game_state.market_prices.get(item.name, 0)
-                inv_qty = player.inventory.get(item.name, 0)
+            if 1 <= choice_num <= len(sorted_categories):
+                category = sorted_categories[choice_num - 1]
+                items_in_cat = categories_with_items[category]
+                importance = PRODUCT_CATEGORIES.get(category, 0)
+                current_pct = player.get_category_pricing_percent(category)
 
-                # Display quantity info
-                if inv_qty > 0:
-                    qty_display = f"Qty: {inv_qty}"
+                print(f"\n" + "=" * 70)
+                print(f"PRICING: {category}")
+                print("=" * 70)
+                print(f"Importance: {importance} ({'Essentials' if importance == 3 else 'Non-essentials' if importance == 2 else 'Luxury'})")
+                print(f"Items in this category: {len(items_in_cat)}")
+
+                # Show some example items
+                print(f"\nExample items in this category:")
+                for item in items_in_cat[:5]:
+                    market_price = game_state.market_prices.get(item.name, 0)
+                    print(f"  - {item.name}: Market ${market_price:.2f}")
+                if len(items_in_cat) > 5:
+                    print(f"  ... and {len(items_in_cat) - 5} more")
+
+                if current_pct is not None:
+                    print(f"\nCurrent pricing: {current_pct:.1f}% {'below' if current_pct > 0 else 'above'} market")
                 else:
-                    vendor_list = player.buy_orders.get(item.name, [])
-                    order_qty = sum(q for q, v in vendor_list)
-                    qty_display = f"Ordered: {order_qty}"
+                    print(f"\nCurrent pricing: Not set")
 
-                print(f"\nSetting price for {item.name} ({qty_display})")
-                print(f"Current market price: ${market_price:.2f}")
+                print("\nEnter percentage below market price:")
+                print("  Positive = below market (e.g., 5 = 5% cheaper than market)")
+                print("  Negative = above market (e.g., -5 = 5% more expensive than market)")
+                print("  0 = exactly at market price")
 
-                price_str = input(f"Enter your selling price: $")
-                price = float(price_str)
+                percent_str = input(f"\nPercentage below market (or Enter to cancel): ").strip()
 
-                if price >= 0:
-                    player.set_price(item.name, price)
-                    print(f"\n✓ Price set to ${price:.2f}")
+                if percent_str:
+                    try:
+                        percent = float(percent_str)
+
+                        # Set the category pricing
+                        player.set_category_pricing(category, percent, game_state.market_prices, items_by_name)
+
+                        # Show results
+                        print(f"\n✓ Pricing set for {category}!")
+                        print(f"  All {len(items_in_cat)} items will be priced at {percent:.1f}% {'below' if percent > 0 else 'above'} market")
+                        print(f"  Prices will automatically update when market prices change")
+
+                        # Show a few example prices
+                        print(f"\nExample new prices:")
+                        for item in items_in_cat[:3]:
+                            market_price = game_state.market_prices.get(item.name, 0)
+                            your_price = player.prices.get(item.name, 0)
+                            print(f"  {item.name}: Market ${market_price:.2f} → Your ${your_price:.2f}")
+
+                    except ValueError:
+                        print("✗ Invalid percentage! No changes made.")
                 else:
-                    print("\n✗ Price must be positive!")
+                    print("✗ Cancelled.")
+
+                input("\nPress Enter to continue...")
             else:
-                print("\n✗ Invalid item selection!")
+                print("\n✗ Invalid category selection!")
 
         except (ValueError, IndexError):
             print("\n✗ Invalid input!")
