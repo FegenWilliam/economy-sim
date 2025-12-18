@@ -45,8 +45,8 @@ def test_auto_restock_with_lead_time():
     # Set up auto-restock with minimum of 10 units
     player.stock_minimum_restock["Widget"] = (10, "Instant Vendor")
 
-    # Set yesterday's sales to 5 units
-    player.yesterday_sales["Widget"] = 5
+    # Set yesterday's demand to 5 units
+    player.yesterday_demand["Widget"] = 5
 
     # Set current stock to 8 units (below minimum of 10)
     player.inventory["Widget"] = 8
@@ -54,7 +54,7 @@ def test_auto_restock_with_lead_time():
     print("\nTest 1: Instant vendor (lead_time=0)")
     print(f"  Minimum stock: 10")
     print(f"  Current stock: 8")
-    print(f"  Yesterday's sales: 5")
+    print(f"  Yesterday's demand: 5")
     print(f"  Expected behavior: Order 2 units (10 - 8)")
 
     purchases, _ = execute_stock_minimum_restock(player, game_state)
@@ -76,7 +76,7 @@ def test_auto_restock_with_lead_time():
     print("\nTest 2: Slow vendor (lead_time=2)")
     print(f"  Minimum stock: 10")
     print(f"  Current stock: 8")
-    print(f"  Yesterday's sales: 5")
+    print(f"  Yesterday's demand: 5")
     print(f"  Expected behavior: Order 7 units (10 + 5 - 8)")
     print(f"    Because: adjusted_minimum = 10 + 5 = 15")
 
@@ -97,11 +97,11 @@ def test_auto_restock_with_lead_time():
     player.inventory["Widget"] = 5
     player.stock_minimum_restock = {}  # Clear item-specific restock
     player.category_minimum_restock["Office Supplies"] = (10, "Slow Vendor")
-    player.yesterday_sales["Widget"] = 3
+    player.yesterday_demand["Widget"] = 3
 
     print(f"  Minimum stock per item: 10")
     print(f"  Current stock: 5")
-    print(f"  Yesterday's sales: 3")
+    print(f"  Yesterday's demand: 3")
     print(f"  Expected behavior: Order 8 units (10 + 3 - 5)")
 
     purchases, _ = execute_category_minimum_restock(player, game_state)

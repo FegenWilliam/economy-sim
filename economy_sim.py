@@ -659,7 +659,7 @@ class Player:
     stock_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (minimum_stock, vendor_name) for auto-restock
     category_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # category_name -> (minimum_stock_per_item, vendor_name) for category auto-restock
     category_pricing: Dict[str, float] = field(default_factory=dict)  # category -> percentage below market (e.g., 5.0 = 5% below market)
-    yesterday_sales: Dict[str, int] = field(default_factory=dict)  # item_name -> units_sold yesterday (for lead time calculation)
+    yesterday_demand: Dict[str, int] = field(default_factory=dict)  # item_name -> total quantity wanted yesterday (for lead time calculation)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -2738,11 +2738,11 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Tupl
         effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
 
         # Adjust minimum stock for vendors with lead time
-        # If vendor has lead time, add yesterday's sales to account for demand during delivery period
+        # If vendor has lead time, add yesterday's demand to account for expected demand during delivery period
         adjusted_minimum = minimum_stock
         if effective_lead_time > 0:
-            yesterday_demand = player.yesterday_sales.get(item_name, 0)
-            adjusted_minimum = minimum_stock + yesterday_demand
+            yesterday_item_demand = player.yesterday_demand.get(item_name, 0)
+            adjusted_minimum = minimum_stock + yesterday_item_demand
 
         if current_stock >= adjusted_minimum:
             # Stock is sufficient, skip
@@ -2838,11 +2838,11 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> T
             current_stock = player.inventory.get(item_name, 0)
 
             # Adjust minimum stock for vendors with lead time
-            # If vendor has lead time, add yesterday's sales to account for demand during delivery period
+            # If vendor has lead time, add yesterday's demand to account for expected demand during delivery period
             adjusted_minimum = minimum_stock
             if effective_lead_time > 0:
-                yesterday_demand = player.yesterday_sales.get(item_name, 0)
-                adjusted_minimum = minimum_stock + yesterday_demand
+                yesterday_item_demand = player.yesterday_demand.get(item_name, 0)
+                adjusted_minimum = minimum_stock + yesterday_item_demand
 
             if current_stock >= adjusted_minimum:
                 # Stock is sufficient, skip
@@ -4452,12 +4452,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     print(f"\n⏰ REMINDER: {player.name}'s loan from {loan.lender_name} is due in {days_remaining} days")
                     print(f"    Amount due: ${loan.remaining_balance:,.2f}")
 
-    # Step 10: Save yesterday's sales per item for each player (used for lead time calculations)
+    # Step 10: Save yesterday's demand per item for each player (used for lead time calculations)
+    # Use global demand (what all customers wanted) rather than individual sales (which may be limited by stock)
     for player in game_state.players:
-        player.yesterday_sales = {}
-        if player.name in per_item_sales:
-            for item_name, sales_data in per_item_sales[player.name].items():
-                player.yesterday_sales[item_name] = sales_data['units_sold']
+        player.yesterday_demand = dict(daily_demand_per_item)  # Copy the global demand data
 
     # Step 11: Reset daily vendor purchase tracking
     game_state.vendor_daily_purchases.clear()

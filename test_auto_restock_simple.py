@@ -32,16 +32,16 @@ def main():
     # Create player
     player = Player(name="TestPlayer", cash=10000.0)
 
-    # Set inventory and yesterday's sales
+    # Set inventory and yesterday's demand
     player.inventory["Widget"] = 8
-    player.yesterday_sales["Widget"] = 5
+    player.yesterday_demand["Widget"] = 5
 
     # Set auto-restock
     player.stock_minimum_restock["Widget"] = (10, "Test Vendor")
 
     print(f"Player cash: ${player.cash}")
     print(f"Current stock: {player.inventory.get('Widget', 0)}")
-    print(f"Yesterday sales: {player.yesterday_sales.get('Widget', 0)}")
+    print(f"Yesterday demand: {player.yesterday_demand.get('Widget', 0)}")
     print(f"Minimum stock: 10")
     print(f"Vendor lead time: {vendor.lead_time}")
     print(f"Vendor has Widget: {'Widget' in vendor.items}")
