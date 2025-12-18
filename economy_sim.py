@@ -6795,6 +6795,14 @@ def take_loan_submenu(game_state: GameState, player: Player, offers: List[LoanOf
         if 1 <= choice_num <= len(offers):
             offer = offers[choice_num - 1]
 
+            # Check if player already has a loan from this lender
+            existing_loan = any(loan.lender_name == offer.lender_name for loan in player.loans)
+            if existing_loan:
+                print(f"\n✗ You already have an active loan from {offer.lender_name}!")
+                print(f"   Please pay off your existing loan before taking another one from this lender.")
+                input("\nPress Enter to continue...")
+                return
+
             # Confirm loan
             total_with_interest = offer.amount * (1 + offer.interest_rate)
             print(f"\n📋 Loan Summary:")
