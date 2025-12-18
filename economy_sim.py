@@ -3229,39 +3229,53 @@ def assign_customers_by_cas_with_specialization(
     all_available_items: List[Item]
 ) -> Tuple[Dict[str, List[Customer]], Dict[str, Dict[str, Any]]]:
     """
-    Assign customers to players with specialization priority.
+    Assign customers to players with CAS-first, then specialization overflow.
 
     Process:
     1. Assign customers normally by CAS
-    2. For customers with specializations, check if any player has a specialty bonus for their categories
-    3. If yes, reassign those customers to the best specialized player
-    4. If no player has the specialty, keep the original CAS assignment
+    2. For customers with specializations:
+       - Check if the CAS-assigned player has at least ONE of the customer's categories
+       - If YES: customer stays with that player (CAS honored)
+       - If NO: customer becomes overflow, reassign to best specialized player if one exists
+       - If no specialized player exists: keep original CAS assignment
     """
     # First, do normal CAS assignment
     assignments, cas_breakdowns = assign_customers_by_cas(customers, players, market_prices, items_by_name, all_available_items)
 
-    # Now, handle specialization-based allocation
-    # Create a new assignment dict
-    specialized_assignments = {player.name: [] for player in players}
+    # Create a player lookup by name for easier access
+    players_by_name = {player.name: player for player in players}
 
-    # Track which customers have been reassigned to specialized stores
-    reassigned_customers = set()
+    # Now, handle specialization-based overflow allocation
+    specialized_assignments = {player.name: [] for player in players}
 
     # Process each player's assigned customers
     for player_name, assigned_customers in assignments.items():
-        for customer in assigned_customers:
-            # Check if customer has specializations and can be reallocated to a better specialized store
-            if customer.specializations:
-                # Try to find a player with specialization bonus for the customer's categories
-                # Pass both categories to prioritize players with both specializations
-                best_specialized_player = choose_best_specialized_player(players, customer.specializations, items_by_name)
+        assigned_player = players_by_name[player_name]
 
-                # If we found a specialized player and it's different from current assignment, reassign
-                if best_specialized_player and best_specialized_player.name != player_name:
-                    specialized_assignments[best_specialized_player.name].append(customer)
-                    reassigned_customers.add(id(customer))
-                else:
+        for customer in assigned_customers:
+            # Check if customer has specializations
+            if customer.specializations:
+                # Check if the assigned player has at least ONE of the customer's categories
+                has_matching_category = False
+                for category in customer.specializations:
+                    threshold = get_category_specialty_threshold(assigned_player, category, items_by_name)
+                    if threshold is not None:
+                        has_matching_category = True
+                        break
+
+                if has_matching_category:
+                    # CAS assignment honored - player has a matching category
                     specialized_assignments[player_name].append(customer)
+                else:
+                    # Player doesn't have any matching categories - try to find a specialized player
+                    best_specialized_player = choose_best_specialized_player(players, customer.specializations, items_by_name)
+
+                    if best_specialized_player:
+                        # Found a specialized player, reassign to them
+                        specialized_assignments[best_specialized_player.name].append(customer)
+                    else:
+                        # No specialized player found, keep original CAS assignment
+                        specialized_assignments[player_name].append(customer)
             else:
                 # No specialization, keep original assignment
                 specialized_assignments[player_name].append(customer)
