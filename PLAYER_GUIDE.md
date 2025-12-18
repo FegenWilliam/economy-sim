@@ -299,22 +299,6 @@ Employees are paid **every 30 days**:
 
 Permanent improvements to your store. One-time purchase.
 
-### Capacity Upgrades
-
-| Upgrade | Cost | Benefit |
-|---------|------|---------|
-| **Additional Shelving** | $2,000 | +2 product types |
-| **Display Cases** | $3,500 | +3 product types |
-
-### Employee Efficiency Upgrades
-
-| Upgrade | Cost | Benefit |
-|---------|------|---------|
-| **Extra Cashier Station** | $3,000 | +30 customer capacity |
-| **Express Checkout Lane** | $5,000 | +60 customer capacity |
-| **Warehouse Extension** | $5,000 | +400 item restocking capacity |
-| **Loading Dock** | $10,000 | +600 item restocking capacity |
-
 ### Progression Upgrades
 
 | Upgrade | Cost | Benefit |

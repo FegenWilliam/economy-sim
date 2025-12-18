@@ -595,7 +595,7 @@ class Upgrade:
     """An upgrade that players can purchase once."""
     name: str
     cost: float
-    effect_type: str  # "max_customers", "max_items", "max_products", "xp_gain", "vendor_discount", "lead_time_reduction", "wage_reduction", "production_line"
+    effect_type: str  # "xp_gain", "vendor_discount", "lead_time_reduction", "wage_reduction", "production_line"
     effect_value: float  # Amount of the effect
     vendor_name: str = ""  # Only used for vendor_discount type
     duration_days: int = 0  # Duration in days (0 = permanent, >0 = temporary)
@@ -726,14 +726,11 @@ class Player:
         # Warehouse capacity: each warehouse level 1 = 500, +500 per upgrade (level 10 = 5000)
         warehouse_capacity = sum(warehouse.level * 500 for warehouse in self.warehouses)
 
-        # Upgrade bonuses
-        bonus = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "max_items")
-
         # Warehouse workers add capacity
         total_workers = sum(warehouse.workers for warehouse in self.warehouses)
         worker_bonus = total_workers * 300
 
-        return int(warehouse_capacity + bonus + worker_bonus)
+        return int(warehouse_capacity + worker_bonus)
 
     def get_inventory_size_used(self, items_by_name: Dict[str, 'Item']) -> float:
         """Calculate total inventory space used based on item sizes."""
@@ -2404,14 +2401,6 @@ def create_default_upgrades(vendors: List[Vendor]) -> List[Upgrade]:
     Admins can add more upgrades to this list.
     """
     upgrades = [
-        # Buyout capacity upgrades
-        Upgrade(name="Warehouse Extension", cost=5000, effect_type="max_items", effect_value=400),
-        Upgrade(name="Loading Dock", cost=10000, effect_type="max_items", effect_value=600),
-
-        # Max different items upgrades
-        Upgrade(name="Additional Shelving", cost=2000, effect_type="max_products", effect_value=2),
-        Upgrade(name="Display Cases", cost=3500, effect_type="max_products", effect_value=3),
-
         # XP gain upgrades
         Upgrade(name="Business Course", cost=2000, effect_type="xp_gain", effect_value=10),
         Upgrade(name="MBA Program", cost=5000, effect_type="xp_gain", effect_value=25),
@@ -6799,13 +6788,7 @@ def upgrades_menu(game_state: GameState, player: Player) -> None:
 
 def _get_upgrade_effect_description(upgrade: Upgrade) -> str:
     """Get a human-readable description of an upgrade's effect."""
-    if upgrade.effect_type == "max_customers":
-        return f"+{int(upgrade.effect_value)} max customers/day"
-    elif upgrade.effect_type == "max_items":
-        return f"+{int(upgrade.effect_value)} max items/day"
-    elif upgrade.effect_type == "max_products":
-        return f"+{int(upgrade.effect_value)} max product types"
-    elif upgrade.effect_type == "xp_gain":
+    if upgrade.effect_type == "xp_gain":
         return f"+{int(upgrade.effect_value)}% XP gain"
     elif upgrade.effect_type == "vendor_discount":
         return f"+{int(upgrade.effect_value)}% discount at {upgrade.vendor_name}"
