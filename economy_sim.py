@@ -2663,24 +2663,41 @@ def execute_recurring_buy_orders(player: Player, game_state: GameState) -> Dict[
             if not vendor:
                 continue
 
-            # Get the price from this vendor
-            price = vendor.get_price(order.item_name)
-            if price is None:
-                # Vendor doesn't have this item, skip
-                continue
-
-            # Get item
+            # Get item object first
             item = game_state.items_by_name.get(order.item_name)
             if not item:
+                continue
+
+            # Determine the package name to use when querying the vendor
+            # For small items (size < 5, excluding luxury), vendors sell packages
+            purchase_item_name = order.item_name
+            packages_to_buy = order.quantity
+            items_per_package = 1
+
+            if item.size < 5.0 and item.category != "Luxury":
+                # Item is packaged - determine package type based on vendor
+                package_type = "bulk" if vendor.name in ["Bulk Master Co.", "Bulk Goods Co."] else "standard"
+                package_name, items_per_package, _ = get_package_info(item, package_type)
+                purchase_item_name = package_name
+
+                # Convert quantity from items to packages (round up)
+                packages_to_buy = (order.quantity + items_per_package - 1) // items_per_package
+
+            # Get the price from this vendor using the package name
+            price = vendor.get_price(purchase_item_name, packages_to_buy)
+            if price is None:
+                # Vendor doesn't have this item, skip
                 continue
 
             # Get market price for production line check
             market_price = game_state.market_prices.get(order.item_name, 0)
 
-            # Try to purchase
-            success = player.purchase_from_vendor(vendor, order.item_name, order.quantity, market_price, game_state)
+            # Try to purchase (purchase_from_vendor handles package conversion)
+            success = player.purchase_from_vendor(vendor, purchase_item_name, packages_to_buy, market_price, game_state)
             if success:
-                purchases[order.item_name] = purchases.get(order.item_name, 0) + order.quantity
+                # Track actual items added to inventory (not packages)
+                items_added = packages_to_buy * items_per_package
+                purchases[order.item_name] = purchases.get(order.item_name, 0) + items_added
                 order.last_executed_day = current_day
 
     return purchases
@@ -2708,39 +2725,45 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Dict
         if not vendor:
             continue
 
-        # Get the price from this vendor
-        price = vendor.get_price(item_name)
-        if price is None:
-            # Vendor doesn't have this item, skip
-            continue
-
-        # Get item
+        # Get item object first
         item = game_state.items_by_name.get(item_name)
         if not item:
             continue
 
-        # Calculate how much to buy
-        needed = minimum_stock - current_stock
+        # Determine the package name to use when querying the vendor
+        # For small items (size < 5, excluding luxury), vendors sell packages
+        purchase_item_name = item_name
+        packages_to_buy = 1
+        items_per_package = 1
 
-        # Check if item is packaged (small items with size < 5, excluding luxury)
         if item.size < 5.0 and item.category != "Luxury":
-            # Item is packaged - buy at least 1 package
-            _, items_per_package, _ = get_package_info(item, "standard")
+            # Item is packaged - determine package type based on vendor
+            package_type = "bulk" if vendor.name in ["Bulk Master Co.", "Bulk Goods Co."] else "standard"
+            package_name, items_per_package, _ = get_package_info(item, package_type)
+            purchase_item_name = package_name
 
-            # Calculate packages needed (round up)
-            packages_needed = (needed + items_per_package - 1) // items_per_package
-            quantity_to_buy = packages_needed * items_per_package
+            # Calculate how many packages to buy
+            needed = minimum_stock - current_stock
+            packages_to_buy = (needed + items_per_package - 1) // items_per_package
         else:
             # Item is not packaged - buy exactly what's needed
-            quantity_to_buy = needed
+            packages_to_buy = minimum_stock - current_stock
+
+        # Get the price from this vendor using the package name
+        price = vendor.get_price(purchase_item_name, packages_to_buy)
+        if price is None:
+            # Vendor doesn't have this item, skip
+            continue
 
         # Get market price for production line check
         market_price = game_state.market_prices.get(item_name, 0)
 
-        # Try to purchase
-        success = player.purchase_from_vendor(vendor, item_name, quantity_to_buy, market_price, game_state)
+        # Try to purchase (purchase_from_vendor handles package conversion)
+        success = player.purchase_from_vendor(vendor, purchase_item_name, packages_to_buy, market_price, game_state)
         if success:
-            purchases[item_name] = purchases.get(item_name, 0) + quantity_to_buy
+            # Track actual items added to inventory (not packages)
+            items_added = packages_to_buy * items_per_package
+            purchases[item_name] = purchases.get(item_name, 0) + items_added
 
     return purchases
 
