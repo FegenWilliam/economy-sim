@@ -1932,11 +1932,11 @@ class GameState:
 def create_default_items() -> List[Item]:
     """
     Create the starting items for the simulation.
-    Returns first 6 items from product catalog.
+    Returns first 60 items from product catalog (all $20 or below with varied categories).
     """
-    # Start with first 6 items (Bread, Milk, Eggs, Coffee, Toilet Paper, Vitamins)
-    return [PRODUCT_CATALOG[0], PRODUCT_CATALOG[1], PRODUCT_CATALOG[2],
-            PRODUCT_CATALOG[3], PRODUCT_CATALOG[4], PRODUCT_CATALOG[5]]
+    # Start with first 60 items - includes Food & Groceries, Fresh Produce,
+    # Household Essentials, Personal Care items (all $20 or below)
+    return [PRODUCT_CATALOG[i] for i in range(60)]
 
 
 def unlock_new_product(game_state: GameState) -> Optional[Item]:
@@ -2777,16 +2777,16 @@ def get_weighted_customer_type(day: int) -> str:
     Returns a weighted random customer type based on the current day.
 
     Day ranges:
-    - Below Day 30: Low=50%, Medium=40%, High=10%
-    - Day 30-99: Low=30%, Medium=60%, High=10%
-    - Day 100+: Low=10%, Medium=30%, High=60%
+    - Below Day 30: Low=40%, Medium=50%, High=10%
+    - Day 30-99: Low=10%, Medium=60%, High=30%
+    - Day 100+: Low=5%, Medium=25%, High=70%
     """
     if day < 30:
-        weights = {"low": 0.50, "medium": 0.40, "high": 0.10}
+        weights = {"low": 0.40, "medium": 0.50, "high": 0.10}
     elif day < 100:
-        weights = {"low": 0.30, "medium": 0.60, "high": 0.10}
+        weights = {"low": 0.10, "medium": 0.60, "high": 0.30}
     else:
-        weights = {"low": 0.10, "medium": 0.30, "high": 0.60}
+        weights = {"low": 0.05, "medium": 0.25, "high": 0.70}
 
     rand = random.random()
     cumulative = 0.0
@@ -3366,21 +3366,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: num_players * 25 + scaled growth
-    # Growth scales: +2/day base, +1 every 15 days (day 15: +3, day 30: +4, etc.)
-    def calculate_scaled_customers(day):
-        if day == 0:
-            return 0
-        full_periods = day // 15
-        remaining_days = day % 15
-        # Sum of customers from complete 15-day periods (arithmetic sequence)
-        total = 15 * full_periods * (3 + full_periods) // 2 if full_periods > 0 else 0
-        # Add customers from remaining days in current period
-        current_rate = 2 + full_periods
-        total += remaining_days * current_rate
-        return total
-
-    base_customer_count = len(game_state.players) * 25 + calculate_scaled_customers(game_state.day)
+    # Calculate base customer count: num_players * 50 + 5 per day
+    base_customer_count = len(game_state.players) * 50 + (game_state.day * 5)
 
     # Add permanent customer increase for every 14-day period that has passed
     fourteen_day_periods = game_state.day // 14
@@ -4089,11 +4076,18 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 emoji = "➡️"
             print(f"   {emoji} {item_name}: ${old_price:.2f} → ${new_price:.2f} ({change_percent:+.1f}%)")
 
-    # Unlock new product every 5 days (at end of day, so players can buy it next day)
-    if game_state.day % 5 == 0 and game_state.day > 0:
-        new_product = unlock_new_product(game_state)
-        if new_product and show_details:
-            print(f"\n🎁 NEW PRODUCT UNLOCKED: {new_product.name} (${new_product.base_price:.2f})")
+    # Unlock new products every 10 days (at end of day, so players can buy them next day)
+    if game_state.day % 10 == 0 and game_state.day > 0:
+        new_products = []
+        for _ in range(5):
+            new_product = unlock_new_product(game_state)
+            if new_product:
+                new_products.append(new_product)
+
+        if new_products and show_details:
+            print(f"\n🎁 NEW PRODUCTS UNLOCKED ({len(new_products)} items):")
+            for product in new_products:
+                print(f"   - {product.name} (${product.base_price:.2f})")
             print(f"   Total products available: {len(game_state.items)}")
 
     # Step 7.8: Apply daily reputation changes with limits and decay
@@ -7558,7 +7552,7 @@ def run_game() -> None:
             human_players.append(human_player)
 
         print(f"\nStarting cash: ${config.starting_cash:.2f}")
-        print(f"Customers formula: (num_players × 15) + day_number")
+        print(f"Customers formula: (num_players × 50) + (day_number × 5) + scaling bonuses")
 
         # Initialize items, vendors
         items = create_default_items()
@@ -7586,7 +7580,7 @@ def run_game() -> None:
             human_players=human_players,
             available_upgrades=available_upgrades,
             current_player_index=0,
-            unlocked_product_indices=[0, 1, 2],  # Start with first 3 products unlocked
+            unlocked_product_indices=list(range(60)),  # Start with first 60 products unlocked
             item_demand=item_demand,
         )
 
