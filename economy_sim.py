@@ -3513,7 +3513,7 @@ def assign_customers_by_cas_with_specialization(
     capacity_penalties = {player.name: 1.0 for player in players}
 
     # Iterative reallocation with capacity checks
-    MAX_ITERATIONS = 10
+    MAX_ITERATIONS = 2
     for iteration in range(MAX_ITERATIONS):
         # Do CAS assignment with current capacity penalties
         assignments, cas_breakdowns = assign_customers_by_cas(
