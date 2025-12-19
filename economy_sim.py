@@ -662,7 +662,7 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, List[tuple]] = field(default_factory=dict)  # item_name -> [(quantity, vendor_name), ...] (up to 3 vendors)
-    restockers: int = 0  # Warehouse Workers: Each adds +300 max inventory capacity
+    restockers: int = 0  # Warehouse Workers: Each adds +300 max inventory capacity and +500 daily item size limit
     marketing_agents: int = 0  # Marketing agents boost customer attraction
     cashiers: int = 0  # Cashiers: Each handles 200 customers/day (owner handles 100 base)
     store_level: int = 1  # Store level (affects inventory capacity)
@@ -687,6 +687,7 @@ class Player:
     yesterday_demand: Dict[str, int] = field(default_factory=dict)  # item_name -> total quantity wanted yesterday (for lead time calculation)
     category_sales_history: Dict[int, Dict[str, float]] = field(default_factory=dict)  # day -> category -> total_sales_value (for main category detection)
     items_stocked_today: Set[str] = field(default_factory=set)  # Track items that were stocked for the first time today (resets each day)
+    daily_item_size_sold: float = 0.0  # Track total item size sold today (for restocking limit: 250 base + 500 per restocker)
 
     def set_buy_order(self, item_name: str, quantity: int, vendor_name: str) -> None:
         """
@@ -768,6 +769,14 @@ class Player:
                 item_size = items_by_name[item_name].size
                 total_size += item_size * quantity
         return total_size
+
+    def get_daily_item_size_limit(self) -> float:
+        """Get daily item size limit (simulates moving items from warehouse to shelves).
+        Base limit: 250 item size per day
+        Each restocker adds: 500 item size per day
+        """
+        total_restockers = sum(warehouse.workers for warehouse in self.warehouses)
+        return 250.0 + (total_restockers * 500.0)
 
     def get_xp_multiplier(self) -> float:
         """Get XP gain multiplier from upgrades."""
@@ -1081,20 +1090,33 @@ class Player:
 
         self.inventory[item.name] = current_inventory + quantity
 
-    def sell_to_customer(self, item_name: str, quantity: int, unit_price: float, current_day: int = 1, item_category: Optional[str] = None) -> tuple:
+    def sell_to_customer(self, item_name: str, quantity: int, unit_price: float, current_day: int = 1, item_category: Optional[str] = None, item_size: float = 1.0) -> tuple:
         """
         Attempt to sell 'quantity' units of 'item_name' at 'unit_price'.
         Returns (revenue, profit, units_sold) tuple.
         Profit = revenue - cost
         Tracks sales by category for adjacency calculations.
+        Respects daily item size limit (250 + 500 * restockers).
         """
         available = self.inventory.get(item_name, 0)
-        units_sold = min(quantity, available)
+
+        # Check daily item size limit (restockers simulate moving items from warehouse to shelves)
+        daily_limit = self.get_daily_item_size_limit()
+        remaining_daily_capacity = daily_limit - self.daily_item_size_sold
+
+        # Calculate max units that can be sold based on daily capacity
+        max_units_by_daily_capacity = int(remaining_daily_capacity / item_size) if item_size > 0 else quantity
+
+        # Limit by both inventory and daily capacity
+        units_sold = min(quantity, available, max_units_by_daily_capacity)
 
         if units_sold > 0:
             self.inventory[item_name] -= units_sold
             revenue = units_sold * unit_price
             self.cash += revenue
+
+            # Track daily item size sold
+            self.daily_item_size_sold += units_sold * item_size
 
             # Calculate profit (revenue - cost)
             cost_per_unit = self.item_costs.get(item_name, 0)
@@ -3811,9 +3833,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[item_name] = original_price
         game_state.event_price_changes.clear()
 
-    # Reset items stocked today for all players (new day starts)
+    # Reset daily counters for all players (new day starts)
     for player in game_state.players:
         player.items_stocked_today.clear()
+        player.daily_item_size_sold = 0.0  # Reset restocking limit
 
     # Check for special events
     if game_state.day % 30 == 0 and show_details:
@@ -4076,8 +4099,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                                 if affordable_quantity > 0:
                                     # Purchase from current supplier
                                     item_category = items_by_name.get(need.item_name).category if need.item_name in items_by_name else None
+                                    item_size = items_by_name.get(need.item_name).size if need.item_name in items_by_name else 1.0
                                     revenue, profit, actual_units_sold = current_supplier.sell_to_customer(
-                                        need.item_name, affordable_quantity, supplier_price, game_state.day, item_category
+                                        need.item_name, affordable_quantity, supplier_price, game_state.day, item_category, item_size
                                     )
 
                                     if revenue > 0 and actual_units_sold > 0:
@@ -4118,6 +4142,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                                         # Check if customer has hit their budget limit
                                         if customer_spending >= customer_budget:
                                             break
+
+                                    # Check if store hit daily item size limit (can't sell more today)
+                                    if actual_units_sold < affordable_quantity and current_supplier.daily_item_size_sold >= current_supplier.get_daily_item_size_limit():
+                                        # Store is out of daily capacity, customer should leave or try another store
+                                        break
 
                 # Remove fully purchased items
                 for need in purchased_needs:
@@ -4230,10 +4259,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity, game_state.market_prices)
 
                 if supplier:
-                    # Uncapped customers bypass cashier limits
+                    # Uncapped customers bypass cashier limits but not daily restocking limits
                     price = supplier.prices.get(need.item_name, 0)
                     item_category = items_by_name.get(need.item_name).category if need.item_name in items_by_name else None
-                    revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price, game_state.day, item_category)
+                    item_size = items_by_name.get(need.item_name).size if need.item_name in items_by_name else 1.0
+                    revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price, game_state.day, item_category, item_size)
                     if revenue > 0:
                         daily_sales[supplier.name] += revenue
                         daily_profits[supplier.name] += profit
@@ -4394,9 +4424,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 if need.item_name in supplier.inventory and supplier.inventory[need.item_name] > 0:
                     if need.item_name in supplier.prices:
                         price = supplier.prices[need.item_name]
-                        # Special customers bypass the 15% market price rule
+                        # Special customers bypass the 15% market price rule but not daily restocking limits
                         item_category = items_by_name.get(need.item_name).category if need.item_name in items_by_name else None
-                        revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price, game_state.day, item_category)
+                        item_size = items_by_name.get(need.item_name).size if need.item_name in items_by_name else 1.0
+                        revenue, profit, actual_units_sold = supplier.sell_to_customer(need.item_name, need.quantity, price, game_state.day, item_category, item_size)
 
                         if revenue > 0:
                             daily_sales[supplier.name] += revenue
@@ -4446,9 +4477,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 6: Pay employee wages (monthly - every 30 days)
     for player in game_state.players:
         wages = player.pay_monthly_wages(game_state.day)
-        total_employees = player.restockers + player.marketing_agents
+        total_warehouse_workers = sum(warehouse.workers for warehouse in player.warehouses)
+        total_employees = total_warehouse_workers + player.marketing_agents
         if show_details and wages > 0:
-            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({player.restockers} warehouse workers, {player.marketing_agents} marketing agents)")
+            print(f"  {player.name}: ${wages:.2f} MONTHLY WAGE ({total_warehouse_workers} warehouse workers, {player.marketing_agents} marketing agents)")
         elif show_details and total_employees > 0:
             days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
             print(f"  {player.name}: No payment today ({days_until_payment} days until next wage)")
@@ -5176,9 +5208,10 @@ def display_player_status(player: Player, game_state: GameState = None) -> None:
     print(f"Experience: {player.experience:.0f}/{xp_needed:.0f} XP")
 
     print(f"\nEmployees:")
-    print(f"  Warehouse Workers: {player.restockers} (Max inventory: {player.get_max_inventory()} items)")
+    total_warehouse_workers = sum(warehouse.workers for warehouse in player.warehouses)
+    print(f"  Warehouse Workers: {total_warehouse_workers} (Max inventory: {player.get_max_inventory()} items, Daily limit: {player.get_daily_item_size_limit():.0f} item size)")
     print(f"  Marketing Agents: {player.marketing_agents} (Boost customer attraction)")
-    total_employees = player.restockers + player.marketing_agents
+    total_employees = total_warehouse_workers + player.marketing_agents
     monthly_wage = 1000.0
     wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
     actual_wage = max(0, monthly_wage - wage_reduction)
@@ -8103,6 +8136,7 @@ def serialize_game_state(game_state: GameState) -> dict:
                 "category_pricing": player.category_pricing,
                 "category_sales_history": {str(k): v for k, v in player.category_sales_history.items()},  # Convert day (int) to str for JSON
                 "items_stocked_today": list(player.items_stocked_today),
+                "daily_item_size_sold": player.daily_item_size_sold,
             }
             for player in game_state.players
         ],
@@ -8280,6 +8314,9 @@ def deserialize_game_state(data: dict) -> GameState:
         # Load items stocked today
         items_stocked_today = set(player_data.get("items_stocked_today", []))
 
+        # Load daily item size sold
+        daily_item_size_sold = player_data.get("daily_item_size_sold", 0.0)
+
         player = Player(
             name=player_data["name"],
             cash=player_data["cash"],
@@ -8309,6 +8346,7 @@ def deserialize_game_state(data: dict) -> GameState:
             category_pricing=category_pricing,
             category_sales_history=category_sales_history,
             items_stocked_today=items_stocked_today,
+            daily_item_size_sold=daily_item_size_sold,
         )
         players.append(player)
 
