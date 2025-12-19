@@ -3444,15 +3444,24 @@ def calculate_capacity_penalty(customers_allocated: int, capacity: int) -> float
     """
     Calculate the CAS penalty multiplier based on overcapacity.
 
-    This is a soft limit - going over capacity reduces CAS effectiveness.
+    This is a soft limit - going over capacity reduces CAS effectiveness with a smooth linear scale.
 
-    Examples from spec:
-    - 1.1x over (110%): 0.9x multiplier
-    - 1.4x over (140%): 0.7x multiplier
-    - 1.8x over (180%): 0.3x multiplier
-    - 2.0x over (200%): 0.1x multiplier
+    Penalty Scale (smooth linear degradation):
+    - At or below capacity (ratio ≤ 1.0): 1.0x multiplier (no penalty)
+    - At 2.0x capacity (ratio = 2.0): 0.1x multiplier (90% penalty)
+    - Smooth linear interpolation between 1.0x and 2.0x capacity
+    - Clamped at minimum 0.1x for extreme overcapacity (>2.0x)
 
-    The formula is designed to heavily penalize understaffing.
+    Formula: penalty = max(0.1, 1.0 - 0.9 * (ratio - 1.0))
+
+    Examples:
+    - ratio 1.0 (at capacity): 1.00x multiplier
+    - ratio 1.1 (10% over): 0.91x multiplier
+    - ratio 1.5 (50% over): 0.55x multiplier
+    - ratio 2.0 (100% over): 0.10x multiplier
+
+    This creates a fair, gradual degradation that simulates customers
+    avoiding overcrowded stores and choosing less busy competitors.
 
     Returns:
         A multiplier between 0.1 and 1.0 to apply to CAS
@@ -3467,26 +3476,8 @@ def calculate_capacity_penalty(customers_allocated: int, capacity: int) -> float
     if ratio <= 1.0:
         return 1.0
 
-    # Apply penalty based on how much over capacity
-    # Formula derived from the examples: penalty ≈ max(0.1, 2.0 - ratio)
-    # This gives us:
-    # ratio 1.1 -> 2.0 - 1.1 = 0.9
-    # ratio 1.4 -> 2.0 - 1.4 = 0.6 (we want 0.7, so we need adjustment)
-    #
-    # Better fit: penalty = max(0.1, 1.1 - 0.5 * (ratio - 1.0))
-    # ratio 1.0 -> 1.1 - 0.5 * 0 = 1.1 -> clip to 1.0
-    # ratio 1.1 -> 1.1 - 0.5 * 0.1 = 1.05 (too high)
-    #
-    # Let's try: penalty = max(0.1, 2.1 - ratio)
-    # ratio 1.1 -> 2.1 - 1.1 = 1.0 (too high)
-    #
-    # Better: penalty = max(0.1, 1.0 - 0.9 * (ratio - 1.0))
-    # ratio 1.0 -> 1.0 - 0 = 1.0 ✓
-    # ratio 1.1 -> 1.0 - 0.9 * 0.1 = 0.91 (close to 0.9)
-    # ratio 1.4 -> 1.0 - 0.9 * 0.4 = 0.64 (close to 0.7)
-    # ratio 1.8 -> 1.0 - 0.9 * 0.8 = 0.28 (close to 0.3)
-    # ratio 2.0 -> 1.0 - 0.9 * 1.0 = 0.1 ✓
-
+    # Smooth linear scale from 1.0 (at capacity) to 0.1 (at 2x capacity)
+    # Linearly decreases by 0.9 over the range [1.0, 2.0]
     penalty = max(0.1, 1.0 - 0.9 * (ratio - 1.0))
     return penalty
 
