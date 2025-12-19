@@ -88,11 +88,11 @@ Example: Level 1→2 needs 500 XP, Level 10→11 needs 15,000 XP
 
 You have three main capacity constraints:
 
-| Type | Base | Per Employee | Per Upgrade |
-|------|------|--------------|-------------|
-| **Product Types** | 3 | — | +2 or +3 |
-| **Daily Customers** | 20 | +30 (Cashier) | +30 or +60 |
-| **Daily Restocking** | 200 items | +200 (Restocker) | +400 or +600 |
+| Type | Base | Per Employee | Notes |
+|------|------|--------------|-------|
+| **Product Types** | 3 | — | Unlocked via XP/upgrades |
+| **Daily Customers** | 20 | +30 (Cashier) | Limited by cashier capacity |
+| **Daily Item Size Limit** | 250 | +500 (Warehouse Worker) | Simulates moving items to shelves |
 
 ---
 
@@ -272,17 +272,18 @@ Rare customers with unique behaviors:
 
 **When to Hire**: When you're consistently hitting your daily customer cap.
 
-### Restockers
+### Warehouse Workers (Restockers)
 
 **Cost**: $500/month (paid every 30 days)
 
-**Benefit**: +200 item restocking capacity per restocker
+**Benefit**: +300 max inventory capacity and +500 daily item size limit per worker
 
-- Base capacity: 200 items/day
-- Each restocker adds: +200 items/day
-- Upgrades available: Warehouse Extension (+400), Loading Dock (+600)
+- Base daily limit: 250 item size/day (simulates moving items from warehouse to shelves)
+- Each warehouse worker adds: +500 item size/day
+- Also adds: +300 max inventory capacity
+- Each warehouse can have up to 5 workers
 
-**When to Hire**: When you're moving high volumes of inventory (especially cheap items in bulk).
+**When to Hire**: When you're consistently hitting your daily item size limit or need more storage capacity.
 
 ### Monthly Costs
 
@@ -369,7 +370,8 @@ The game gets harder as days progress:
 Profit per Item = Selling Price - Cost Price
 XP to Next Level = 500 × Level + (10,000 × (Level ÷ 10))
 Customer Capacity = 20 + (30 × Cashiers) + Upgrades
-Restocking Capacity = 200 + (200 × Restockers) + Upgrades
+Daily Item Size Limit = 250 + (500 × Warehouse Workers)
+Max Inventory = (Warehouse Level × 500) + (300 × Warehouse Workers)
 Product Slots = 3 + Level + Upgrades
 ```
 
