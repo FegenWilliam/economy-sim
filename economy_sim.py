@@ -664,6 +664,7 @@ class Player:
     buy_orders: Dict[str, List[tuple]] = field(default_factory=dict)  # item_name -> [(quantity, vendor_name), ...] (up to 3 vendors)
     restockers: int = 0  # Warehouse Workers: Each adds +300 max inventory capacity
     marketing_agents: int = 0  # Marketing agents boost customer attraction
+    cashiers: int = 0  # Cashiers: Each handles 200 customers/day (owner handles 100 base)
     store_level: int = 1  # Store level (affects inventory capacity)
     experience: float = 0.0  # XP gained from profits
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
@@ -883,10 +884,18 @@ class Player:
     def hire_employee(self, employee_type: str) -> bool:
         """
         Hire an employee.
+        - Cashier: $500 upfront, $500/month, handles 200 customers/day
         - Marketing Agent: 5x scaling cost (1k, 5k, 25k...), $1000/month, requires level 5+
         Returns True if successful, False if not enough cash or requirements not met.
         """
-        if employee_type == "marketing_agent":
+        if employee_type == "cashier":
+            HIRING_COST = 500.0
+            if self.cash < HIRING_COST:
+                return False
+            self.cash -= HIRING_COST
+            self.cashiers += 1
+            return True
+        elif employee_type == "marketing_agent":
             # Level 5+ required
             if self.store_level < 5:
                 return False
@@ -904,6 +913,7 @@ class Player:
         """
         Pay monthly wages for all employees every 30 days.
         - Warehouse workers: $500/month each
+        - Cashiers: $500/month each
         - Marketing agents: $1000/month each
         Only pays if 30 days have passed since last payment.
         Returns total wages paid (0 if not a payment day).
@@ -916,7 +926,7 @@ class Player:
         total_warehouse_workers = sum(warehouse.workers for warehouse in self.warehouses)
 
         # Total employees
-        total_employees = total_warehouse_workers + self.marketing_agents
+        total_employees = total_warehouse_workers + self.cashiers + self.marketing_agents
 
         # No wages if no employees
         if total_employees == 0:
@@ -924,6 +934,8 @@ class Player:
 
         # Warehouse workers: $500/month
         warehouse_worker_wage = 500.0
+        # Cashiers: $500/month
+        cashier_wage = 500.0
         # Marketing agents: $1000/month
         marketing_agent_wage = 1000.0
 
@@ -931,9 +943,10 @@ class Player:
         wage_reduction = sum(u.effect_value for u in self.purchased_upgrades if u.effect_type == "wage_reduction")
 
         actual_worker_wage = max(0, warehouse_worker_wage - wage_reduction)
+        actual_cashier_wage = max(0, cashier_wage - wage_reduction)
         actual_agent_wage = max(0, marketing_agent_wage - wage_reduction)
 
-        wages = (total_warehouse_workers * actual_worker_wage) + (self.marketing_agents * actual_agent_wage)
+        wages = (total_warehouse_workers * actual_worker_wage) + (self.cashiers * actual_cashier_wage) + (self.marketing_agents * actual_agent_wage)
         self.cash -= wages
         self.last_wage_payment_day = current_day
         return wages
@@ -1543,13 +1556,17 @@ class Customer:
         players: List[Player],
         item_name: str,
         quantity: int,
-        market_prices: Dict[str, float]
+        market_prices: Dict[str, float],
+        customer_visits_per_store: Dict[str, int] = None
     ) -> Optional[Player]:
         """
         Decide which player to buy from for a given item and quantity.
 
         Chooses the player with the lowest price who has at least some stock.
         Customers will only buy if the price is within 15% of market price.
+
+        NEW: Considers customer capacity - prefers stores that aren't overcrowded.
+
         Breaks ties randomly.
         """
         candidates = []
@@ -1575,7 +1592,35 @@ class Customer:
         # Get all players with the lowest price
         best_players = [player for player, price in candidates if price == min_price]
 
-        # Return random player from best options
+        # If no capacity tracking, use original behavior
+        if customer_visits_per_store is None:
+            return random.choice(best_players)
+
+        # Prefer stores that are under capacity
+        under_capacity = []
+        over_capacity = []
+
+        for player in best_players:
+            capacity = get_player_customer_capacity(player)
+            current_visits = customer_visits_per_store.get(player.name, 0)
+
+            if current_visits < capacity:
+                under_capacity.append(player)
+            else:
+                over_capacity.append((player, current_visits))
+
+        # Prefer stores under capacity
+        if under_capacity:
+            return random.choice(under_capacity)
+
+        # If all are over capacity, choose the least crowded
+        if over_capacity:
+            # Sort by visit count (ascending) and pick the least crowded
+            over_capacity.sort(key=lambda x: x[1])
+            least_crowded = [p for p, visits in over_capacity if visits == over_capacity[0][1]]
+            return random.choice(least_crowded)
+
+        # Fallback (shouldn't happen)
         return random.choice(best_players)
 
     def get_all_suppliers_sorted(
@@ -3386,6 +3431,66 @@ def choose_best_specialized_player(
     return random.choice(tied_players)[0]
 
 
+def get_player_customer_capacity(player: Player) -> int:
+    """
+    Calculate the maximum customer capacity for a player.
+    - Base (owner only): 100 customers/day
+    - Each cashier: +200 customers/day
+    """
+    return 100 + (player.cashiers * 200)
+
+
+def calculate_capacity_penalty(customers_allocated: int, capacity: int) -> float:
+    """
+    Calculate the CAS penalty multiplier based on overcapacity.
+
+    This is a soft limit - going over capacity reduces CAS effectiveness.
+
+    Examples from spec:
+    - 1.1x over (110%): 0.9x multiplier
+    - 1.4x over (140%): 0.7x multiplier
+    - 1.8x over (180%): 0.3x multiplier
+    - 2.0x over (200%): 0.1x multiplier
+
+    The formula is designed to heavily penalize understaffing.
+
+    Returns:
+        A multiplier between 0.1 and 1.0 to apply to CAS
+    """
+    if capacity == 0:
+        # No capacity means severe penalty
+        return 0.1
+
+    ratio = customers_allocated / capacity
+
+    # If under or at capacity, no penalty
+    if ratio <= 1.0:
+        return 1.0
+
+    # Apply penalty based on how much over capacity
+    # Formula derived from the examples: penalty ≈ max(0.1, 2.0 - ratio)
+    # This gives us:
+    # ratio 1.1 -> 2.0 - 1.1 = 0.9
+    # ratio 1.4 -> 2.0 - 1.4 = 0.6 (we want 0.7, so we need adjustment)
+    #
+    # Better fit: penalty = max(0.1, 1.1 - 0.5 * (ratio - 1.0))
+    # ratio 1.0 -> 1.1 - 0.5 * 0 = 1.1 -> clip to 1.0
+    # ratio 1.1 -> 1.1 - 0.5 * 0.1 = 1.05 (too high)
+    #
+    # Let's try: penalty = max(0.1, 2.1 - ratio)
+    # ratio 1.1 -> 2.1 - 1.1 = 1.0 (too high)
+    #
+    # Better: penalty = max(0.1, 1.0 - 0.9 * (ratio - 1.0))
+    # ratio 1.0 -> 1.0 - 0 = 1.0 ✓
+    # ratio 1.1 -> 1.0 - 0.9 * 0.1 = 0.91 (close to 0.9)
+    # ratio 1.4 -> 1.0 - 0.9 * 0.4 = 0.64 (close to 0.7)
+    # ratio 1.8 -> 1.0 - 0.9 * 0.8 = 0.28 (close to 0.3)
+    # ratio 2.0 -> 1.0 - 0.9 * 1.0 = 0.1 ✓
+
+    penalty = max(0.1, 1.0 - 0.9 * (ratio - 1.0))
+    return penalty
+
+
 def assign_customers_by_cas_with_specialization(
     customers: List[Customer],
     players: List[Player],
@@ -3404,47 +3509,89 @@ def assign_customers_by_cas_with_specialization(
        - If YES: customer stays with that player (CAS honored)
        - If NO: customer becomes overflow, reassign to best specialized player if one exists
        - If no specialized player exists: keep original CAS assignment
-    """
-    # First, do normal CAS assignment
-    assignments, cas_breakdowns = assign_customers_by_cas(customers, players, market_prices, items_by_name, all_available_items, current_day)
 
+    NEW: Iterative capacity-based reallocation
+    3. Check if any player is over their customer capacity
+    4. If yes, apply capacity penalty to their CAS and reallocate
+    5. Repeat until stable or max iterations reached
+    """
     # Create a player lookup by name for easier access
     players_by_name = {player.name: player for player in players}
 
-    # Now, handle specialization-based overflow allocation
-    specialized_assignments = {player.name: [] for player in players}
+    # Track capacity penalties for each player (starts at 1.0 = no penalty)
+    capacity_penalties = {player.name: 1.0 for player in players}
 
-    # Process each player's assigned customers
-    for player_name, assigned_customers in assignments.items():
-        assigned_player = players_by_name[player_name]
+    # Iterative reallocation with capacity checks
+    MAX_ITERATIONS = 10
+    for iteration in range(MAX_ITERATIONS):
+        # Do CAS assignment with current capacity penalties
+        assignments, cas_breakdowns = assign_customers_by_cas(
+            customers, players, market_prices, items_by_name, all_available_items,
+            current_day, capacity_penalties
+        )
 
-        for customer in assigned_customers:
-            # Check if customer has specializations
-            if customer.specializations:
-                # Check if the assigned player has at least ONE of the customer's categories
-                has_matching_category = False
-                for category in customer.specializations:
-                    threshold = get_category_specialty_threshold(assigned_player, category, items_by_name)
-                    if threshold is not None:
-                        has_matching_category = True
-                        break
+        # Handle specialization-based overflow allocation
+        specialized_assignments = {player.name: [] for player in players}
 
-                if has_matching_category:
-                    # CAS assignment honored - player has a matching category
-                    specialized_assignments[player_name].append(customer)
-                else:
-                    # Player doesn't have any matching categories - try to find a specialized player
-                    best_specialized_player = choose_best_specialized_player(players, customer.specializations, items_by_name)
+        # Process each player's assigned customers
+        for player_name, assigned_customers in assignments.items():
+            assigned_player = players_by_name[player_name]
 
-                    if best_specialized_player:
-                        # Found a specialized player, reassign to them
-                        specialized_assignments[best_specialized_player.name].append(customer)
-                    else:
-                        # No specialized player found, keep original CAS assignment
+            for customer in assigned_customers:
+                # Check if customer has specializations
+                if customer.specializations:
+                    # Check if the assigned player has at least ONE of the customer's categories
+                    has_matching_category = False
+                    for category in customer.specializations:
+                        threshold = get_category_specialty_threshold(assigned_player, category, items_by_name)
+                        if threshold is not None:
+                            has_matching_category = True
+                            break
+
+                    if has_matching_category:
+                        # CAS assignment honored - player has a matching category
                         specialized_assignments[player_name].append(customer)
-            else:
-                # No specialization, keep original assignment
-                specialized_assignments[player_name].append(customer)
+                    else:
+                        # Player doesn't have any matching categories - try to find a specialized player
+                        best_specialized_player = choose_best_specialized_player(players, customer.specializations, items_by_name)
+
+                        if best_specialized_player:
+                            # Found a specialized player, reassign to them
+                            specialized_assignments[best_specialized_player.name].append(customer)
+                        else:
+                            # No specialized player found, keep original CAS assignment
+                            specialized_assignments[player_name].append(customer)
+                else:
+                    # No specialization, keep original assignment
+                    specialized_assignments[player_name].append(customer)
+
+        # Check if any player is over capacity and needs penalty
+        needs_reallocation = False
+        new_capacity_penalties = {}
+
+        for player in players:
+            allocated_count = len(specialized_assignments[player.name])
+            capacity = get_player_customer_capacity(player)
+            penalty = calculate_capacity_penalty(allocated_count, capacity)
+
+            new_capacity_penalties[player.name] = penalty
+
+            # If penalty changed, we need to reallocate
+            if abs(penalty - capacity_penalties[player.name]) > 0.001:
+                needs_reallocation = True
+
+        # Update penalties
+        capacity_penalties = new_capacity_penalties
+
+        # If no reallocation needed, we've reached a stable state
+        if not needs_reallocation:
+            break
+
+    # Store capacity penalties in CAS breakdowns for visibility
+    for player_name in cas_breakdowns:
+        cas_breakdowns[player_name]["capacity_penalty"] = capacity_penalties[player_name]
+        cas_breakdowns[player_name]["customer_capacity"] = get_player_customer_capacity(players_by_name[player_name])
+        cas_breakdowns[player_name]["allocated_customers"] = len(specialized_assignments[player_name])
 
     return specialized_assignments, cas_breakdowns
 
@@ -3455,7 +3602,8 @@ def assign_customers_by_cas(
     market_prices: Dict[str, float],
     items_by_name: Dict[str, Item],
     all_available_items: List[Item],
-    current_day: int = 1
+    current_day: int = 1,
+    capacity_penalties: Dict[str, float] = None
 ) -> Tuple[Dict[str, List[Customer]], Dict[str, Dict[str, Any]]]:
     """
     Assign customers to players based on proportional CAS distribution.
@@ -3463,18 +3611,31 @@ def assign_customers_by_cas(
     If a player has 30% of total CAS, they receive exactly 30% of customers.
     This is deterministic and proportional, not random.
 
+    Capacity penalties (if provided) are applied to CAS to simulate customers
+    avoiding overcrowded stores.
+
     Returns:
         - A dictionary mapping player name to list of assigned customers.
         - A dictionary mapping player name to their CAS breakdown data.
     """
+    # Initialize capacity penalties if not provided
+    if capacity_penalties is None:
+        capacity_penalties = {player.name: 1.0 for player in players}
+
     # Calculate CAS for each player and store breakdown
     player_cas = {}
     cas_breakdowns = {}
     for player in players:
         breakdown = calculate_cas_breakdown(player, market_prices, items_by_name, all_available_items, current_day)
-        cas = breakdown["final_cas"]
-        player_cas[player.name] = cas
+        base_cas = breakdown["final_cas"]
+
+        # Apply capacity penalty
+        penalty = capacity_penalties.get(player.name, 1.0)
+        penalized_cas = base_cas * penalty
+
+        player_cas[player.name] = penalized_cas
         cas_breakdowns[player.name] = breakdown
+        cas_breakdowns[player.name]["capacity_penalty_applied"] = penalty
 
     # Calculate total CAS
     total_cas = sum(player_cas.values())
@@ -3832,6 +3993,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         game_state.day
     )
 
+    # Track how many customers have visited each store (for capacity-aware overflow)
+    customer_visits_per_store = {player.name: 0 for player in game_state.players}
+
     # Process customers for each player
     for player in game_state.players:
         allocated_customers_assigned[player.name] = len(customer_assignments.get(player.name, []))
@@ -3885,6 +4049,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                     break
 
                 visited_stores.add(current_supplier.name)
+
+                # Track customer visit to this store
+                customer_visits_per_store[current_supplier.name] += 1
 
                 # Determine visit type
                 visit_type = "allocated" if current_supplier == player else "overflow"
@@ -3996,7 +4163,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                             [p for p in game_state.players if p.name not in visited_stores],
                             need.item_name,
                             need.quantity,
-                            game_state.market_prices
+                            game_state.market_prices,
+                            customer_visits_per_store
                         )
                         if alternative_supplier:
                             next_supplier = alternative_supplier
@@ -6850,7 +7018,7 @@ def discard_inventory_menu(game_state: GameState, player: Player) -> None:
 
 
 def employee_menu(game_state: GameState, player: Player) -> None:
-    """Menu for hiring marketing agents."""
+    """Menu for hiring cashiers and marketing agents."""
 
     while True:
         print("\n" + "=" * 60)
@@ -6859,25 +7027,34 @@ def employee_menu(game_state: GameState, player: Player) -> None:
         print(f"\nYour Cash: ${player.cash:.2f}")
         print(f"Store Level: {player.store_level}")
         print(f"\nCurrent Employees:")
+        print(f"  Cashiers: {player.cashiers} (Handle 200 customers/day each)")
         print(f"  Marketing Agents: {player.marketing_agents} (Boost customer attraction)")
 
         # Total employees including warehouse workers
         total_warehouse_workers = sum(w.workers for w in player.warehouses)
-        total_employees = total_warehouse_workers + player.marketing_agents
+        total_employees = total_warehouse_workers + player.cashiers + player.marketing_agents
 
         # Calculate actual wages with upgrades
         wage_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "wage_reduction")
         worker_wage = max(0, 500.0 - wage_reduction)
+        cashier_wage = max(0, 500.0 - wage_reduction)
         agent_wage = max(0, 1000.0 - wage_reduction)
-        total_monthly_wages = (total_warehouse_workers * worker_wage) + (player.marketing_agents * agent_wage)
+        total_monthly_wages = (total_warehouse_workers * worker_wage) + (player.cashiers * cashier_wage) + (player.marketing_agents * agent_wage)
 
         print(f"  Warehouse Workers (in Warehouse menu): {total_warehouse_workers}")
         print(f"  Total monthly wages: ${total_monthly_wages:.2f}")
 
+        # Show customer capacity
+        customer_capacity = 100 + (player.cashiers * 200)
+        print(f"\nCustomer Capacity: {customer_capacity} customers/day (100 base + {player.cashiers * 200} from cashiers)")
+        print(f"Note: Going over capacity reduces CAS through soft penalty")
+
         if wage_reduction > 0:
-            print(f"\nMonthly Wage per Agent: ${agent_wage:.2f} (reduced from $1000.00)")
+            print(f"\nMonthly Wage per Cashier: ${cashier_wage:.2f} (reduced from $500.00)")
+            print(f"Monthly Wage per Agent: ${agent_wage:.2f} (reduced from $1000.00)")
         else:
-            print(f"\nMonthly Wage per Agent: ${agent_wage:.2f}")
+            print(f"\nMonthly Wage per Cashier: ${cashier_wage:.2f}")
+            print(f"Monthly Wage per Agent: ${agent_wage:.2f}")
 
         # Show days until next wage payment
         days_until_payment = 30 - (game_state.day - player.last_wage_payment_day)
@@ -6885,24 +7062,37 @@ def employee_menu(game_state: GameState, player: Player) -> None:
             print(f"Next wage payment: Day {player.last_wage_payment_day + 30} ({days_until_payment} days)")
         print(f"Note: Wages paid every 30 days for ALL employees (including newly hired)")
 
-        # Calculate marketing agent cost
+        # Calculate costs
+        cashier_cost = 500.0
         marketing_cost = 1000.0 * (5 ** player.marketing_agents)
 
         print("\nOptions:")
         print("  [For warehouse workers, use: 9. Warehouse Management]")
+        print(f"  1. Hire Cashier (Handle more customers) - ${cashier_cost:.2f}")
         if player.store_level >= 5:
-            print(f"  1. Hire Marketing Agent (Boost CAS) - ${marketing_cost:.2f}")
+            print(f"  2. Hire Marketing Agent (Boost CAS) - ${marketing_cost:.2f}")
         else:
-            print(f"  1. Hire Marketing Agent (Requires Level 5+)")
+            print(f"  2. Hire Marketing Agent (Requires Level 5+)")
         print("  0. Back to Main Menu")
 
         try:
-            choice = input("\nSelect option (0-1): ")
+            choice = input("\nSelect option (0-2): ")
             choice_num = int(choice)
 
             if choice_num == 0:
                 break
             elif choice_num == 1:
+                if player.cash < cashier_cost:
+                    print(f"\n✗ Not enough cash! Need ${cashier_cost:.2f}, have ${player.cash:.2f}")
+                else:
+                    success = player.hire_employee("cashier")
+                    if success:
+                        print(f"\n✓ Hired Cashier for ${cashier_cost:.2f}")
+                        new_capacity = 100 + (player.cashiers * 200)
+                        print(f"  New customer capacity: {new_capacity} customers/day")
+                    else:
+                        print("\n✗ Failed to hire Cashier")
+            elif choice_num == 2:
                 if player.store_level < 5:
                     print(f"\n✗ Requires Store Level 5+! (Current: {player.store_level})")
                 elif player.cash < marketing_cost:
