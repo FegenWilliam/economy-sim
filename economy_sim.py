@@ -4523,6 +4523,19 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if unmet_uncapped_demand > 0:
             print(f"Unmet uncapped demand: {unmet_uncapped_demand} items")
 
+        # Apply inventory penalty ($1 per 10 units of size)
+        items_by_name = {item.name: item for item in game_state.items}
+        inventory_penalties = []
+        for player in game_state.players:
+            total_size = player.get_inventory_size_used(items_by_name)
+            penalty = total_size / 10.0
+            if penalty > 0:
+                player.cash -= penalty
+                inventory_penalties.append(f"{player.name}: {total_size:.1f} size → ${penalty:.2f}")
+
+        if inventory_penalties:
+            print(f"\n📦 Inventory Penalties: {', '.join(inventory_penalties)}")
+
         # Display customer type statistics
         print(f"\nCustomer Types Today:")
         for ctype in ['low', 'medium', 'high']:
