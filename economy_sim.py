@@ -3051,14 +3051,14 @@ def get_weighted_special_customer_type() -> str:
 
 def get_player_main_category(player: Player, current_day: int) -> Optional[str]:
     """
-    Determine the player's main category based on sales history from the last 7 days.
+    Determine the player's main category based on sales history from the last 14 days.
 
-    Returns the category with the highest total sales value over the last 7 days.
-    If less than 7 days of data exists, uses all available data.
+    Returns the category with the highest total sales value over the last 14 days.
+    If less than 14 days of data exists, uses all available data.
     Returns None if no sales history exists.
     """
-    # Get the range of days to consider (last 7 days, or all available if less than 7)
-    start_day = max(1, current_day - 6)  # Look back 7 days including today
+    # Get the range of days to consider (last 14 days, or all available if less than 14)
+    start_day = max(1, current_day - 13)  # Look back 14 days including today
 
     # Aggregate sales by category across the time period
     category_totals: Dict[str, float] = {}
