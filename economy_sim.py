@@ -2008,6 +2008,8 @@ class GameState:
     item_demand: Dict[str, float] = field(default_factory=dict)  # item_name -> demand multiplier (0.1 to 2.0)
     vendor_daily_purchases: Dict[str, Dict[str, Dict[str, int]]] = field(default_factory=dict)  # player_name -> vendor_name -> item_name -> quantity_today
     players_passed: Set[int] = field(default_factory=set)  # Set of player indices who have passed their turn
+    single_player_mode: bool = False  # True if only 1 player in the game
+    global_cas: float = 0.0  # Benchmark CAS for single-player mode that grows each day
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -3997,6 +3999,39 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Build items dictionary for quick lookup (needed for CAS calculation)
     items_by_name = {item.name: item for item in game_state.items}
 
+    # In single-player mode, split customers based on CAS competition with global benchmark
+    total_customers_spawned = len(all_customers)
+    if game_state.single_player_mode and len(game_state.players) > 0:
+        player = game_state.players[0]
+        player_cas = calculate_player_cas(
+            player,
+            game_state.market_prices,
+            items_by_name,
+            game_state.items,
+            game_state.day
+        )
+
+        # Calculate player's share of customers based on CAS proportion
+        total_cas = player_cas + game_state.global_cas
+        if total_cas > 0:
+            player_share = player_cas / total_cas
+        else:
+            player_share = 0.5  # Default to 50/50 if both CAS are 0
+
+        # Calculate how many customers the player actually gets
+        num_customers_for_player = int(len(all_customers) * player_share)
+        customers_lost_to_benchmark = len(all_customers) - num_customers_for_player
+
+        # Only give the player their share of customers
+        all_customers = all_customers[:num_customers_for_player]
+
+        if show_details:
+            print(f"\n🎯 Customer Allocation (Single-Player Mode):")
+            print(f"  Your CAS: {player_cas:.1f} | Global CAS: {game_state.global_cas:.1f}")
+            print(f"  Your Share: {player_share * 100:.1f}% of {total_customers_spawned} customers")
+            print(f"  ✓ You get {num_customers_for_player} customers")
+            print(f"  ✗ Global benchmark takes {customers_lost_to_benchmark} customers")
+
     # Assign customers to players based on weighted CAS distribution with specialization priority
     customer_assignments, cas_breakdowns_pre_shopping = assign_customers_by_cas_with_specialization(
         all_customers,
@@ -4760,12 +4795,34 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 specialty_text += f" (+{data['specialty_mult_raw']:.2f})"
             print(f"  {data['name']}: CAS={data['final_cas']:.1f} | Rep: {data['reputation']:.0f}, Disc: {data['discount_pct']:.1f}%, Stab: {data['stability']:.1f}{marketing_text}, Spec: {specialty_text}, Fulfill: {data['fulfill_mult']:.2f}x ({data['fulfill_pct']:.0f}%)")
 
+        # Show single-player mode comparison
+        if game_state.single_player_mode and len(game_state.human_players) > 0:
+            player_cas = cas_data[0]['final_cas']  # First player's CAS
+            cas_diff = player_cas - game_state.global_cas
+            if cas_diff >= 0:
+                status = "✓ AHEAD"
+                symbol = "↑"
+            else:
+                status = "✗ BEHIND"
+                symbol = "↓"
+            print(f"\n  {symbol} Global Benchmark CAS: {game_state.global_cas:.1f}")
+            print(f"  {status}: Your CAS is {abs(cas_diff):.1f} points {'above' if cas_diff >= 0 else 'below'} the global benchmark")
+
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
     refresh_vendor_inventory(game_state.vendors, game_state.items, game_state.market_prices)
 
     # Step 9: Advance day counter
     game_state.day += 1
+
+    # Step 9.1: Update global CAS for single-player mode
+    if game_state.single_player_mode:
+        # Global CAS grows each day with accelerating growth - player must keep improving!
+        # Formula: 2.0 base + 0.05 per day (quadratic acceleration)
+        daily_growth = 2.0 + (game_state.day * 0.05)
+        game_state.global_cas += daily_growth
+        if show_details:
+            print(f"\n📊 Global CAS increased to {game_state.global_cas:.2f} (+{daily_growth:.2f})")
 
     # Step 9.25: Process pending deliveries for all players
     delivery_summary = {}  # Track deliveries per player for consolidated output
@@ -7933,6 +7990,22 @@ def main_menu(game_state: GameState) -> bool:
             total_debt = sum(loan.remaining_balance for loan in player.loans)
             print(f"Total Debt: ${total_debt:,.2f}")
 
+        # Show single-player mode CAS comparison
+        if game_state.single_player_mode:
+            player_cas = calculate_player_cas(
+                player,
+                game_state.market_prices,
+                game_state.items_by_name,
+                game_state.items,
+                game_state.day
+            )
+            cas_diff = player_cas - game_state.global_cas
+            if cas_diff >= 0:
+                status = f"✓ Ahead by {cas_diff:.2f}"
+            else:
+                status = f"✗ Behind by {abs(cas_diff):.2f}"
+            print(f"\n📊 Your CAS: {player_cas:.2f} | Global CAS: {game_state.global_cas:.2f} | {status}")
+
         print("\nOptions:")
         print("  1. Pass Day (Simulate)")
         print("  2. View Market Prices")
@@ -8153,6 +8226,8 @@ def serialize_game_state(game_state: GameState) -> dict:
         "vendor_daily_purchases": game_state.vendor_daily_purchases,
         "players_passed": list(game_state.players_passed),
         "item_demand": game_state.item_demand,
+        "single_player_mode": game_state.single_player_mode,
+        "global_cas": game_state.global_cas,
     }
 
 
@@ -8369,6 +8444,8 @@ def deserialize_game_state(data: dict) -> GameState:
         vendor_daily_purchases=data.get("vendor_daily_purchases", {}),
         players_passed=set(data.get("players_passed", [])),
         item_demand=data.get("item_demand", {}),
+        single_player_mode=data.get("single_player_mode", False),
+        global_cas=data.get("global_cas", 0.0),
     )
 
     # Backward compatibility: Initialize item_demand for any items that don't have it
@@ -8537,6 +8614,18 @@ def run_game() -> None:
 
         # Set global game state for signal handler
         _current_game_state = game_state
+
+        # Initialize single-player mode if only 1 player
+        if len(human_players) == 1:
+            game_state.single_player_mode = True
+            game_state.global_cas = 35.0  # Starting benchmark CAS - tough but achievable
+            print("\n" + "=" * 60)
+            print("SINGLE-PLAYER MODE ACTIVATED")
+            print("=" * 60)
+            print("You'll compete against a global benchmark that steals customers!")
+            print(f"Starting Global CAS: {game_state.global_cas:.2f}")
+            print("Your share of customers = Your CAS / (Your CAS + Global CAS)")
+            print("Keep your CAS high to maximize customers and revenue!")
 
         # Show initial setup
         print("\n" + "=" * 60)
