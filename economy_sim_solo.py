@@ -3852,8 +3852,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: num_players * 50 + 5 per day
-    base_customer_count = len(game_state.players) * 50 + (game_state.day * 5)
+    # Calculate base customer count: 100 base + 5 per day
+    base_customer_count = 100 + (game_state.day * 5)
 
     # Add permanent customer increase for every 14-day period that has passed
     fourteen_day_periods = game_state.day // 14
@@ -8528,29 +8528,15 @@ def run_game() -> None:
         config = GameConfig()
         config.num_days = 365  # Run for a full year
 
-        # Get number of human players
-        while True:
-            try:
-                num_humans_str = input("\nHow many human players? (1-4): ").strip()
-                num_humans = int(num_humans_str)
-                if 1 <= num_humans <= 4:
-                    break
-                else:
-                    print("Please enter a number between 1 and 4")
-            except ValueError:
-                print("Invalid input. Please enter a number.")
-
-        # Get names for human players
-        human_players = []
-        for i in range(num_humans):
-            player_name = input(f"\nEnter name for Player {i+1}: ").strip()
-            if not player_name:
-                player_name = f"Player {i+1}"
-            human_player = Player(name=player_name, cash=config.starting_cash, is_human=True)
-            human_players.append(human_player)
+        # Create single player
+        player_name = input("\nEnter your name: ").strip()
+        if not player_name:
+            player_name = "Player"
+        human_player = Player(name=player_name, cash=config.starting_cash, is_human=True)
+        human_players = [human_player]
 
         print(f"\nStarting cash: ${config.starting_cash:.2f}")
-        print(f"Customers formula: (num_players × 50) + (day_number × 5) + scaling bonuses")
+        print(f"Customers formula: 100 base + (day_number × 5) + scaling bonuses")
 
         # Initialize items, vendors
         items = create_default_items()
@@ -8636,29 +8622,23 @@ def run_game() -> None:
         print("=" * 60)
 
     print("\n" + "=" * 60)
-    print("FINAL STANDINGS")
+    print("GAME OVER - FINAL RESULTS")
     print("=" * 60)
     print(f"Days played: {game_state.day - 1}")
 
-    # Sort players by cash (descending)
-    sorted_players = sorted(game_state.players, key=lambda p: p.cash, reverse=True)
-
-    for i, player in enumerate(sorted_players, 1):
-        print(f"\n{i}. {player.name}")
-        print(f"   Cash: ${player.cash:.2f}")
-        print(f"   Inventory value: {sum(player.inventory.values())} units")
-
-    if sorted_players:
-        winner = sorted_players[0]
+    # Get the single player
+    if game_state.players:
+        player = game_state.players[0]
+        print(f"\nPlayer: {player.name}")
+        print(f"Final cash: ${player.cash:.2f}")
+        print(f"Store level: {player.store_level}")
+        print(f"Inventory value: {sum(player.inventory.values())} units")
+        print(f"Reputation: {player.reputation}")
         print("\n" + "=" * 60)
-        if winner.is_human:
-            print("🎉 CONGRATULATIONS! YOU WON! 🎉")
-        else:
-            print(f"Winner: {winner.name}")
-        print(f"Final cash: ${winner.cash:.2f}")
+        print("🎉 THANKS FOR PLAYING! 🎉")
         print("=" * 60)
     else:
-        print("\nNo players in game.")
+        print("\nNo player found.")
 
 
 if __name__ == "__main__":
