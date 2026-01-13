@@ -3999,6 +3999,39 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Build items dictionary for quick lookup (needed for CAS calculation)
     items_by_name = {item.name: item for item in game_state.items}
 
+    # In single-player mode, split customers based on CAS competition with global benchmark
+    total_customers_spawned = len(all_customers)
+    if game_state.single_player_mode and len(game_state.players) > 0:
+        player = game_state.players[0]
+        player_cas = calculate_player_cas(
+            player,
+            game_state.market_prices,
+            items_by_name,
+            game_state.items,
+            game_state.day
+        )
+
+        # Calculate player's share of customers based on CAS proportion
+        total_cas = player_cas + game_state.global_cas
+        if total_cas > 0:
+            player_share = player_cas / total_cas
+        else:
+            player_share = 0.5  # Default to 50/50 if both CAS are 0
+
+        # Calculate how many customers the player actually gets
+        num_customers_for_player = int(len(all_customers) * player_share)
+        customers_lost_to_benchmark = len(all_customers) - num_customers_for_player
+
+        # Only give the player their share of customers
+        all_customers = all_customers[:num_customers_for_player]
+
+        if show_details:
+            print(f"\n🎯 Customer Allocation (Single-Player Mode):")
+            print(f"  Your CAS: {player_cas:.1f} | Global CAS: {game_state.global_cas:.1f}")
+            print(f"  Your Share: {player_share * 100:.1f}% of {total_customers_spawned} customers")
+            print(f"  ✓ You get {num_customers_for_player} customers")
+            print(f"  ✗ Global benchmark takes {customers_lost_to_benchmark} customers")
+
     # Assign customers to players based on weighted CAS distribution with specialization priority
     customer_assignments, cas_breakdowns_pre_shopping = assign_customers_by_cas_with_specialization(
         all_customers,
@@ -4784,8 +4817,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Step 9.1: Update global CAS for single-player mode
     if game_state.single_player_mode:
-        # Global CAS grows each day, with slight acceleration over time
-        daily_growth = 1.5 + (game_state.day * 0.01)
+        # Global CAS grows each day with accelerating growth - player must keep improving!
+        # Formula: 2.0 base + 0.05 per day (quadratic acceleration)
+        daily_growth = 2.0 + (game_state.day * 0.05)
         game_state.global_cas += daily_growth
         if show_details:
             print(f"\n📊 Global CAS increased to {game_state.global_cas:.2f} (+{daily_growth:.2f})")
@@ -8584,13 +8618,14 @@ def run_game() -> None:
         # Initialize single-player mode if only 1 player
         if len(human_players) == 1:
             game_state.single_player_mode = True
-            game_state.global_cas = 25.0  # Starting benchmark CAS
+            game_state.global_cas = 35.0  # Starting benchmark CAS - tough but achievable
             print("\n" + "=" * 60)
             print("SINGLE-PLAYER MODE ACTIVATED")
             print("=" * 60)
-            print("You'll compete against a global benchmark CAS that grows each day!")
+            print("You'll compete against a global benchmark that steals customers!")
             print(f"Starting Global CAS: {game_state.global_cas:.2f}")
-            print("Try to keep your CAS above the global benchmark to succeed!")
+            print("Your share of customers = Your CAS / (Your CAS + Global CAS)")
+            print("Keep your CAS high to maximize customers and revenue!")
 
         # Show initial setup
         print("\n" + "=" * 60)
