@@ -669,7 +669,6 @@ class Player:
     experience: float = 0.0  # XP gained from profits
     item_costs: Dict[str, float] = field(default_factory=dict)  # Track cost per item for profit calculation
     purchased_upgrades: List['Upgrade'] = field(default_factory=list)  # Upgrades bought by this player
-    is_human: bool = False  # Whether this is a human-controlled player
     reputation: float = 0.0  # Store reputation from -100 to 100, affects customer choice
     average_fulfillment_pct: float = 70.0  # Average % of customer needs fulfilled (used for scoring)
     allocated_average_fulfillment_pct: float = 70.0  # Avg fulfillment for initially assigned customers
@@ -1216,19 +1215,7 @@ class Player:
             discount = self.get_vendor_discount(vendor.name, current_day)
             final_price_package = vendor_price * (1.0 - discount)
 
-            # Apply catch-up discount for non-dominating players (starts day 10)
-            if game_state and game_state.day >= 10:
-                # Find the highest level player
-                highest_level = max(p.store_level for p in game_state.players)
-
-                # If this player is not the highest level, apply catch-up discount
-                if self.store_level < highest_level:
-                    if vendor.name == "Daily Essentials Co.":
-                        # 10% additional discount: 90% → 80% market price
-                        final_price_package *= (0.80 / 0.90)
-                    elif vendor.name == "Instant Goods Ltd.":
-                        # 3% additional discount: 98% → 95% market price
-                        final_price_package *= (0.95 / 0.98)
+            # Catch-up discount removed (not applicable in single-player mode)
 
             # Calculate price per individual item (for packages, this divides by items_per_package)
             final_price_per_unit = final_price_package / items_per_package
@@ -1994,13 +1981,12 @@ class GameConfig:
 class GameState:
     """Holds the entire current state of the simulation."""
     day: int = 1
-    players: List[Player] = field(default_factory=list)
+    player: Optional[Player] = None
     customers: List[Customer] = field(default_factory=list)
     items: List[Item] = field(default_factory=list)
     vendors: List[Vendor] = field(default_factory=list)
     market_prices: Dict[str, float] = field(default_factory=dict)  # item_name -> current market price
     config: GameConfig = field(default_factory=GameConfig)
-    human_players: List[Player] = field(default_factory=list)  # All human-controlled players
     available_upgrades: List[Upgrade] = field(default_factory=list)  # Upgrades that can be purchased
     unlocked_product_indices: List[int] = field(default_factory=list)  # Indices of products from catalog that have been unlocked
     event_price_changes: Dict[str, float] = field(default_factory=dict)  # Tracks items with temporary event prices and their original prices
@@ -3832,10 +3818,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[item_name] = original_price
         game_state.event_price_changes.clear()
 
-    # Reset daily counters for all players (new day starts)
-    for player in game_state.players:
-        player.items_stocked_today.clear()
-        player.daily_item_size_sold = 0.0  # Reset restocking limit
+    # Reset daily counters (new day starts)
+    game_state.player.items_stocked_today.clear()
+    game_state.player.daily_item_size_sold = 0.0  # Reset restocking limit
 
     # Check for special events
     if game_state.day % 30 == 0 and show_details:
@@ -3880,13 +3865,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     if show_details:
         print("\nExecuting buy orders...")
 
-    # Track daily spending per player for accurate profit calculation
-    daily_spending = {player.name: 0.0 for player in game_state.players}
+    # Track daily spending for accurate profit calculation
+    daily_spending = 0.0
 
-    # Track inventory space used per player (for buy orders)
-    daily_inventory_used = {player.name: 0.0 for player in game_state.players}
+    # Track inventory space used (for buy orders)
+    daily_inventory_used = 0.0
 
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         # Track actual cash spent (accounts for vendor fallbacks, discounts, etc.)
         cash_before = player.cash
 
@@ -3903,7 +3889,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         manual_purchases, manual_size = execute_buy_orders(player, game_state)
 
         # Track total inventory space used
-        daily_inventory_used[player.name] = recurring_size + restock_size + category_restock_size + manual_size
+        daily_inventory_used = recurring_size + restock_size + category_restock_size + manual_size
 
         # Combine all purchases
         all_purchases = {}
@@ -3919,9 +3905,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         cash_after = player.cash
         actual_spent = cash_before - cash_after
 
-        daily_spending[player.name] = actual_spent
+        daily_spending = actual_spent
         if show_details and all_purchases:
-            print(f"  {player.name}: Purchased {sum(all_purchases.values())} items (bought: {daily_inventory_used[player.name]:.1f} space)(spent ${actual_spent:.2f})")
+            print(f"  {player.name}: Purchased {sum(all_purchases.values())} items (bought: {daily_inventory_used:.1f} space)(spent ${actual_spent:.2f})")
             if recurring_purchases:
                 print(f"    - Recurring orders: {sum(recurring_purchases.values())} items")
             if restock_purchases:
@@ -3930,26 +3916,23 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 print(f"    - Category auto-restock: {sum(category_restock_purchases.values())} items")
 
     # Track daily statistics
-    daily_sales = {player.name: 0.0 for player in game_state.players}
-    daily_profits = {player.name: 0.0 for player in game_state.players}
-    customers_served = {player.name: 0 for player in game_state.players}
-    allocated_customers_served = {player.name: 0 for player in game_state.players}
-    allocated_customers_assigned = {player.name: 0 for player in game_state.players}
-    overflow_customers_served = {player.name: 0 for player in game_state.players}
-    uncapped_customers_served = {player.name: 0 for player in game_state.players}
+    daily_sales = 0.0
+    daily_profits = 0.0
+    customers_served = 0
+    allocated_customers_served = 0
+    allocated_customers_assigned = 0
+    overflow_customers_served = 0
+    uncapped_customers_served = 0
     unmet_demand = 0
     unmet_uncapped_demand = 0
 
-    # Track reputation changes per player (to be applied at end of day with limits)
-    daily_reputation_changes = {player.name: 0 for player in game_state.players}
+    # Track reputation changes (to be applied at end of day with limits)
+    daily_reputation_changes = 0
 
-    # Track fulfillment percentages per player (to calculate average at end of day)
-    daily_fulfillment_data = {
-        player.name: {"allocated": [], "overflow": []}
-        for player in game_state.players
-    }
-    fulfillment_visit_counts = {player.name: {"allocated": 0, "overflow": 0} for player in game_state.players}
-    routed_no_need_counts = {player.name: {"allocated": 0, "overflow": 0} for player in game_state.players}
+    # Track fulfillment percentages (to calculate average at end of day)
+    daily_fulfillment_data = {"allocated": [], "overflow": []}
+    fulfillment_visit_counts = {"allocated": 0, "overflow": 0}
+    routed_no_need_counts = {"allocated": 0, "overflow": 0}
 
     # Track customer types for daily summary
     customer_type_stats = {
@@ -3963,12 +3946,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     special_customer_events = []  # List of (customer_type, target_player_name, items_taken/bought)
 
     # Track per-item sales data for pricing strategy
-    # player_name -> item_name -> {units_sold, revenue, starting_inventory}
-    per_item_sales = {player.name: {} for player in game_state.players}
-    # Track starting inventory before sales for each player/item
-    for player in game_state.players:
+    # item_name -> {units_sold, revenue, starting_inventory}
+    per_item_sales = {}
+    # Track starting inventory before sales for each item
+    player = game_state.player
+    if player:
         for item_name, quantity in player.inventory.items():
-            per_item_sales[player.name][item_name] = {
+            per_item_sales[item_name] = {
                 'units_sold': 0,
                 'revenue': 0.0,
                 'starting_inventory': quantity
@@ -3998,8 +3982,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Split customers based on CAS competition with global benchmark
     total_customers_spawned = len(all_customers)
-    if len(game_state.players) > 0:
-        player = game_state.players[0]
+    player = game_state.player
+    if player:
         player_cas = calculate_player_cas(
             player,
             game_state.market_prices,
@@ -4029,25 +4013,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"  ✓ You get {num_customers_for_player} customers")
             print(f"  ✗ Global benchmark takes {customers_lost_to_benchmark} customers")
 
-    # Assign customers to players based on weighted CAS distribution with specialization priority
-    customer_assignments, cas_breakdowns_pre_shopping = assign_customers_by_cas_with_specialization(
-        all_customers,
-        game_state.players,
-        game_state.market_prices,
-        items_by_name,
-        game_state.items,
-        game_state.day
-    )
+        # In single-player mode, all customers go to the player
+        assigned_customers = all_customers
+        allocated_customers_assigned = len(assigned_customers)
 
-    # Track how many customers have visited each store (for capacity-aware overflow)
-    customer_visits_per_store = {player.name: 0 for player in game_state.players}
-
-    # Process customers for each player
-    for player in game_state.players:
-        allocated_customers_assigned[player.name] = len(customer_assignments.get(player.name, []))
-
-    for player in game_state.players:
-        assigned_customers = customer_assignments.get(player.name, [])
+        # Track customer visits
+        customer_visits_per_store = 0
 
         for customer in assigned_customers:
             needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
@@ -4211,13 +4182,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 next_supplier = None
                 for need in remaining_needs:
                     if need.quantity > 0:
-                        alternative_supplier = customer.choose_supplier(
-                            [p for p in game_state.players if p.name not in visited_stores],
-                            need.item_name,
-                            need.quantity,
-                            game_state.market_prices,
-                            customer_visits_per_store
-                        )
+                        # In single-player mode, there are no alternative suppliers
+                        alternative_supplier = None
                         if alternative_supplier:
                             next_supplier = alternative_supplier
                             break
@@ -4288,7 +4254,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 daily_demand_per_item[need.item_name] = daily_demand_per_item.get(need.item_name, 0) + need.quantity
 
             for need in needs:
-                supplier = customer.choose_supplier(game_state.players, need.item_name, need.quantity, game_state.market_prices)
+                # In single-player mode, the supplier is always the player
+                supplier = player
 
                 if supplier:
                     # Uncapped customers bypass cashier limits but not daily restocking limits
@@ -4371,10 +4338,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             # Shoplifter has special handling (steals items)
             if customer.customer_type == "shoplifter":
-                # Choose target (highest reputation player)
-                target = customer.choose_supplier_for_special_customer(
-                    game_state.players, [], game_state.market_prices, items_by_name, game_state.items
-                )
+                # In single-player mode, target is always the player
+                target = player
 
                 if target:
                     # Find 1-2 most expensive items in target's inventory
@@ -4436,9 +4401,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 continue
 
             # Choose supplier using special customer logic
-            supplier = customer.choose_supplier_for_special_customer(
-                game_state.players, needs, game_state.market_prices, items_by_name, game_state.items
-            )
+            # In single-player mode, supplier is always the player
+            supplier = player
 
             if not supplier:
                 special_customer_events.append((
@@ -4492,12 +4456,14 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 ))
 
     # Step 5.7: Calculate actual profits (Sales - Daily Spending, before wages)
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         daily_profits[player.name] = daily_sales[player.name] - daily_spending[player.name]
 
     # Step 5.6: Award XP based on sales (every $5 of sales = 1 XP)
     level_ups = {}
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         sales = daily_sales[player.name]
         if sales > 0:
             # Every $5 of sales = 1 XP
@@ -4507,7 +4473,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 level_ups[player.name] = player.store_level
 
     # Step 6: Pay employee wages (monthly - every 30 days)
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         wages = player.pay_monthly_wages(game_state.day)
         total_warehouse_workers = sum(warehouse.workers for warehouse in player.warehouses)
         total_employees = total_warehouse_workers + player.marketing_agents
@@ -4520,7 +4487,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 7: Print daily summary
     if show_details:
         print(f"\nDaily Results:")
-        for player in game_state.players:
+        player = game_state.player
+        if player:
             sales = daily_sales[player.name]
             profit = daily_profits[player.name]
             served = customers_served[player.name]
@@ -4590,7 +4558,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Apply inventory penalty ($1 per 10 units of size)
         items_by_name = {item.name: item for item in game_state.items}
         inventory_penalties = []
-        for player in game_state.players:
+        player = game_state.player
+        if player:
             total_size = player.get_inventory_size_used(items_by_name)
             penalty = total_size / 10.0
             if penalty > 0:
@@ -4653,7 +4622,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Update all player prices based on their category pricing rules
     items_by_name = {item.name: item for item in game_state.items}
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         player.update_prices_from_market(game_state.market_prices, items_by_name)
 
     if show_details and price_changes:
@@ -4688,7 +4658,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     reputation_data = []
     cas_data = []
 
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         # Apply daily reputation changes from customer interactions
         rep_change = daily_reputation_changes[player.name]
 
@@ -4793,8 +4764,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"  {data['name']}: CAS={data['final_cas']:.1f} | Rep: {data['reputation']:.0f}, Disc: {data['discount_pct']:.1f}%, Stab: {data['stability']:.1f}{marketing_text}, Spec: {specialty_text}, Fulfill: {data['fulfill_mult']:.2f}x ({data['fulfill_pct']:.0f}%)")
 
         # Show global benchmark comparison
-        if len(game_state.human_players) > 0:
-            player_cas = cas_data[0]['final_cas']  # First player's CAS
+        if game_state.player and cas_data:
+            player_cas = cas_data[0]['final_cas']  # Player's CAS
             cas_diff = player_cas - game_state.global_cas
             if cas_diff >= 0:
                 status = "✓ AHEAD"
@@ -4823,7 +4794,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 9.25: Process pending deliveries for all players
     delivery_summary = {}  # Track deliveries per player for consolidated output
 
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         deliveries_to_process = []
         remaining_deliveries = []
 
@@ -4857,11 +4829,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
             player.inventory[item_name] = new_total_qty
 
-            if player.is_human:
+            if True:
                 player_deliveries.append(f"{quantity}x {item_name}")
 
         # Track deliveries for this player
-        if player.is_human and player_deliveries:
+        if True and player_deliveries:
             delivery_summary[player.name] = player_deliveries
 
         # Update pending deliveries list
@@ -4873,7 +4845,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             print(f"\n📦 Deliveries for {player_name}: {', '.join(deliveries)}")
 
     # Step 9.5: Clean up expired vendor partnerships
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         expired_upgrades = []
         for upgrade in player.purchased_upgrades:
             if upgrade.duration_days > 0:  # Temporary upgrade
@@ -4887,12 +4860,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Remove expired upgrades
         for upgrade in expired_upgrades:
             player.purchased_upgrades.remove(upgrade)
-            if player.is_human and show_details:
+            if True and show_details:
                 print(f"\n⚠️  {player.name}: '{upgrade.name}' has expired!")
 
     # Display loan warnings for human players
-    for player in game_state.players:
-        if player.is_human and player.loans and show_details:
+    player = game_state.player
+    if player:
+        if True and player.loans and show_details:
             for loan in player.loans:
                 days_remaining = loan.due_day - game_state.day
                 if days_remaining <= 0:
@@ -4904,7 +4878,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Step 10: Save yesterday's demand per item for each player (used for lead time calculations)
     # Use global demand (what all customers wanted) rather than individual sales (which may be limited by stock)
-    for player in game_state.players:
+    player = game_state.player
+    if player:
         player.yesterday_demand = dict(daily_demand_per_item)  # Copy the global demand data
 
     # Step 11: Reset daily vendor purchase tracking
@@ -7668,14 +7643,14 @@ def display_customer_forecast(game_state: GameState) -> None:
     print("=" * 60)
     print(f"\nDay {game_state.day} Expected Customers:")
 
-    # Calculate base customer count
-    base_customer_count = len(game_state.players) * 10 + game_state.day
+    # Calculate base customer count: 100 base + 5 per day
+    base_customer_count = 100 + (game_state.day * 5)
 
-    # Check for 14-day event
+    # Add permanent customer increase for every 14-day period that has passed
+    fourteen_day_periods = game_state.day // 14
     event_bonus = 0
-    if game_state.day % 14 == 0:
-        occurrence_count = game_state.day // 14
-        event_bonus = 20 * occurrence_count
+    if fourteen_day_periods > 0:
+        event_bonus = 20 * fourteen_day_periods
         base_customer_count += event_bonus
 
     # Calculate uncapped customers
@@ -7970,7 +7945,7 @@ def main_menu(game_state: GameState) -> bool:
     Display main menu and handle user choice.
     Returns True to continue game, False to quit.
     """
-    player = game_state.human_players[0]
+    player = game_state.player
 
     while True:
         print("\n" + "=" * 50)
@@ -8118,76 +8093,72 @@ def serialize_game_state(game_state: GameState) -> dict:
             }
             for vendor in game_state.vendors
         ],
-        "players": [
-            {
-                "name": player.name,
-                "cash": player.cash,
-                "inventory": player.inventory,
-                "prices": player.prices,
-                "buy_orders": {k: list(v) for k, v in player.buy_orders.items()},
-                "restockers": player.restockers,
-                "marketing_agents": player.marketing_agents,
-                "store_level": player.store_level,
-                "experience": player.experience,
-                "item_costs": player.item_costs,
-                "purchased_upgrades": [
-                    {
-                        "name": upgrade.name,
-                        "cost": upgrade.cost,
-                        "effect_type": upgrade.effect_type,
-                        "effect_value": upgrade.effect_value,
-                        "vendor_name": upgrade.vendor_name,
-                        "duration_days": upgrade.duration_days,
-                    }
-                    for upgrade in player.purchased_upgrades
-                ],
-                "is_human": player.is_human,
-                "last_wage_payment_day": player.last_wage_payment_day,
-                "vendor_partnership_expiration": player.vendor_partnership_expiration,
-                "reputation": player.reputation,
-                "average_fulfillment_pct": player.average_fulfillment_pct,
-                "allocated_average_fulfillment_pct": player.allocated_average_fulfillment_pct,
-                "overflow_average_fulfillment_pct": player.overflow_average_fulfillment_pct,
-                "pending_deliveries": player.pending_deliveries,
-                "warehouses": [
-                    {
-                        "level": warehouse.level,
-                        "workers": warehouse.workers,
-                    }
-                    for warehouse in player.warehouses
-                ],
-                "loans": [
-                    {
-                        "lender_name": loan.lender_name,
-                        "principal": loan.principal,
-                        "remaining_balance": loan.remaining_balance,
-                        "interest_rate": loan.interest_rate,
-                        "early_interest_rate": loan.early_interest_rate,
-                        "due_day": loan.due_day,
-                        "taken_day": loan.taken_day,
-                    }
-                    for loan in player.loans
-                ],
-                "price_history": player.price_history,
-                "recurring_buy_orders": [
-                    {
-                        "item_name": order.item_name,
-                        "vendor_name": order.vendor_name,
-                        "quantity": order.quantity,
-                        "interval_days": order.interval_days,
-                        "last_executed_day": order.last_executed_day,
-                    }
-                    for order in player.recurring_buy_orders
-                ],
-                "stock_minimum_restock": {k: list(v) for k, v in player.stock_minimum_restock.items()},
-                "category_minimum_restock": {k: list(v) for k, v in player.category_minimum_restock.items()},
-                "category_pricing": player.category_pricing,
-                "category_sales_history": {str(k): v for k, v in player.category_sales_history.items()},  # Convert day (int) to str for JSON
-                "items_stocked_today": list(player.items_stocked_today),
-                "daily_item_size_sold": player.daily_item_size_sold,
-            }
-            for player in game_state.players
-        ],
+        "player": {
+            "name": game_state.player.name,
+            "cash": game_state.player.cash,
+            "inventory": game_state.player.inventory,
+            "prices": game_state.player.prices,
+            "buy_orders": {k: list(v) for k, v in game_state.player.buy_orders.items()},
+            "restockers": game_state.player.restockers,
+            "marketing_agents": game_state.player.marketing_agents,
+            "store_level": game_state.player.store_level,
+            "experience": game_state.player.experience,
+            "item_costs": game_state.player.item_costs,
+            "purchased_upgrades": [
+                {
+                    "name": upgrade.name,
+                    "cost": upgrade.cost,
+                    "effect_type": upgrade.effect_type,
+                    "effect_value": upgrade.effect_value,
+                    "vendor_name": upgrade.vendor_name,
+                    "duration_days": upgrade.duration_days,
+                }
+                for upgrade in game_state.player.purchased_upgrades
+            ],
+            "last_wage_payment_day": game_state.player.last_wage_payment_day,
+            "vendor_partnership_expiration": game_state.player.vendor_partnership_expiration,
+            "reputation": game_state.player.reputation,
+            "average_fulfillment_pct": game_state.player.average_fulfillment_pct,
+            "allocated_average_fulfillment_pct": game_state.player.allocated_average_fulfillment_pct,
+            "overflow_average_fulfillment_pct": game_state.player.overflow_average_fulfillment_pct,
+            "pending_deliveries": game_state.player.pending_deliveries,
+            "warehouses": [
+                {
+                    "level": warehouse.level,
+                    "workers": warehouse.workers,
+                }
+                for warehouse in game_state.player.warehouses
+            ],
+            "loans": [
+                {
+                    "lender_name": loan.lender_name,
+                    "principal": loan.principal,
+                    "remaining_balance": loan.remaining_balance,
+                    "interest_rate": loan.interest_rate,
+                    "early_interest_rate": loan.early_interest_rate,
+                    "due_day": loan.due_day,
+                    "taken_day": loan.taken_day,
+                }
+                for loan in game_state.player.loans
+            ],
+            "price_history": game_state.player.price_history,
+            "recurring_buy_orders": [
+                {
+                    "item_name": order.item_name,
+                    "vendor_name": order.vendor_name,
+                    "quantity": order.quantity,
+                    "interval_days": order.interval_days,
+                    "last_executed_day": order.last_executed_day,
+                }
+                for order in game_state.player.recurring_buy_orders
+            ],
+            "stock_minimum_restock": {k: list(v) for k, v in game_state.player.stock_minimum_restock.items()},
+            "category_minimum_restock": {k: list(v) for k, v in game_state.player.category_minimum_restock.items()},
+            "category_pricing": game_state.player.category_pricing,
+            "category_sales_history": {str(k): v for k, v in game_state.player.category_sales_history.items()},
+            "items_stocked_today": list(game_state.player.items_stocked_today),
+            "daily_item_size_sold": game_state.player.daily_item_size_sold,
+        },
         "available_upgrades": [
             {
                 "name": upgrade.name,
@@ -8285,132 +8256,132 @@ def deserialize_game_state(data: dict) -> GameState:
     # Regenerate available upgrades (don't load from save to ensure balance changes are applied)
     available_upgrades = create_default_upgrades(vendors)
 
-    # Recreate players
-    players = []
-    for player_data in data["players"]:
-        # Recreate purchased upgrades
-        purchased_upgrades = [
-            Upgrade(
-                name=upgrade_data["name"],
-                cost=upgrade_data["cost"],
-                effect_type=upgrade_data["effect_type"],
-                effect_value=upgrade_data["effect_value"],
-                vendor_name=upgrade_data.get("vendor_name", ""),
-                duration_days=upgrade_data.get("duration_days", 0),
-            )
-            for upgrade_data in player_data["purchased_upgrades"]
-        ]
+    # Recreate player (with backward compatibility for old saves that had "players" array)
+    if "player" in data:
+        player_data = data["player"]
+    elif "players" in data and len(data["players"]) > 0:
+        # Backward compatibility: Load first player from old format
+        player_data = data["players"][0]
+    else:
+        raise ValueError("No player data found in save file")
 
-        # Convert buy_orders back to lists (needed for append operations)
-        buy_orders = {k: list(v) for k, v in player_data["buy_orders"].items()}
-
-        # Recreate warehouses
-        warehouses = [
-            Warehouse(
-                level=warehouse_data["level"],
-                workers=warehouse_data["workers"],
-            )
-            for warehouse_data in player_data.get("warehouses", [Warehouse()])
-        ]
-        # Ensure at least 1 warehouse for backward compatibility
-        if not warehouses:
-            warehouses = [Warehouse()]
-
-        # Recreate loans
-        loans = [
-            Loan(
-                lender_name=loan_data["lender_name"],
-                principal=loan_data["principal"],
-                remaining_balance=loan_data["remaining_balance"],
-                interest_rate=loan_data["interest_rate"],
-                early_interest_rate=loan_data["early_interest_rate"],
-                due_day=loan_data["due_day"],
-                taken_day=loan_data["taken_day"],
-            )
-            for loan_data in player_data.get("loans", [])
-        ]
-
-        # Recreate recurring buy orders
-        recurring_buy_orders = [
-            RecurringBuyOrder(
-                item_name=order_data["item_name"],
-                vendor_name=order_data["vendor_name"],
-                quantity=order_data["quantity"],
-                interval_days=order_data["interval_days"],
-                last_executed_day=order_data["last_executed_day"],
-            )
-            for order_data in player_data.get("recurring_buy_orders", [])
-        ]
-
-        # Recreate stock minimum restock (convert lists back to tuples)
-        stock_minimum_restock = {
-            k: tuple(v) for k, v in player_data.get("stock_minimum_restock", {}).items()
-        }
-
-        # Recreate category minimum restock (convert lists back to tuples)
-        category_minimum_restock = {
-            k: tuple(v) for k, v in player_data.get("category_minimum_restock", {}).items()
-        }
-
-        # Load category pricing
-        category_pricing = player_data.get("category_pricing", {})
-
-        # Load category sales history (convert str keys back to int)
-        category_sales_history_raw = player_data.get("category_sales_history", {})
-        category_sales_history = {int(k): v for k, v in category_sales_history_raw.items()}
-
-        # Load items stocked today
-        items_stocked_today = set(player_data.get("items_stocked_today", []))
-
-        # Load daily item size sold
-        daily_item_size_sold = player_data.get("daily_item_size_sold", 0.0)
-
-        player = Player(
-            name=player_data["name"],
-            cash=player_data["cash"],
-            inventory=player_data["inventory"],
-            prices=player_data["prices"],
-            buy_orders=buy_orders,
-            restockers=player_data.get("restockers", 0),  # Backward compatibility
-            marketing_agents=player_data.get("marketing_agents", 0),  # Backward compatibility
-            store_level=player_data["store_level"],
-            experience=player_data["experience"],
-            item_costs=player_data["item_costs"],
-            purchased_upgrades=purchased_upgrades,
-            is_human=player_data["is_human"],
-            last_wage_payment_day=player_data.get("last_wage_payment_day", 0),
-            vendor_partnership_expiration=player_data.get("vendor_partnership_expiration", {}),
-            reputation=player_data.get("reputation", 0.0),
-            average_fulfillment_pct=player_data.get("average_fulfillment_pct", 70.0),
-            allocated_average_fulfillment_pct=player_data.get("allocated_average_fulfillment_pct", 70.0),
-            overflow_average_fulfillment_pct=player_data.get("overflow_average_fulfillment_pct", 70.0),
-            pending_deliveries=[tuple(delivery) for delivery in player_data.get("pending_deliveries", [])],
-            warehouses=warehouses,
-            loans=loans,
-            price_history=player_data.get("price_history", {}),
-            recurring_buy_orders=recurring_buy_orders,
-            stock_minimum_restock=stock_minimum_restock,
-            category_minimum_restock=category_minimum_restock,
-            category_pricing=category_pricing,
-            category_sales_history=category_sales_history,
-            items_stocked_today=items_stocked_today,
-            daily_item_size_sold=daily_item_size_sold,
+    # Recreate purchased upgrades
+    purchased_upgrades = [
+        Upgrade(
+            name=upgrade_data["name"],
+            cost=upgrade_data["cost"],
+            effect_type=upgrade_data["effect_type"],
+            effect_value=upgrade_data["effect_value"],
+            vendor_name=upgrade_data.get("vendor_name", ""),
+            duration_days=upgrade_data.get("duration_days", 0),
         )
-        players.append(player)
+        for upgrade_data in player_data["purchased_upgrades"]
+    ]
 
-    # Separate human and AI players
-    human_players = [p for p in players if p.is_human]
+    # Convert buy_orders back to lists (needed for append operations)
+    buy_orders = {k: list(v) for k, v in player_data["buy_orders"].items()}
+
+    # Recreate warehouses
+    warehouses = [
+        Warehouse(
+            level=warehouse_data["level"],
+            workers=warehouse_data["workers"],
+        )
+        for warehouse_data in player_data.get("warehouses", [Warehouse()])
+    ]
+    # Ensure at least 1 warehouse for backward compatibility
+    if not warehouses:
+        warehouses = [Warehouse()]
+
+    # Recreate loans
+    loans = [
+        Loan(
+            lender_name=loan_data["lender_name"],
+            principal=loan_data["principal"],
+            remaining_balance=loan_data["remaining_balance"],
+            interest_rate=loan_data["interest_rate"],
+            early_interest_rate=loan_data["early_interest_rate"],
+            due_day=loan_data["due_day"],
+            taken_day=loan_data["taken_day"],
+        )
+        for loan_data in player_data.get("loans", [])
+    ]
+
+    # Recreate recurring buy orders
+    recurring_buy_orders = [
+        RecurringBuyOrder(
+            item_name=order_data["item_name"],
+            vendor_name=order_data["vendor_name"],
+            quantity=order_data["quantity"],
+            interval_days=order_data["interval_days"],
+            last_executed_day=order_data["last_executed_day"],
+        )
+        for order_data in player_data.get("recurring_buy_orders", [])
+    ]
+
+    # Recreate stock minimum restock (convert lists back to tuples)
+    stock_minimum_restock = {
+        k: tuple(v) for k, v in player_data.get("stock_minimum_restock", {}).items()
+    }
+
+    # Recreate category minimum restock (convert lists back to tuples)
+    category_minimum_restock = {
+        k: tuple(v) for k, v in player_data.get("category_minimum_restock", {}).items()
+    }
+
+    # Load category pricing
+    category_pricing = player_data.get("category_pricing", {})
+
+    # Load category sales history (convert str keys back to int)
+    category_sales_history_raw = player_data.get("category_sales_history", {})
+    category_sales_history = {int(k): v for k, v in category_sales_history_raw.items()}
+
+    # Load items stocked today
+    items_stocked_today = set(player_data.get("items_stocked_today", []))
+
+    # Load daily item size sold
+    daily_item_size_sold = player_data.get("daily_item_size_sold", 0.0)
+
+    player = Player(
+        name=player_data["name"],
+        cash=player_data["cash"],
+        inventory=player_data["inventory"],
+        prices=player_data["prices"],
+        buy_orders=buy_orders,
+        restockers=player_data.get("restockers", 0),  # Backward compatibility
+        marketing_agents=player_data.get("marketing_agents", 0),  # Backward compatibility
+        store_level=player_data["store_level"],
+        experience=player_data["experience"],
+        item_costs=player_data["item_costs"],
+        purchased_upgrades=purchased_upgrades,
+        last_wage_payment_day=player_data.get("last_wage_payment_day", 0),
+        vendor_partnership_expiration=player_data.get("vendor_partnership_expiration", {}),
+        reputation=player_data.get("reputation", 0.0),
+        average_fulfillment_pct=player_data.get("average_fulfillment_pct", 70.0),
+        allocated_average_fulfillment_pct=player_data.get("allocated_average_fulfillment_pct", 70.0),
+        overflow_average_fulfillment_pct=player_data.get("overflow_average_fulfillment_pct", 70.0),
+        pending_deliveries=[tuple(delivery) for delivery in player_data.get("pending_deliveries", [])],
+        warehouses=warehouses,
+        loans=loans,
+        price_history=player_data.get("price_history", {}),
+        recurring_buy_orders=recurring_buy_orders,
+        stock_minimum_restock=stock_minimum_restock,
+        category_minimum_restock=category_minimum_restock,
+        category_pricing=category_pricing,
+        category_sales_history=category_sales_history,
+        items_stocked_today=items_stocked_today,
+        daily_item_size_sold=daily_item_size_sold,
+    )
 
     # Create GameState
     game_state = GameState(
         day=data["day"],
-        players=players,
+        player=player,
         customers=[],  # Customers are generated dynamically
         items=items,
         vendors=vendors,
         market_prices=data["market_prices"],
         config=config,
-        human_players=human_players,
         available_upgrades=available_upgrades,
         unlocked_product_indices=data.get("unlocked_product_indices", []),
         vendor_daily_purchases=data.get("vendor_daily_purchases", {}),
@@ -8532,8 +8503,7 @@ def run_game() -> None:
         player_name = input("\nEnter your name: ").strip()
         if not player_name:
             player_name = "Player"
-        human_player = Player(name=player_name, cash=config.starting_cash, is_human=True)
-        human_players = [human_player]
+        player = Player(name=player_name, cash=config.starting_cash)
 
         print(f"\nStarting cash: ${config.starting_cash:.2f}")
         print(f"Customers formula: 100 base + (day_number × 5) + scaling bonuses")
@@ -8547,23 +8517,19 @@ def run_game() -> None:
         # Initialize vendor inventory for day 1
         refresh_vendor_inventory(vendors, items, market_prices)
 
-        all_players = human_players
-
         # Create available upgrades
         available_upgrades = create_default_upgrades(vendors)
 
         # Create GameState (customers generated dynamically each day)
         game_state = GameState(
             day=1,
-            players=all_players,
+            player=player,
             customers=[],  # Customers generated dynamically in run_day()
             items=items,
             vendors=vendors,
             market_prices=market_prices,
             config=config,
-            human_players=human_players,
             available_upgrades=available_upgrades,
-            current_player_index=0,
             unlocked_product_indices=list(range(60)),  # Start with first 60 products unlocked
             item_demand=item_demand,
         )
@@ -8585,9 +8551,7 @@ def run_game() -> None:
         print("\n" + "=" * 60)
         print("GAME SETUP COMPLETE")
         print("=" * 60)
-        print(f"\nPlayers:")
-        for player in human_players:
-            print(f"  - {player.name}")
+        print(f"\nPlayer: {player.name}")
 
         print(f"\nAvailable Items:")
         for item in items:
@@ -8604,10 +8568,10 @@ def run_game() -> None:
         print("LOADED GAME STATUS")
         print("=" * 60)
         print(f"\nCurrent Day: {game_state.day}")
-        print(f"\nPlayers:")
-        for player in game_state.players:
-            status = " (YOU)" if player.is_human else " (AI)"
-            print(f"  - {player.name}{status}: ${player.cash:.2f}")
+        print(f"\nPlayer:")
+        player = game_state.player
+        if player:
+            print(f"  - {player.name}: ${player.cash:.2f}")
         input("\nPress Enter to continue...")
 
     # Main game loop
@@ -8627,8 +8591,8 @@ def run_game() -> None:
     print(f"Days played: {game_state.day - 1}")
 
     # Get the single player
-    if game_state.players:
-        player = game_state.players[0]
+    player = game_state.player
+    if player:
         print(f"\nPlayer: {player.name}")
         print(f"Final cash: ${player.cash:.2f}")
         print(f"Store level: {player.store_level}")
