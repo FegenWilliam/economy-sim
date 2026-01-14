@@ -77,14 +77,14 @@ def test_auto_restock_with_lead_time():
     print(f"  Minimum stock: 10")
     print(f"  Current stock: 8")
     print(f"  Yesterday's demand: 5")
-    print(f"  Expected behavior: Order 7 units (10 + 5 - 8)")
-    print(f"    Because: adjusted_minimum = 10 + 5 = 15")
+    print(f"  Expected behavior: Order 12 units (10 + (5 * 2) - 8)")
+    print(f"    Because: adjusted_minimum = 10 + (5 * 2) = 20")
 
     purchases, _ = execute_stock_minimum_restock(player, game_state)
 
     if "Widget" in purchases:
         print(f"  ✓ Ordered {purchases['Widget']} units")
-        expected = 7
+        expected = 12
         if purchases["Widget"] == expected:
             print(f"  ✓ Correct: ordered {expected} units (with lead time adjustment)")
         else:
@@ -93,7 +93,7 @@ def test_auto_restock_with_lead_time():
         print(f"  ✗ ERROR: No purchase made!")
 
     # Test 3: Category auto-restock with lead time
-    print("\nTest 3: Category auto-restock with lead time")
+    print("\nTest 3: Category auto-restock with lead time (2 days)")
     player.inventory["Widget"] = 5
     player.stock_minimum_restock = {}  # Clear item-specific restock
     player.category_minimum_restock["Office Supplies"] = (10, "Slow Vendor")
@@ -102,15 +102,50 @@ def test_auto_restock_with_lead_time():
     print(f"  Minimum stock per item: 10")
     print(f"  Current stock: 5")
     print(f"  Yesterday's demand: 3")
-    print(f"  Expected behavior: Order 8 units (10 + 3 - 5)")
+    print(f"  Expected behavior: Order 11 units (10 + (3 * 2) - 5)")
+    print(f"    Because: adjusted_minimum = 10 + (3 * 2) = 16")
 
     purchases, _ = execute_category_minimum_restock(player, game_state)
 
     if "Widget" in purchases:
         print(f"  ✓ Ordered {purchases['Widget']} units")
-        expected = 8
+        expected = 11
         if purchases["Widget"] == expected:
             print(f"  ✓ Correct: ordered {expected} units (category with lead time adjustment)")
+        else:
+            print(f"  ✗ ERROR: Expected {expected}, got {purchases['Widget']}")
+    else:
+        print(f"  ✗ ERROR: No purchase made!")
+
+    # Test 4: Very slow vendor (lead_time=5) to verify multiplication
+    print("\nTest 4: Very slow vendor (lead_time=5)")
+
+    very_slow_vendor = Vendor(
+        name="Very Slow Vendor",
+        items={"Widget": 5.0},
+        lead_time=5
+    )
+    game_state.vendors.append(very_slow_vendor)
+
+    player.inventory["Widget"] = 10
+    player.stock_minimum_restock["Widget"] = (20, "Very Slow Vendor")
+    player.category_minimum_restock = {}  # Clear category restock
+    player.yesterday_demand["Widget"] = 4
+
+    print(f"  Minimum stock: 20")
+    print(f"  Current stock: 10")
+    print(f"  Yesterday's demand: 4")
+    print(f"  Lead time: 5 days")
+    print(f"  Expected behavior: Order 30 units (20 + (4 * 5) - 10)")
+    print(f"    Because: adjusted_minimum = 20 + (4 * 5) = 40")
+
+    purchases, _ = execute_stock_minimum_restock(player, game_state)
+
+    if "Widget" in purchases:
+        print(f"  ✓ Ordered {purchases['Widget']} units")
+        expected = 30
+        if purchases["Widget"] == expected:
+            print(f"  ✓ Correct: ordered {expected} units (5-day lead time adjustment)")
         else:
             print(f"  ✗ ERROR: Expected {expected}, got {purchases['Widget']}")
     else:

@@ -2857,7 +2857,7 @@ def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Tupl
         adjusted_minimum = minimum_stock
         if effective_lead_time > 0:
             yesterday_item_demand = player.yesterday_demand.get(item_name, 0)
-            adjusted_minimum = minimum_stock + yesterday_item_demand
+            adjusted_minimum = minimum_stock + (yesterday_item_demand * effective_lead_time)
 
         if current_stock >= adjusted_minimum:
             # Stock is sufficient, skip
@@ -2957,7 +2957,7 @@ def execute_category_minimum_restock(player: Player, game_state: GameState) -> T
             adjusted_minimum = minimum_stock
             if effective_lead_time > 0:
                 yesterday_item_demand = player.yesterday_demand.get(item_name, 0)
-                adjusted_minimum = minimum_stock + yesterday_item_demand
+                adjusted_minimum = minimum_stock + (yesterday_item_demand * effective_lead_time)
 
             if current_stock >= adjusted_minimum:
                 # Stock is sufficient, skip
