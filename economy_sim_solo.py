@@ -655,6 +655,16 @@ class RecurringBuyOrder:
 
 
 @dataclass
+class RecurringCategoryBuyOrder:
+    """Represents a recurring buy order for an entire category that executes every N days."""
+    category_name: str
+    vendor_name: str
+    quantity_per_item: int  # How much of each item in the category to buy
+    interval_days: int  # Execute every N days
+    last_executed_day: int = 0  # Last day this order was executed
+
+
+@dataclass
 class Player:
     """Represents a company / player in the economic simulation."""
     name: str
@@ -680,6 +690,7 @@ class Player:
     loans: List['Loan'] = field(default_factory=list)  # Active loans taken by the player
     warehouses: List['Warehouse'] = field(default_factory=lambda: [Warehouse()])  # List of warehouses (starts with 1)
     recurring_buy_orders: List[RecurringBuyOrder] = field(default_factory=list)  # Recurring buy orders (scheduled)
+    category_recurring_buy_orders: List[RecurringCategoryBuyOrder] = field(default_factory=list)  # Recurring category buy orders (scheduled)
     stock_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # item_name -> (minimum_stock, vendor_name) for auto-restock
     category_minimum_restock: Dict[str, tuple] = field(default_factory=dict)  # category_name -> (minimum_stock_per_item, vendor_name) for category auto-restock
     category_pricing: Dict[str, float] = field(default_factory=dict)  # category -> percentage below market (e.g., 5.0 = 5% below market)
@@ -2532,6 +2543,85 @@ def execute_recurring_buy_orders(player: Player, game_state: GameState) -> Tuple
     return purchases, total_size_used
 
 
+def execute_category_recurring_buy_orders(player: Player, game_state: GameState) -> Tuple[Dict[str, int], float]:
+    """
+    Execute recurring buy orders for entire categories that are due (based on interval_days).
+    For each category order, purchases the specified quantity of each item in that category.
+    Respects inventory capacity - stops buying when player reaches max inventory.
+
+    Returns a tuple of (items purchased: {item_name: quantity_bought}, inventory_size_used: float)
+    """
+    purchases = {}
+    total_size_used = 0.0
+    current_day = game_state.day
+
+    # Get current inventory size and max capacity
+    current_inventory_size = player.get_inventory_size_used(game_state.items_by_name)
+    max_inventory = player.get_max_inventory()
+
+    for order in player.category_recurring_buy_orders:
+        # Check if this order is due (current_day - last_executed >= interval)
+        days_since_last = current_day - order.last_executed_day
+
+        if days_since_last >= order.interval_days:
+            # Find the vendor
+            vendor = game_state.get_vendor(order.vendor_name)
+            if not vendor:
+                continue
+
+            # Get all items in this category
+            category_items = [item for item in game_state.items if item.category == order.category_name]
+
+            # Process each item in the category
+            for item in category_items:
+                item_name = item.name
+
+                # Determine the package name to use when querying the vendor
+                # For small items (size < 5, excluding luxury), vendors sell packages
+                purchase_item_name = item_name
+                packages_to_buy = order.quantity_per_item
+                items_per_package = 1
+
+                if item.size < 5.0 and item.category != "Luxury":
+                    # Item is packaged - determine package type based on vendor
+                    package_type = "bulk" if vendor.name in ["Bulk Master Co.", "Bulk Goods Co."] else "standard"
+                    package_name, items_per_package, _ = get_package_info(item, package_type)
+                    purchase_item_name = package_name
+
+                    # Convert quantity from items to packages (round up)
+                    packages_to_buy = (order.quantity_per_item + items_per_package - 1) // items_per_package
+
+                # Get the price from this vendor using the package name
+                price = vendor.get_price(purchase_item_name, packages_to_buy)
+                if price is None:
+                    # Vendor doesn't have this item, skip
+                    continue
+
+                # Get market price for production line check
+                market_price = game_state.market_prices.get(item_name, 0)
+
+                # Check if we have enough inventory space before buying
+                items_added = packages_to_buy * items_per_package
+                size_needed = items_added * item.size
+
+                if current_inventory_size + total_size_used + size_needed > max_inventory:
+                    # Not enough space, skip this purchase
+                    continue
+
+                # Try to purchase (purchase_from_vendor handles package conversion)
+                success = player.purchase_from_vendor(vendor, purchase_item_name, packages_to_buy, market_price, game_state)
+                if success:
+                    # Track actual items added to inventory (not packages)
+                    purchases[item_name] = purchases.get(item_name, 0) + items_added
+                    # Track inventory size used
+                    total_size_used += size_needed
+
+            # Mark this order as executed after processing all items in the category
+            order.last_executed_day = current_day
+
+    return purchases, total_size_used
+
+
 def execute_stock_minimum_restock(player: Player, game_state: GameState) -> Tuple[Dict[str, int], float]:
     """
     Execute stock minimum restock orders for items below their minimum threshold.
@@ -3315,6 +3405,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         # Execute recurring buy orders first
         recurring_purchases, recurring_size = execute_recurring_buy_orders(player, game_state)
 
+        # Execute category recurring buy orders
+        category_recurring_purchases, category_recurring_size = execute_category_recurring_buy_orders(player, game_state)
+
         # Execute stock minimum restock
         restock_purchases, restock_size = execute_stock_minimum_restock(player, game_state)
 
@@ -3325,11 +3418,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         manual_purchases, manual_size = execute_buy_orders(player, game_state)
 
         # Track total inventory space used
-        daily_inventory_used[player.name] = recurring_size + restock_size + category_restock_size + manual_size
+        daily_inventory_used[player.name] = recurring_size + category_recurring_size + restock_size + category_restock_size + manual_size
 
         # Combine all purchases
         all_purchases = {}
         for item, qty in recurring_purchases.items():
+            all_purchases[item] = all_purchases.get(item, 0) + qty
+        for item, qty in category_recurring_purchases.items():
             all_purchases[item] = all_purchases.get(item, 0) + qty
         for item, qty in restock_purchases.items():
             all_purchases[item] = all_purchases.get(item, 0) + qty
@@ -5963,6 +6058,223 @@ def recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
             input("Press Enter to continue...")
 
 
+def category_recurring_buy_order_menu(game_state: GameState, player: Player) -> None:
+    """Menu for managing recurring buy orders for entire categories (scheduled auto-buy every N days)."""
+    while True:
+        print("\n" + "=" * 100)
+        print("CATEGORY RECURRING BUY ORDERS - Automatic Category Purchasing Every N Days")
+        print("=" * 100)
+        print("\nCurrent Category Recurring Orders:")
+
+        if not player.category_recurring_buy_orders:
+            print("  (no category recurring orders set)")
+        else:
+            print(f"{'#':<4} {'Category':<25} {'Vendor':<25} {'Qty/Item':>10} {'Every':>8} {'Last Run':>10}")
+            print("-" * 100)
+            for i, order in enumerate(player.category_recurring_buy_orders, 1):
+                days_since = game_state.day - order.last_executed_day
+                last_run_str = f"Day {order.last_executed_day}" if order.last_executed_day > 0 else "Never"
+                # Count items in category
+                item_count = len([item for item in game_state.items if item.category == order.category_name])
+                print(f"{i:<4} {order.category_name:<25} {order.vendor_name:<25} {order.quantity_per_item:>10} {order.interval_days}d {last_run_str:>10} ({item_count} items)")
+
+        print("\nOptions:")
+        print("  1. Add New Category Recurring Order")
+        if player.category_recurring_buy_orders:
+            print("  2. Edit Existing Category Recurring Order (change vendor/qty/interval)")
+            print("  3. Cancel Category Recurring Order (costs $500)")
+        print("  0. Back to Auto Buy Menu")
+
+        try:
+            choice = input("\nSelect option: ").strip()
+
+            if choice == "0":
+                break
+            elif choice == "1":
+                # Add new category recurring order
+                print("\nSelect category for recurring order:")
+                categories = sorted(PRODUCT_CATEGORIES.keys())
+                for i, category in enumerate(categories, 1):
+                    item_count = len([item for item in game_state.items if item.category == category])
+                    print(f"  {i}. {category} ({item_count} items)")
+                print("  0. Cancel")
+
+                cat_choice = input(f"\nSelect category (0-{len(categories)}): ").strip()
+                cat_num = int(cat_choice)
+
+                if cat_num == 0:
+                    continue
+                elif 1 <= cat_num <= len(categories):
+                    category_name = categories[cat_num - 1]
+
+                    # Select vendor
+                    print("\nAvailable Vendors:")
+                    for i, vendor in enumerate(game_state.vendors, 1):
+                        min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                        vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                        req_parts = []
+                        if vendor.required_reputation:
+                            req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                        if vendor.required_level:
+                            req_parts.append(f"lvl: {vendor.required_level}")
+                        rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
+                        # Calculate effective lead time with player's upgrades
+                        lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                        effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                        lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+                        print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} (lead: {lead_time_str})")
+
+                    vendor_choice = input(f"\nSelect vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+                    vendor_num = int(vendor_choice)
+
+                    if vendor_num == 0:
+                        continue
+                    elif 1 <= vendor_num <= len(game_state.vendors):
+                        vendor = game_state.vendors[vendor_num - 1]
+
+                        # Get quantity per item
+                        quantity_str = input("Enter quantity to buy per item in category: ").strip()
+                        quantity = int(quantity_str)
+
+                        if quantity <= 0:
+                            print("\n✗ Quantity must be positive!")
+                            input("Press Enter to continue...")
+                            continue
+
+                        # Get interval
+                        interval_str = input("Execute every how many days? (e.g., 3 for every 3 days): ").strip()
+                        interval = int(interval_str)
+
+                        if interval <= 0:
+                            print("\n✗ Interval must be positive!")
+                            input("Press Enter to continue...")
+                            continue
+
+                        # Create the order (no cost to set up)
+                        new_order = RecurringCategoryBuyOrder(
+                            category_name=category_name,
+                            vendor_name=vendor.name,
+                            quantity_per_item=quantity,
+                            interval_days=interval,
+                            last_executed_day=0
+                        )
+                        player.category_recurring_buy_orders.append(new_order)
+                        item_count = len([item for item in game_state.items if item.category == category_name])
+                        print(f"\n✓ Added category recurring order: {quantity} per item for {category_name} ({item_count} items) from {vendor.name} every {interval} days")
+                        input("Press Enter to continue...")
+
+            elif choice == "2" and player.category_recurring_buy_orders:
+                # Edit existing category recurring order
+                print("\nSelect category recurring order to edit:")
+                for i, order in enumerate(player.category_recurring_buy_orders, 1):
+                    item_count = len([item for item in game_state.items if item.category == order.category_name])
+                    print(f"  {i}. {order.category_name} ({order.quantity_per_item} per item from {order.vendor_name} every {order.interval_days}d, {item_count} items)")
+                print("  0. Back")
+
+                edit_choice = input(f"\nSelect order to edit (0-{len(player.category_recurring_buy_orders)}): ").strip()
+                edit_num = int(edit_choice)
+
+                if edit_num == 0:
+                    continue
+                elif 1 <= edit_num <= len(player.category_recurring_buy_orders):
+                    order_to_edit = player.category_recurring_buy_orders[edit_num - 1]
+
+                    print(f"\n--- Editing Category Recurring Order for {order_to_edit.category_name} ---")
+                    print(f"Current: {order_to_edit.quantity_per_item} per item from {order_to_edit.vendor_name} every {order_to_edit.interval_days} days")
+                    print("\nWhat would you like to change?")
+                    print("  1. Change Vendor")
+                    print("  2. Change Quantity Per Item")
+                    print("  3. Change Interval (days)")
+                    print("  4. Change All")
+                    print("  0. Cancel")
+
+                    edit_option = input("\nSelect option: ").strip()
+
+                    if edit_option == "0":
+                        continue
+                    elif edit_option in ["1", "4"]:
+                        # Change vendor
+                        print("\nAvailable Vendors:")
+                        for i, vendor in enumerate(game_state.vendors, 1):
+                            min_text = f" (min: {vendor.min_purchase})" if vendor.min_purchase else ""
+                            vol_text = " [volume pricing]" if vendor.volume_pricing_tiers else ""
+                            req_parts = []
+                            if vendor.required_reputation:
+                                req_parts.append(f"rep: {vendor.required_reputation:.0f}")
+                            if vendor.required_level:
+                                req_parts.append(f"lvl: {vendor.required_level}")
+                            rep_text = f" [req {', '.join(req_parts)}]" if req_parts else ""
+                            lead_time_reduction = sum(u.effect_value for u in player.purchased_upgrades if u.effect_type == "lead_time_reduction")
+                            effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
+                            lead_time_str = f"{effective_lead_time}d" if effective_lead_time > 0 else "instant"
+                            print(f"  {i}. {vendor.name}{min_text}{vol_text}{rep_text} (lead: {lead_time_str})")
+
+                        vendor_choice = input(f"\nSelect new vendor (1-{len(game_state.vendors)}, 0 to cancel): ").strip()
+                        vendor_num = int(vendor_choice)
+
+                        if vendor_num == 0:
+                            continue
+                        elif 1 <= vendor_num <= len(game_state.vendors):
+                            order_to_edit.vendor_name = game_state.vendors[vendor_num - 1].name
+
+                    if edit_option in ["2", "4"]:
+                        # Change quantity
+                        quantity_str = input("Enter new quantity per item: ").strip()
+                        quantity = int(quantity_str)
+                        if quantity > 0:
+                            order_to_edit.quantity_per_item = quantity
+                        else:
+                            print("\n✗ Quantity must be positive!")
+
+                    if edit_option in ["3", "4"]:
+                        # Change interval
+                        interval_str = input("Execute every how many days?: ").strip()
+                        interval = int(interval_str)
+                        if interval > 0:
+                            order_to_edit.interval_days = interval
+                        else:
+                            print("\n✗ Interval must be positive!")
+
+                    print(f"\n✓ Updated category recurring order for {order_to_edit.category_name}")
+                    print(f"New settings: {order_to_edit.quantity_per_item} per item from {order_to_edit.vendor_name} every {order_to_edit.interval_days} days")
+                    input("Press Enter to continue...")
+
+            elif choice == "3" and player.category_recurring_buy_orders:
+                # Cancel category recurring order
+                print("\nSelect category recurring order to cancel:")
+                for i, order in enumerate(player.category_recurring_buy_orders, 1):
+                    item_count = len([item for item in game_state.items if item.category == order.category_name])
+                    print(f"  {i}. {order.category_name} ({order.quantity_per_item} per item from {order.vendor_name} every {order.interval_days}d, {item_count} items)")
+                print("  0. Back")
+
+                cancel_choice = input(f"\nSelect order to cancel (0-{len(player.category_recurring_buy_orders)}): ").strip()
+                cancel_num = int(cancel_choice)
+
+                if cancel_num == 0:
+                    continue
+                elif 1 <= cancel_num <= len(player.category_recurring_buy_orders):
+                    order_to_cancel = player.category_recurring_buy_orders[cancel_num - 1]
+
+                    confirm = input(f"\nCancel recurring order for {order_to_cancel.category_name}? This costs $500. (y/n): ").strip().lower()
+                    if confirm == 'y':
+                        cancellation_cost = 500
+                        if player.cash >= cancellation_cost:
+                            player.cash -= cancellation_cost
+                            player.category_recurring_buy_orders.pop(cancel_num - 1)
+                            print(f"\n✓ Cancelled category recurring order for {order_to_cancel.category_name}. Paid $500 cancellation fee.")
+                            input("Press Enter to continue...")
+                        else:
+                            print(f"\n✗ Insufficient cash! Need ${cancellation_cost:.2f}, have ${player.cash:.2f}")
+                        input("Press Enter to continue...")
+                    else:
+                        print("\nCancellation aborted.")
+                        input("Press Enter to continue...")
+
+        except (ValueError, IndexError):
+            print("\n✗ Invalid input!")
+            input("Press Enter to continue...")
+
+
 def stock_minimum_restock_menu(game_state: GameState, player: Player) -> None:
     """Menu for managing stock minimum auto-restock (threshold-based auto-buy)."""
     while True:
@@ -6389,20 +6701,23 @@ def auto_buy_orders_menu(game_state: GameState, player: Player) -> None:
         print("=" * 80)
         print("\nOptions:")
         print("  1. Recurring Buy Orders (Schedule orders every N days)")
-        print("  2. Stock Minimum Auto-Restock (Auto-buy when stock falls below threshold)")
-        print("  3. Category Auto-Restock (Auto-restock all items in a category)")
+        print("  2. Category Recurring Buy Orders (Schedule category orders every N days)")
+        print("  3. Stock Minimum Auto-Restock (Auto-buy when stock falls below threshold)")
+        print("  4. Category Auto-Restock (Auto-restock all items in a category)")
         print("  0. Back to Main Menu")
 
         try:
-            choice = input("\nSelect option (0-3): ").strip()
+            choice = input("\nSelect option (0-4): ").strip()
 
             if choice == "0":
                 break
             elif choice == "1":
                 recurring_buy_order_menu(game_state, player)
             elif choice == "2":
-                stock_minimum_restock_menu(game_state, player)
+                category_recurring_buy_order_menu(game_state, player)
             elif choice == "3":
+                stock_minimum_restock_menu(game_state, player)
+            elif choice == "4":
                 category_minimum_restock_menu(game_state, player)
             else:
                 print("\n✗ Invalid choice!")
@@ -7062,6 +7377,10 @@ def pricing_menu(game_state: GameState, player: Player) -> None:
         # Add items from auto-restock
         for item_name in player.stock_minimum_restock.keys():
             relevant_item_names.add(item_name)
+
+        # Add categories from category recurring buy orders
+        for order in player.category_recurring_buy_orders:
+            relevant_categories.add(order.category_name)
 
         # Add categories from category auto-restock
         for category_name in player.category_minimum_restock.keys():
@@ -7745,6 +8064,16 @@ def serialize_game_state(game_state: GameState) -> dict:
                 }
                 for order in game_state.player.recurring_buy_orders
             ],
+            "category_recurring_buy_orders": [
+                {
+                    "category_name": order.category_name,
+                    "vendor_name": order.vendor_name,
+                    "quantity_per_item": order.quantity_per_item,
+                    "interval_days": order.interval_days,
+                    "last_executed_day": order.last_executed_day,
+                }
+                for order in game_state.player.category_recurring_buy_orders
+            ],
             "stock_minimum_restock": {k: list(v) for k, v in game_state.player.stock_minimum_restock.items()},
             "category_minimum_restock": {k: list(v) for k, v in game_state.player.category_minimum_restock.items()},
             "category_pricing": game_state.player.category_pricing,
@@ -7918,6 +8247,18 @@ def deserialize_game_state(data: dict) -> GameState:
         for order_data in player_data.get("recurring_buy_orders", [])
     ]
 
+    # Recreate category recurring buy orders
+    category_recurring_buy_orders = [
+        RecurringCategoryBuyOrder(
+            category_name=order_data["category_name"],
+            vendor_name=order_data["vendor_name"],
+            quantity_per_item=order_data["quantity_per_item"],
+            interval_days=order_data["interval_days"],
+            last_executed_day=order_data["last_executed_day"],
+        )
+        for order_data in player_data.get("category_recurring_buy_orders", [])
+    ]
+
     # Recreate stock minimum restock (convert lists back to tuples)
     stock_minimum_restock = {
         k: tuple(v) for k, v in player_data.get("stock_minimum_restock", {}).items()
@@ -7964,6 +8305,7 @@ def deserialize_game_state(data: dict) -> GameState:
         loans=loans,
         price_history=player_data.get("price_history", {}),
         recurring_buy_orders=recurring_buy_orders,
+        category_recurring_buy_orders=category_recurring_buy_orders,
         stock_minimum_restock=stock_minimum_restock,
         category_minimum_restock=category_minimum_restock,
         category_pricing=category_pricing,
