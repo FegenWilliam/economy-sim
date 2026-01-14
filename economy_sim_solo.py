@@ -1568,7 +1568,7 @@ class Customer:
 @dataclass
 class GameConfig:
     """Configuration for the economic simulation."""
-    starting_cash: float = 10000.0
+    starting_cash: float = 50000.0
     num_days: int = 30
     customers_per_day: int = 10
     # TODO: add more config options if needed (e.g. random seed, max inventory, etc.)
