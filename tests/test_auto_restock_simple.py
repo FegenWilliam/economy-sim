@@ -53,7 +53,7 @@ def main():
     effective_lead_time = max(0, vendor.lead_time - int(lead_time_reduction))
     adjusted_minimum = 10
     if effective_lead_time > 0:
-        adjusted_minimum = 10 + 5
+        adjusted_minimum = 10 + (5 * effective_lead_time)
 
     print(f"Effective lead time: {effective_lead_time}")
     print(f"Adjusted minimum: {adjusted_minimum}")
