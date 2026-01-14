@@ -8020,6 +8020,7 @@ def serialize_game_state(game_state: GameState) -> dict:
             "buy_orders": {k: list(v) for k, v in game_state.player.buy_orders.items()},
             "restockers": game_state.player.restockers,
             "marketing_agents": game_state.player.marketing_agents,
+            "cashiers": game_state.player.cashiers,
             "store_level": game_state.player.store_level,
             "experience": game_state.player.experience,
             "item_costs": game_state.player.item_costs,
@@ -8087,6 +8088,7 @@ def serialize_game_state(game_state: GameState) -> dict:
             "category_sales_history": {str(k): v for k, v in game_state.player.category_sales_history.items()},
             "items_stocked_today": list(game_state.player.items_stocked_today),
             "daily_item_size_sold": game_state.player.daily_item_size_sold,
+            "yesterday_demand": game_state.player.yesterday_demand,
         },
         "available_upgrades": [
             {
@@ -8100,6 +8102,7 @@ def serialize_game_state(game_state: GameState) -> dict:
         ],
         "vendor_daily_purchases": game_state.vendor_daily_purchases,
         "item_demand": game_state.item_demand,
+        "event_price_changes": game_state.event_price_changes,
         "competitors": [
             {
                 "name": competitor.name,
@@ -8289,6 +8292,9 @@ def deserialize_game_state(data: dict) -> GameState:
     # Load daily item size sold
     daily_item_size_sold = player_data.get("daily_item_size_sold", 0.0)
 
+    # Load yesterday demand
+    yesterday_demand = player_data.get("yesterday_demand", {})
+
     player = Player(
         name=player_data["name"],
         cash=player_data["cash"],
@@ -8297,6 +8303,7 @@ def deserialize_game_state(data: dict) -> GameState:
         buy_orders=buy_orders,
         restockers=player_data.get("restockers", 0),  # Backward compatibility
         marketing_agents=player_data.get("marketing_agents", 0),  # Backward compatibility
+        cashiers=player_data.get("cashiers", 0),  # Backward compatibility
         store_level=player_data["store_level"],
         experience=player_data["experience"],
         item_costs=player_data["item_costs"],
@@ -8319,6 +8326,7 @@ def deserialize_game_state(data: dict) -> GameState:
         category_sales_history=category_sales_history,
         items_stocked_today=items_stocked_today,
         daily_item_size_sold=daily_item_size_sold,
+        yesterday_demand=yesterday_demand,
     )
 
     # Load competitors (if present)
@@ -8351,6 +8359,7 @@ def deserialize_game_state(data: dict) -> GameState:
         unlocked_product_indices=data.get("unlocked_product_indices", []),
         vendor_daily_purchases=data.get("vendor_daily_purchases", {}),
         item_demand=data.get("item_demand", {}),
+        event_price_changes=data.get("event_price_changes", {}),
         competitors=competitors,
     )
 
