@@ -3569,14 +3569,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         if show_details:
             print(f"\n🎯 Customer Allocation:")
-            print(f"  Your CAS: {base_player_cas:.1f}")
+            print(f"  Your Base CAS: {base_player_cas:.1f}")
+            if capacity_penalty < 1.0:
+                print(f"  ⚠️  CAPACITY PENALTY: {capacity_penalty:.2f}x (CAS reduced to {player_cas:.1f})")
             for comp_name, comp_cas in competitor_cas_scores:
                 print(f"  {comp_name} CAS: {comp_cas:.1f}")
-            if capacity_penalty < 1.0:
-                print(f"  ⚠️  Capacity: {num_customers_for_player}/{player_capacity} (Over capacity!)")
-                print(f"  Penalty Applied: {capacity_penalty:.2f}x (Your CAS reduced to {player_cas:.1f})")
-            else:
-                print(f"  Capacity: {num_customers_for_player}/{player_capacity} customers")
+            print(f"  Capacity: {num_customers_for_player}/{player_capacity} customers")
             print(f"  Your Share: {player_share * 100:.1f}% of {total_customers_spawned} customers")
             print(f"  ✓ You get {num_customers_for_player} allocated customers")
             if overflow_customers:
