@@ -4266,6 +4266,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             formatted_items = [f"{category}: {quantity}" for category, quantity in sorted_demand]
             print(f"  {', '.join(formatted_items)}")
 
+            # Display top 10 individual items by demand
+            print(f"\nTop 10 Items by Demand Today:")
+            sorted_items = sorted(daily_demand_per_item.items(), key=lambda x: -x[1])
+            top_10_items = sorted_items[:10]
+            for i, (item_name, quantity) in enumerate(top_10_items, 1):
+                print(f"  {i}. {item_name}: {quantity}")
+
     # Update item demand for next day (after everything has sold)
     updated_items = update_item_demand(game_state)
     if show_details and updated_items:
