@@ -2923,6 +2923,57 @@ def get_category_specialty_threshold(player: Player, category: str, items_by_nam
     return highest_threshold
 
 
+def get_player_customer_capacity(player: Player) -> int:
+    """
+    Calculate the maximum customer capacity for a player.
+    - Base (owner only): 100 customers/day
+    - Each cashier: +200 customers/day
+    """
+    return 100 + (player.cashiers * 200)
+
+
+def calculate_capacity_penalty(customers_allocated: int, capacity: int) -> float:
+    """
+    Calculate the CAS penalty multiplier based on overcapacity.
+
+    This is a soft limit - going over capacity reduces CAS effectiveness with a smooth linear scale.
+
+    Penalty Scale (smooth linear degradation):
+    - At or below capacity (ratio ≤ 1.0): 1.0x multiplier (no penalty)
+    - At 2.0x capacity (ratio = 2.0): 0.1x multiplier (90% penalty)
+    - Smooth linear interpolation between 1.0x and 2.0x capacity
+    - Clamped at minimum 0.1x for extreme overcapacity (>2.0x)
+
+    Formula: penalty = max(0.1, 1.0 - 0.9 * (ratio - 1.0))
+
+    Examples:
+    - ratio 1.0 (at capacity): 1.00x multiplier
+    - ratio 1.1 (10% over): 0.91x multiplier
+    - ratio 1.5 (50% over): 0.55x multiplier
+    - ratio 2.0 (100% over): 0.10x multiplier
+
+    This creates a fair, gradual degradation that simulates customers
+    avoiding overcrowded stores and choosing less busy competitors.
+
+    Returns:
+        A multiplier between 0.1 and 1.0 to apply to CAS
+    """
+    if capacity == 0:
+        # No capacity means severe penalty
+        return 0.1
+
+    ratio = customers_allocated / capacity
+
+    # If under or at capacity, no penalty
+    if ratio <= 1.0:
+        return 1.0
+
+    # Smooth linear scale from 1.0 (at capacity) to 0.1 (at 2x capacity)
+    # Linearly decreases by 0.9 over the range [1.0, 2.0]
+    penalty = max(0.1, 1.0 - 0.9 * (ratio - 1.0))
+    return penalty
+
+
 def update_player_fulfillment_averages(player: Player, fulfillment_data: Dict[str, List[float]]) -> None:
     """Update a player's overall, allocated, and overflow fulfillment averages."""
     allocated_data = fulfillment_data.get("allocated", [])
@@ -3221,7 +3272,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     total_customers_spawned = len(all_customers)
     player = game_state.player
     if player:
-        player_cas = calculate_player_cas(
+        # Calculate base player CAS
+        base_player_cas = calculate_player_cas(
             player,
             game_state.market_prices,
             items_by_name,
@@ -3229,15 +3281,36 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.day
         )
 
-        # Calculate player's share of customers based on CAS proportion
-        total_cas = player_cas + game_state.global_cas
-        if total_cas > 0:
-            player_share = player_cas / total_cas
-        else:
-            player_share = 0.5  # Default to 50/50 if both CAS are 0
+        # Get player's customer capacity
+        player_capacity = get_player_customer_capacity(player)
 
-        # Calculate how many customers the player actually gets
-        num_customers_for_player = int(len(all_customers) * player_share)
+        # Iterative allocation with capacity penalty (max 2 iterations)
+        capacity_penalty = 1.0
+        player_cas = base_player_cas
+        num_customers_for_player = 0
+
+        for iteration in range(2):
+            # Calculate player's share of customers based on CAS proportion
+            total_cas = player_cas + game_state.global_cas
+            if total_cas > 0:
+                player_share = player_cas / total_cas
+            else:
+                player_share = 0.5  # Default to 50/50 if both CAS are 0
+
+            # Calculate how many customers the player actually gets
+            num_customers_for_player = int(len(all_customers) * player_share)
+
+            # Check if over capacity and apply penalty
+            new_penalty = calculate_capacity_penalty(num_customers_for_player, player_capacity)
+
+            # If penalty changed, apply it and reallocate
+            if abs(new_penalty - capacity_penalty) > 0.001:
+                capacity_penalty = new_penalty
+                player_cas = base_player_cas * capacity_penalty
+            else:
+                # Stable, stop iterating
+                break
+
         customers_lost_to_benchmark = len(all_customers) - num_customers_for_player
 
         # Only give the player their share of customers
@@ -3245,7 +3318,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         if show_details:
             print(f"\n🎯 Customer Allocation:")
-            print(f"  Your CAS: {player_cas:.1f} | Global CAS: {game_state.global_cas:.1f}")
+            print(f"  Base CAS: {base_player_cas:.1f} | Global CAS: {game_state.global_cas:.1f}")
+            if capacity_penalty < 1.0:
+                print(f"  ⚠️  Capacity: {num_customers_for_player}/{player_capacity} (Over capacity!)")
+                print(f"  Penalty Applied: {capacity_penalty:.2f}x (Your CAS reduced to {player_cas:.1f})")
+            else:
+                print(f"  Capacity: {num_customers_for_player}/{player_capacity} customers")
             print(f"  Your Share: {player_share * 100:.1f}% of {total_customers_spawned} customers")
             print(f"  ✓ You get {num_customers_for_player} customers")
             print(f"  ✗ Global benchmark takes {customers_lost_to_benchmark} customers")
