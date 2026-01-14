@@ -3410,7 +3410,6 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if customer_type in ["low", "medium", "high"]:
             customer.roll_specializations(game_state.items, game_state.item_demand)
         all_customers.append(customer)
-        customer_type_stats['spawned'][customer_type] += 1
 
 
     # Track total demand per item (what customers want to buy today)
@@ -3483,6 +3482,11 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # Only give the player their share of customers
         all_customers = all_customers[:num_customers_for_player]
+
+        # Track customer type statistics for player's allocated customers only
+        for customer in all_customers:
+            if customer.customer_type in customer_type_stats['spawned']:
+                customer_type_stats['spawned'][customer.customer_type] += 1
 
         if show_details:
             print(f"\n🎯 Customer Allocation:")
