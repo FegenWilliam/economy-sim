@@ -1656,22 +1656,22 @@ def create_competitors(items: List[Item], market_prices: Dict[str, float]) -> Li
         Competitor(name="SuperShop", max_inventory_items=75)
     ]
 
-    # Give each competitor a reasonable starting inventory (25-30 diverse items)
+    # Give each competitor a reasonable starting inventory (12-16 diverse items)
     for competitor in competitors:
         # Select random items from available pool (bias toward essentials)
         essential_items = [item for item in items if item.importance == 3]
         non_essential_items = [item for item in items if item.importance == 2]
 
-        # Start with 15-18 essential items
-        starter_essentials = random.sample(essential_items, min(random.randint(15, 18), len(essential_items)))
-        # Add 10-12 non-essential items
-        starter_non_essentials = random.sample(non_essential_items, min(random.randint(10, 12), len(non_essential_items)))
+        # Start with 8-10 essential items
+        starter_essentials = random.sample(essential_items, min(random.randint(8, 10), len(essential_items)))
+        # Add 4-6 non-essential items
+        starter_non_essentials = random.sample(non_essential_items, min(random.randint(4, 6), len(non_essential_items)))
 
         starter_items = starter_essentials + starter_non_essentials
 
-        # Give each item reasonable stock (20-50 units) and competitive pricing
+        # Give each item reasonable stock (15-35 units) and competitive pricing
         for item in starter_items:
-            quantity = random.randint(20, 50)
+            quantity = random.randint(15, 35)
             competitor.inventory[item.name] = quantity
 
             # Price at market or slight discount (0-10% below market)
@@ -3267,18 +3267,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: 100 base + 5 per day
-    base_customer_count = 100 + (game_state.day * 5)
+    # Calculate base customer count: 300 base + 20 per day
+    base_customer_count = 300 + (game_state.day * 20)
 
     # Add permanent customer increase for every 14-day period that has passed
+    # Each milestone adds 100 more than the last: +100, +200, +300, etc.
     fourteen_day_periods = game_state.day // 14
     if fourteen_day_periods > 0:
-        permanent_bonus = 20 * fourteen_day_periods
+        # Sum of 100 + 200 + 300 + ... + (n*100) = 100 * (1 + 2 + 3 + ... + n) = 100 * n*(n+1)/2
+        permanent_bonus = 100 * fourteen_day_periods * (fourteen_day_periods + 1) // 2
         base_customer_count += permanent_bonus
 
         # Show event message only on the actual milestone days
         if game_state.day % 14 == 0 and show_details:
-            print(f"🎊 14-DAY EVENT! +20 permanent customers! (Total permanent bonus: +{permanent_bonus})")
+            current_milestone_bonus = fourteen_day_periods * 100
+            print(f"🎊 14-DAY EVENT! +{current_milestone_bonus} permanent customers! (Total permanent bonus: +{permanent_bonus})")
 
     # Calculate uncapped customers (starts at day 50, +1 every 10 days)
     uncapped_customer_count = 0
@@ -3491,7 +3494,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         allocated_customers_assigned = len(assigned_customers)
 
         # Track customer visits
-        customer_visits_per_store = 0
+        customer_visits_per_store = {}
 
         for customer in assigned_customers:
             needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
@@ -3541,7 +3544,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 visited_stores.add(current_supplier.name)
 
                 # Track customer visit to this store
-                customer_visits_per_store[current_supplier.name] += 1
+                customer_visits_per_store[current_supplier.name] = customer_visits_per_store.get(current_supplier.name, 0) + 1
 
                 # Determine visit type
                 visit_type = "allocated" if current_supplier == player else "overflow"
@@ -7121,14 +7124,16 @@ def display_customer_forecast(game_state: GameState) -> None:
     print("=" * 60)
     print(f"\nDay {game_state.day} Expected Customers:")
 
-    # Calculate base customer count: 100 base + 5 per day
-    base_customer_count = 100 + (game_state.day * 5)
+    # Calculate base customer count: 300 base + 20 per day
+    base_customer_count = 300 + (game_state.day * 20)
 
     # Add permanent customer increase for every 14-day period that has passed
+    # Each milestone adds 100 more than the last: +100, +200, +300, etc.
     fourteen_day_periods = game_state.day // 14
     event_bonus = 0
     if fourteen_day_periods > 0:
-        event_bonus = 20 * fourteen_day_periods
+        # Sum of 100 + 200 + 300 + ... + (n*100) = 100 * (1 + 2 + 3 + ... + n) = 100 * n*(n+1)/2
+        event_bonus = 100 * fourteen_day_periods * (fourteen_day_periods + 1) // 2
         base_customer_count += event_bonus
 
     # Calculate uncapped customers
