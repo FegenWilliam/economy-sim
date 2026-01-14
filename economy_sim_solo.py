@@ -1575,6 +1575,17 @@ class GameConfig:
 
 
 @dataclass
+class Competitor:
+    """Simulated competitor store (only tracks inventory/prices for CAS calculation)."""
+    name: str
+    inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
+    prices: Dict[str, float] = field(default_factory=dict)  # item_name -> sale price
+    reputation: float = 50.0  # Start at average reputation
+    average_fulfillment_pct: float = 75.0  # Start at decent fulfillment
+    max_inventory_items: int = 80  # Cap on unique items (prevents becoming too strong)
+
+
+@dataclass
 class GameState:
     """Holds the entire current state of the simulation."""
     day: int = 1
@@ -1589,7 +1600,7 @@ class GameState:
     event_price_changes: Dict[str, float] = field(default_factory=dict)  # Tracks items with temporary event prices and their original prices
     item_demand: Dict[str, float] = field(default_factory=dict)  # item_name -> demand multiplier (0.1 to 2.0)
     vendor_daily_purchases: Dict[str, Dict[str, Dict[str, int]]] = field(default_factory=dict)  # player_name -> vendor_name -> item_name -> quantity_today
-    global_cas: float = 0.0  # Benchmark CAS for single-player mode that grows each day
+    competitors: List[Competitor] = field(default_factory=list)  # AI competitor stores (simulated via CAS only)
 
     def get_item(self, item_name: str) -> Optional[Item]:
         """
@@ -1631,6 +1642,137 @@ def create_default_items() -> List[Item]:
     # Start with first 60 items - includes Food & Groceries, Fresh Produce,
     # Household Essentials, Personal Care items (all $20 or below)
     return [PRODUCT_CATALOG[i] for i in range(60)]
+
+
+def create_competitors(items: List[Item], market_prices: Dict[str, float]) -> List[Competitor]:
+    """
+    Create 2 simulated competitor stores with reasonable starting inventory.
+    These competitors only exist for CAS calculation - they don't actually buy/sell.
+
+    Returns list of 2 competitors with diversified starting inventory.
+    """
+    competitors = [
+        Competitor(name="MegaMart", max_inventory_items=80),
+        Competitor(name="SuperShop", max_inventory_items=75)
+    ]
+
+    # Give each competitor a reasonable starting inventory (25-30 diverse items)
+    for competitor in competitors:
+        # Select random items from available pool (bias toward essentials)
+        essential_items = [item for item in items if item.importance == 3]
+        non_essential_items = [item for item in items if item.importance == 2]
+
+        # Start with 15-18 essential items
+        starter_essentials = random.sample(essential_items, min(random.randint(15, 18), len(essential_items)))
+        # Add 10-12 non-essential items
+        starter_non_essentials = random.sample(non_essential_items, min(random.randint(10, 12), len(non_essential_items)))
+
+        starter_items = starter_essentials + starter_non_essentials
+
+        # Give each item reasonable stock (20-50 units) and competitive pricing
+        for item in starter_items:
+            quantity = random.randint(20, 50)
+            competitor.inventory[item.name] = quantity
+
+            # Price at market or slight discount (0-10% below market)
+            market_price = market_prices.get(item.name, item.base_price)
+            discount_pct = random.uniform(0, 0.10)
+            competitor.prices[item.name] = market_price * (1 - discount_pct)
+
+    return competitors
+
+
+def grow_competitors(competitors: List[Competitor], items: List[Item], market_prices: Dict[str, float], day: int) -> None:
+    """
+    Grow competitor inventory over time (simulates them expanding their stores).
+    Called at end of each day.
+
+    Growth strategy:
+    - Days 1-30: Add 1-2 new items per day
+    - Days 31-90: Add 1-3 new items per day
+    - Days 91+: Add 0-2 new items per day (slowing growth)
+    - Cap at max_inventory_items unique items per competitor
+    - Randomly restock existing items to maintain CAS
+    """
+    for competitor in competitors:
+        current_item_count = len(competitor.inventory)
+
+        # Determine how many new items to add based on day
+        if day <= 30:
+            new_items_to_add = random.randint(1, 2)
+        elif day <= 90:
+            new_items_to_add = random.randint(1, 3)
+        else:
+            new_items_to_add = random.randint(0, 2)
+
+        # Don't exceed max inventory cap
+        items_available = competitor.max_inventory_items - current_item_count
+        new_items_to_add = min(new_items_to_add, items_available)
+
+        # Add new items if under cap
+        if new_items_to_add > 0:
+            # Find items competitor doesn't have yet
+            available_items = [item for item in items if item.name not in competitor.inventory]
+            if available_items:
+                # Bias toward items they don't have yet
+                items_to_add = random.sample(available_items, min(new_items_to_add, len(available_items)))
+
+                for item in items_to_add:
+                    quantity = random.randint(20, 50)
+                    competitor.inventory[item.name] = quantity
+
+                    # Price competitively
+                    market_price = market_prices.get(item.name, item.base_price)
+                    discount_pct = random.uniform(0, 0.10)
+                    competitor.prices[item.name] = market_price * (1 - discount_pct)
+
+        # Restock some existing items (simulate restocking 20-40% of inventory)
+        items_to_restock = random.sample(
+            list(competitor.inventory.keys()),
+            k=min(random.randint(5, 12), len(competitor.inventory))
+        )
+        for item_name in items_to_restock:
+            # Add 10-30 units
+            competitor.inventory[item_name] += random.randint(10, 30)
+
+        # Slowly improve reputation over time (cap at 100)
+        if competitor.reputation < 100:
+            competitor.reputation = min(100, competitor.reputation + random.uniform(0.1, 0.5))
+
+        # Maintain decent fulfillment (fluctuate 70-85%)
+        competitor.average_fulfillment_pct = random.uniform(70, 85)
+
+
+def calculate_competitor_cas(
+    competitor: Competitor,
+    market_prices: Dict[str, float],
+    items_by_name: Dict[str, Item],
+    all_available_items: List[Item],
+    current_day: int
+) -> float:
+    """
+    Calculate CAS for a competitor using the same logic as player CAS.
+    Competitors don't have all the same features (no marketing, employees, etc.)
+    but do have inventory, pricing, reputation, and fulfillment.
+    """
+    # Create a minimal Player-like object to reuse calculate_player_cas
+    # We'll use the competitor's data to simulate a player's inventory/prices
+    dummy_player = Player(name=competitor.name, cash=0)
+    dummy_player.inventory = competitor.inventory.copy()
+    dummy_player.prices = competitor.prices.copy()
+    dummy_player.reputation = competitor.reputation
+    dummy_player.average_fulfillment_pct = competitor.average_fulfillment_pct
+
+    # Calculate CAS using the same function
+    cas = calculate_player_cas(
+        dummy_player,
+        market_prices,
+        items_by_name,
+        all_available_items,
+        current_day
+    )
+
+    return cas
 
 
 def unlock_new_product(game_state: GameState) -> Optional[Item]:
@@ -3268,7 +3410,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Build items dictionary for quick lookup (needed for CAS calculation)
     items_by_name = {item.name: item for item in game_state.items}
 
-    # Split customers based on CAS competition with global benchmark
+    # Split customers based on CAS competition with competitor stores
     total_customers_spawned = len(all_customers)
     player = game_state.player
     if player:
@@ -3281,6 +3423,20 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.day
         )
 
+        # Calculate competitor CAS scores
+        competitor_cas_scores = []
+        for competitor in game_state.competitors:
+            cas = calculate_competitor_cas(
+                competitor,
+                game_state.market_prices,
+                items_by_name,
+                game_state.items,
+                game_state.day
+            )
+            competitor_cas_scores.append((competitor.name, cas))
+
+        total_competitor_cas = sum(cas for _, cas in competitor_cas_scores)
+
         # Get player's customer capacity
         player_capacity = get_player_customer_capacity(player)
 
@@ -3290,12 +3446,12 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         num_customers_for_player = 0
 
         for iteration in range(2):
-            # Calculate player's share of customers based on CAS proportion
-            total_cas = player_cas + game_state.global_cas
+            # Calculate player's share of customers based on CAS proportion vs all competitors
+            total_cas = player_cas + total_competitor_cas
             if total_cas > 0:
                 player_share = player_cas / total_cas
             else:
-                player_share = 0.5  # Default to 50/50 if both CAS are 0
+                player_share = 0.33  # Default to equal split if all CAS are 0 (1 of 3 stores)
 
             # Calculate how many customers the player actually gets
             num_customers_for_player = int(len(all_customers) * player_share)
@@ -3311,14 +3467,16 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 # Stable, stop iterating
                 break
 
-        customers_lost_to_benchmark = len(all_customers) - num_customers_for_player
+        customers_lost_to_competitors = len(all_customers) - num_customers_for_player
 
         # Only give the player their share of customers
         all_customers = all_customers[:num_customers_for_player]
 
         if show_details:
             print(f"\n🎯 Customer Allocation:")
-            print(f"  Base CAS: {base_player_cas:.1f} | Global CAS: {game_state.global_cas:.1f}")
+            print(f"  Your CAS: {base_player_cas:.1f}")
+            for comp_name, comp_cas in competitor_cas_scores:
+                print(f"  {comp_name} CAS: {comp_cas:.1f}")
             if capacity_penalty < 1.0:
                 print(f"  ⚠️  Capacity: {num_customers_for_player}/{player_capacity} (Over capacity!)")
                 print(f"  Penalty Applied: {capacity_penalty:.2f}x (Your CAS reduced to {player_cas:.1f})")
@@ -3326,7 +3484,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 print(f"  Capacity: {num_customers_for_player}/{player_capacity} customers")
             print(f"  Your Share: {player_share * 100:.1f}% of {total_customers_spawned} customers")
             print(f"  ✓ You get {num_customers_for_player} customers")
-            print(f"  ✗ Global benchmark takes {customers_lost_to_benchmark} customers")
+            print(f"  ✗ Competitors take {customers_lost_to_competitors} customers")
 
         # In single-player mode, all customers go to the player
         assigned_customers = all_customers
@@ -4078,18 +4236,26 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 specialty_text += f" (+{data['specialty_mult_raw']:.2f})"
             print(f"  {data['name']}: CAS={data['final_cas']:.1f} | Rep: {data['reputation']:.0f}, Disc: {data['discount_pct']:.1f}%, Stab: {data['stability']:.1f}{marketing_text}, Spec: {specialty_text}, Fulfill: {data['fulfill_mult']:.2f}x ({data['fulfill_pct']:.0f}%)")
 
-        # Show global benchmark comparison
-        if game_state.player and cas_data:
+        # Show competitor comparison
+        if game_state.player and cas_data and game_state.competitors:
             player_cas = cas_data[0]['final_cas']  # Player's CAS
-            cas_diff = player_cas - game_state.global_cas
-            if cas_diff >= 0:
-                status = "✓ AHEAD"
-                symbol = "↑"
-            else:
-                status = "✗ BEHIND"
-                symbol = "↓"
-            print(f"\n  {symbol} Global Benchmark CAS: {game_state.global_cas:.1f}")
-            print(f"  {status}: Your CAS is {abs(cas_diff):.1f} points {'above' if cas_diff >= 0 else 'below'} the global benchmark")
+            print(f"\n  🏪 Competitor Comparison:")
+            for competitor in game_state.competitors:
+                comp_cas = calculate_competitor_cas(
+                    competitor,
+                    game_state.market_prices,
+                    {item.name: item for item in game_state.items},
+                    game_state.items,
+                    game_state.day
+                )
+                cas_diff = player_cas - comp_cas
+                if cas_diff >= 0:
+                    symbol = "✓"
+                    status = f"ahead by {cas_diff:.1f}"
+                else:
+                    symbol = "✗"
+                    status = f"behind by {abs(cas_diff):.1f}"
+                print(f"    {symbol} {competitor.name}: {comp_cas:.1f} CAS ({status})")
 
     # Step 8: Refresh vendor inventory for next day
     # Done at END of day so buy orders are set for current vendor inventory
@@ -4098,13 +4264,10 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     # Step 9: Advance day counter
     game_state.day += 1
 
-    # Step 9.1: Update global CAS
-    # Global CAS grows each day with accelerating growth - player must keep improving!
-    # Formula: 2.0 base + 0.05 per day (quadratic acceleration)
-    daily_growth = 2.0 + (game_state.day * 0.05)
-    game_state.global_cas += daily_growth
+    # Step 9.1: Grow competitor stores (add inventory, improve reputation, etc.)
+    grow_competitors(game_state.competitors, game_state.items, game_state.market_prices, game_state.day)
     if show_details:
-        print(f"\n📊 Global CAS increased to {game_state.global_cas:.2f} (+{daily_growth:.2f})")
+        print(f"\n📊 Competitor stores expanded their inventory")
 
     # Step 9.25: Process pending deliveries for all players
     delivery_summary = {}  # Track deliveries per player for consolidated output
@@ -7276,7 +7439,7 @@ def main_menu(game_state: GameState) -> bool:
             total_debt = sum(loan.remaining_balance for loan in player.loans)
             print(f"Total Debt: ${total_debt:,.2f}")
 
-        # Show CAS comparison with global benchmark
+        # Show CAS comparison with competitors
         player_cas = calculate_player_cas(
             player,
             game_state.market_prices,
@@ -7284,12 +7447,23 @@ def main_menu(game_state: GameState) -> bool:
             game_state.items,
             game_state.day
         )
-        cas_diff = player_cas - game_state.global_cas
-        if cas_diff >= 0:
-            status = f"✓ Ahead by {cas_diff:.2f}"
-        else:
-            status = f"✗ Behind by {abs(cas_diff):.2f}"
-        print(f"\n📊 Your CAS: {player_cas:.2f} | Global CAS: {game_state.global_cas:.2f} | {status}")
+        print(f"\n📊 Your CAS: {player_cas:.2f}")
+        if game_state.competitors:
+            print("   Competitors:")
+            for competitor in game_state.competitors:
+                comp_cas = calculate_competitor_cas(
+                    competitor,
+                    game_state.market_prices,
+                    game_state.items_by_name,
+                    game_state.items,
+                    game_state.day
+                )
+                cas_diff = player_cas - comp_cas
+                if cas_diff >= 0:
+                    symbol = "✓"
+                else:
+                    symbol = "✗"
+                print(f"   {symbol} {competitor.name}: {comp_cas:.2f} (diff: {cas_diff:+.2f})")
 
         print("\nOptions:")
         print("  1. Pass Day (Simulate)")
@@ -7486,7 +7660,17 @@ def serialize_game_state(game_state: GameState) -> dict:
         ],
         "vendor_daily_purchases": game_state.vendor_daily_purchases,
         "item_demand": game_state.item_demand,
-        "global_cas": game_state.global_cas,
+        "competitors": [
+            {
+                "name": competitor.name,
+                "inventory": competitor.inventory,
+                "prices": competitor.prices,
+                "reputation": competitor.reputation,
+                "average_fulfillment_pct": competitor.average_fulfillment_pct,
+                "max_inventory_items": competitor.max_inventory_items,
+            }
+            for competitor in game_state.competitors
+        ],
     }
 
 
@@ -7684,6 +7868,23 @@ def deserialize_game_state(data: dict) -> GameState:
         daily_item_size_sold=daily_item_size_sold,
     )
 
+    # Load competitors (if present)
+    competitors = []
+    if "competitors" in data:
+        for comp_data in data["competitors"]:
+            competitor = Competitor(
+                name=comp_data["name"],
+                inventory=comp_data.get("inventory", {}),
+                prices=comp_data.get("prices", {}),
+                reputation=comp_data.get("reputation", 50.0),
+                average_fulfillment_pct=comp_data.get("average_fulfillment_pct", 75.0),
+                max_inventory_items=comp_data.get("max_inventory_items", 80),
+            )
+            competitors.append(competitor)
+    else:
+        # Backward compatibility: create competitors from scratch if old save
+        competitors = create_competitors(items, data["market_prices"])
+
     # Create GameState
     game_state = GameState(
         day=data["day"],
@@ -7697,7 +7898,7 @@ def deserialize_game_state(data: dict) -> GameState:
         unlocked_product_indices=data.get("unlocked_product_indices", []),
         vendor_daily_purchases=data.get("vendor_daily_purchases", {}),
         item_demand=data.get("item_demand", {}),
-        global_cas=data.get("global_cas", 0.0),
+        competitors=competitors,
     )
 
     # Backward compatibility: Initialize item_demand for any items that don't have it
@@ -7831,6 +8032,9 @@ def run_game() -> None:
         # Create available upgrades
         available_upgrades = create_default_upgrades(vendors)
 
+        # Create competitor stores
+        competitors = create_competitors(items, market_prices)
+
         # Create GameState (customers generated dynamically each day)
         game_state = GameState(
             day=1,
@@ -7843,20 +8047,22 @@ def run_game() -> None:
             available_upgrades=available_upgrades,
             unlocked_product_indices=list(range(60)),  # Start with first 60 products unlocked
             item_demand=item_demand,
+            competitors=competitors,
         )
 
         # Set global game state for signal handler
         _current_game_state = game_state
 
-        # Initialize global CAS benchmark
-        game_state.global_cas = 35.0  # Starting benchmark CAS - tough but achievable
+        # Show competitor info
         print("\n" + "=" * 60)
         print("SINGLE-PLAYER MODE")
         print("=" * 60)
-        print("You'll compete against a global benchmark that steals customers!")
-        print(f"Starting Global CAS: {game_state.global_cas:.2f}")
-        print("Your share of customers = Your CAS / (Your CAS + Global CAS)")
-        print("Keep your CAS high to maximize customers and revenue!")
+        print("You'll compete against 2 local stores for customers!")
+        print("\nCompetitors:")
+        for competitor in competitors:
+            print(f"  - {competitor.name}: {len(competitor.inventory)} items in stock")
+        print("\nYour share of customers = Your CAS / (Total CAS of all 3 stores)")
+        print("Stock diverse inventory and price competitively to attract customers!")
 
         # Show initial setup
         print("\n" + "=" * 60)
