@@ -3480,11 +3480,90 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         customers_lost_to_competitors = len(all_customers) - num_customers_for_player
 
-        # Only give the player their share of customers
-        all_customers = all_customers[:num_customers_for_player]
+        # Split customers into player-allocated and competitor-allocated
+        customers_for_player = all_customers[:num_customers_for_player]
+        customers_for_competitors = all_customers[num_customers_for_player:]
 
         # Track customer type statistics for player's allocated customers only
-        for customer in all_customers:
+        for customer in customers_for_player:
+            if customer.customer_type in customer_type_stats['spawned']:
+                customer_type_stats['spawned'][customer.customer_type] += 1
+
+        # Process competitor customers for spillover
+        overflow_customers = []
+        competitor_kept_customers = 0
+
+        if customers_for_competitors:
+            # Split competitor customers between MegaMart and SuperShop based on their CAS scores
+            megamart = next((c for c in game_state.competitors if c.name == "MegaMart"), None)
+            supershop = next((c for c in game_state.competitors if c.name == "SuperShop"), None)
+
+            if megamart and supershop:
+                megamart_cas = next((cas for name, cas in competitor_cas_scores if name == "MegaMart"), 0)
+                supershop_cas = next((cas for name, cas in competitor_cas_scores if name == "SuperShop"), 0)
+
+                total_comp_cas = megamart_cas + supershop_cas
+                if total_comp_cas > 0:
+                    megamart_share = megamart_cas / total_comp_cas
+                else:
+                    megamart_share = 0.5
+
+                num_megamart = int(len(customers_for_competitors) * megamart_share)
+                megamart_customers = customers_for_competitors[:num_megamart]
+                supershop_customers = customers_for_competitors[num_megamart:]
+
+                # Process MegaMart customers for spillover
+                for customer in megamart_customers:
+                    needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
+
+                    # Check if MegaMart stocks the categories this customer needs
+                    spills_over = False
+                    for need in needs:
+                        item = items_by_name.get(need.item_name)
+                        if item:
+                            category = item.category
+                            # Check if MegaMart has ANY item from this category
+                            has_category = any(
+                                items_by_name.get(item_name).category == category
+                                for item_name in megamart.inventory.keys()
+                                if item_name in items_by_name
+                            )
+                            if not has_category:
+                                spills_over = True
+                                break
+
+                    if spills_over:
+                        overflow_customers.append(customer)
+                    else:
+                        competitor_kept_customers += 1
+
+                # Process SuperShop customers for spillover
+                for customer in supershop_customers:
+                    needs = customer.generate_daily_needs(game_state.items, game_state.market_prices, game_state.item_demand)
+
+                    # Check if SuperShop stocks the categories this customer needs
+                    spills_over = False
+                    for need in needs:
+                        item = items_by_name.get(need.item_name)
+                        if item:
+                            category = item.category
+                            # Check if SuperShop has ANY item from this category
+                            has_category = any(
+                                items_by_name.get(item_name).category == category
+                                for item_name in supershop.inventory.keys()
+                                if item_name in items_by_name
+                            )
+                            if not has_category:
+                                spills_over = True
+                                break
+
+                    if spills_over:
+                        overflow_customers.append(customer)
+                    else:
+                        competitor_kept_customers += 1
+
+        # Track overflow customer types
+        for customer in overflow_customers:
             if customer.customer_type in customer_type_stats['spawned']:
                 customer_type_stats['spawned'][customer.customer_type] += 1
 
@@ -3499,12 +3578,17 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             else:
                 print(f"  Capacity: {num_customers_for_player}/{player_capacity} customers")
             print(f"  Your Share: {player_share * 100:.1f}% of {total_customers_spawned} customers")
-            print(f"  ✓ You get {num_customers_for_player} customers")
-            print(f"  ✗ Competitors take {customers_lost_to_competitors} customers")
+            print(f"  ✓ You get {num_customers_for_player} allocated customers")
+            if overflow_customers:
+                print(f"  ↩️  +{len(overflow_customers)} overflow from competitors (missing categories)")
+            print(f"  ✗ Competitors keep {competitor_kept_customers} customers")
 
-        # In single-player mode, all customers go to the player
-        assigned_customers = all_customers
-        allocated_customers_assigned[player.name] = len(assigned_customers)
+        # Combine allocated and overflow customers
+        assigned_customers = customers_for_player + overflow_customers
+        allocated_customers_assigned[player.name] = len(customers_for_player)
+
+        # Track which customers are overflow (for visit_type determination)
+        overflow_customer_set = set(c.name for c in overflow_customers)
 
         # Track customer visits
         customer_visits_per_store = {}
@@ -3559,8 +3643,8 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 # Track customer visit to this store
                 customer_visits_per_store[current_supplier.name] = customer_visits_per_store.get(current_supplier.name, 0) + 1
 
-                # Determine visit type
-                visit_type = "allocated" if current_supplier == player else "overflow"
+                # Determine visit type (check if customer is from overflow)
+                visit_type = "overflow" if customer.name in overflow_customer_set else "allocated"
 
                 # Record basket size when entering this store
                 basket_size_on_entry = sum(need.quantity for need in remaining_needs)
@@ -4073,17 +4157,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             for customer_type, target_name, details in special_customer_events:
                 print(f"  {customer_type} → {target_name}: {details}")
 
-        # Display demand per item (what customers wanted today)
+        # Display demand per category (what customers wanted today)
         if daily_demand_per_item:
-            print(f"\nItem Demand Today (Total Quantity Wanted):")
-            # Sort by demand (highest first), then by item name
-            sorted_demand = sorted(daily_demand_per_item.items(), key=lambda x: (-x[1], x[0]))
-            # Show 7 items per line
-            items_per_line = 7
-            for i in range(0, len(sorted_demand), items_per_line):
-                line_items = sorted_demand[i:i+items_per_line]
-                formatted_items = [f"{item_name}: {quantity}" for item_name, quantity in line_items]
-                print(f"  {', '.join(formatted_items)}")
+            print(f"\nItem Demand Today (Total Quantity Wanted by Category):")
+            # Aggregate demand by category
+            demand_by_category = {}
+            for item_name, quantity in daily_demand_per_item.items():
+                item = items_by_name.get(item_name)
+                if item:
+                    category = item.category
+                    demand_by_category[category] = demand_by_category.get(category, 0) + quantity
+
+            # Sort by demand (highest first), then by category name
+            sorted_demand = sorted(demand_by_category.items(), key=lambda x: (-x[1], x[0]))
+            formatted_items = [f"{category}: {quantity}" for category, quantity in sorted_demand]
+            print(f"  {', '.join(formatted_items)}")
 
     # Update item demand for next day (after everything has sold)
     updated_items = update_item_demand(game_state)
