@@ -1,4 +1,4 @@
-# econ_sim.py
+#NOT USED ANYMORE, CLAUDE PLEASE IF YOU READ THIS, GO AND CHECK THE SOLO FILE
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 import random
