@@ -628,7 +628,7 @@ class Upgrade:
 @dataclass
 class Warehouse:
     """Represents a warehouse owned by a player."""
-    level: int = 1  # Warehouse level (1-10), each level adds 500 capacity
+    level: int = 1  # Warehouse level (1-10), each level adds 1000 capacity
     workers: int = 0  # Number of workers in this warehouse (max 5)
 
 
@@ -662,7 +662,7 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, List[tuple]] = field(default_factory=dict)  # item_name -> [(quantity, vendor_name), ...] (up to 3 vendors)
-    restockers: int = 0  # Warehouse Workers: Each adds +300 max inventory capacity and +500 daily item size limit
+    restockers: int = 0  # Warehouse Workers: Each adds +600 max inventory capacity and +1000 daily item size limit
     marketing_agents: int = 0  # Marketing agents boost customer attraction
     cashiers: int = 0  # Cashiers: Each handles 200 customers/day (owner handles 100 base)
     store_level: int = 1  # Store level (affects inventory capacity)
@@ -751,12 +751,12 @@ class Player:
 
     def get_max_inventory(self) -> int:
         """Get max inventory capacity (total items that can be stored)."""
-        # Warehouse capacity: each warehouse level 1 = 500, +500 per upgrade (level 10 = 5000)
-        warehouse_capacity = sum(warehouse.level * 500 for warehouse in self.warehouses)
+        # Warehouse capacity: each warehouse level 1 = 1000, +1000 per upgrade (level 10 = 10000)
+        warehouse_capacity = sum(warehouse.level * 1000 for warehouse in self.warehouses)
 
         # Warehouse workers add capacity
         total_workers = sum(warehouse.workers for warehouse in self.warehouses)
-        worker_bonus = total_workers * 300
+        worker_bonus = total_workers * 600
 
         return int(warehouse_capacity + worker_bonus)
 
@@ -771,11 +771,11 @@ class Player:
 
     def get_daily_item_size_limit(self) -> float:
         """Get daily item size limit (simulates moving items from warehouse to shelves).
-        Base limit: 250 item size per day
-        Each restocker adds: 500 item size per day
+        Base limit: 500 item size per day
+        Each restocker adds: 1000 item size per day
         """
         total_restockers = sum(warehouse.workers for warehouse in self.warehouses)
-        return 250.0 + (total_restockers * 500.0)
+        return 500.0 + (total_restockers * 1000.0)
 
     def get_xp_multiplier(self) -> float:
         """Get XP gain multiplier from upgrades."""
@@ -3293,16 +3293,19 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         if uncapped_customer_count > 0:
             print(f"💎 Uncapped customers today: {uncapped_customer_count} (looking for expensive items ≥$100)")
 
+    # Initialize list of all stores (player + competitors) for dictionary tracking
+    all_stores = [game_state.player.name] if game_state.player else []
+    all_stores.extend([c.name for c in game_state.competitors])
 
     # Step 4: Execute buy orders for ALL players
     if show_details:
         print("\nExecuting buy orders...")
 
-    # Track daily spending for accurate profit calculation
-    daily_spending = 0.0
+    # Track daily spending per store for accurate profit calculation
+    daily_spending = {store: 0.0 for store in all_stores}
 
-    # Track inventory space used (for buy orders)
-    daily_inventory_used = 0.0
+    # Track inventory space used per store (for buy orders)
+    daily_inventory_used = {store: 0.0 for store in all_stores}
 
     player = game_state.player
     if player:
@@ -3322,7 +3325,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         manual_purchases, manual_size = execute_buy_orders(player, game_state)
 
         # Track total inventory space used
-        daily_inventory_used = recurring_size + restock_size + category_restock_size + manual_size
+        daily_inventory_used[player.name] = recurring_size + restock_size + category_restock_size + manual_size
 
         # Combine all purchases
         all_purchases = {}
@@ -3338,9 +3341,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
         cash_after = player.cash
         actual_spent = cash_before - cash_after
 
-        daily_spending = actual_spent
+        daily_spending[player.name] = actual_spent
         if show_details and all_purchases:
-            print(f"  {player.name}: Purchased {sum(all_purchases.values())} items (bought: {daily_inventory_used:.1f} space)(spent ${actual_spent:.2f})")
+            print(f"  {player.name}: Purchased {sum(all_purchases.values())} items (bought: {daily_inventory_used[player.name]:.1f} space)(spent ${actual_spent:.2f})")
             if recurring_purchases:
                 print(f"    - Recurring orders: {sum(recurring_purchases.values())} items")
             if restock_purchases:
@@ -3349,23 +3352,26 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
                 print(f"    - Category auto-restock: {sum(category_restock_purchases.values())} items")
 
     # Track daily statistics
-    daily_sales = 0.0
-    daily_profits = 0.0
-    customers_served = 0
-    allocated_customers_served = 0
-    allocated_customers_assigned = 0
-    overflow_customers_served = 0
-    uncapped_customers_served = 0
+    daily_sales = {store: 0.0 for store in all_stores}
+    daily_profits = {store: 0.0 for store in all_stores}
+    customers_served = {store: 0 for store in all_stores}
+    allocated_customers_served = {store: 0 for store in all_stores}
+    allocated_customers_assigned = {store: 0 for store in all_stores}
+    overflow_customers_served = {store: 0 for store in all_stores}
+    uncapped_customers_served = {store: 0 for store in all_stores}
     unmet_demand = 0
     unmet_uncapped_demand = 0
 
     # Track reputation changes (to be applied at end of day with limits)
-    daily_reputation_changes = 0
+    daily_reputation_changes = {store: 0 for store in all_stores}
 
-    # Track fulfillment percentages (to calculate average at end of day)
-    daily_fulfillment_data = {"allocated": [], "overflow": []}
-    fulfillment_visit_counts = {"allocated": 0, "overflow": 0}
-    routed_no_need_counts = {"allocated": 0, "overflow": 0}
+    # Track fulfillment percentages per store (to calculate average at end of day)
+    daily_fulfillment_data = {
+        store: {"allocated": [], "overflow": []}
+        for store in all_stores
+    }
+    fulfillment_visit_counts = {store: {"allocated": 0, "overflow": 0} for store in all_stores}
+    routed_no_need_counts = {store: {"allocated": 0, "overflow": 0} for store in all_stores}
 
     # Track customer types for daily summary
     customer_type_stats = {
@@ -3379,13 +3385,13 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
     special_customer_events = []  # List of (customer_type, target_player_name, items_taken/bought)
 
     # Track per-item sales data for pricing strategy
-    # item_name -> {units_sold, revenue, starting_inventory}
-    per_item_sales = {}
+    # store_name -> item_name -> {units_sold, revenue, starting_inventory}
+    per_item_sales = {store: {} for store in all_stores}
     # Track starting inventory before sales for each item
     player = game_state.player
     if player:
         for item_name, quantity in player.inventory.items():
-            per_item_sales[item_name] = {
+            per_item_sales[player.name][item_name] = {
                 'units_sold': 0,
                 'revenue': 0.0,
                 'starting_inventory': quantity
@@ -3412,6 +3418,9 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
     # Build items dictionary for quick lookup (needed for CAS calculation)
     items_by_name = {item.name: item for item in game_state.items}
+
+    # Initialize CAS breakdowns (for stats display later)
+    cas_breakdowns_pre_shopping = {}
 
     # Split customers based on CAS competition with competitor stores
     total_customers_spawned = len(all_customers)
@@ -3491,7 +3500,7 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
 
         # In single-player mode, all customers go to the player
         assigned_customers = all_customers
-        allocated_customers_assigned = len(assigned_customers)
+        allocated_customers_assigned[player.name] = len(assigned_customers)
 
         # Track customer visits
         customer_visits_per_store = {}
@@ -6333,7 +6342,7 @@ def warehouse_menu(game_state: GameState, player: Player) -> None:
         print("\n" + "-" * 70)
         total_workers = 0
         for i, warehouse in enumerate(player.warehouses):
-            capacity = warehouse.level * 500
+            capacity = warehouse.level * 1000
             print(f"  Warehouse {i + 1}: Level {warehouse.level}/10 | {warehouse.workers}/5 workers | Capacity: {capacity}")
             total_workers += warehouse.workers
 
@@ -6399,7 +6408,7 @@ def warehouse_menu(game_state: GameState, player: Player) -> None:
                         else:
                             if player.upgrade_warehouse(w_num - 1):
                                 print(f"\n✓ Upgraded Warehouse {w_num} to Level {warehouse.level}")
-                                print(f"  Capacity increased to {warehouse.level * 500} items")
+                                print(f"  Capacity increased to {warehouse.level * 1000} items")
                                 next_cost = 5000.0 * player.get_total_warehouse_level()
                                 print(f"  Next upgrade will cost: ${next_cost:.2f}")
                             else:
