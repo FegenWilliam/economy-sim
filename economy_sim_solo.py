@@ -628,7 +628,7 @@ class Upgrade:
 @dataclass
 class Warehouse:
     """Represents a warehouse owned by a player."""
-    level: int = 1  # Warehouse level (1-10), each level adds 500 capacity
+    level: int = 1  # Warehouse level (1-10), each level adds 1000 capacity
     workers: int = 0  # Number of workers in this warehouse (max 5)
 
 
@@ -662,7 +662,7 @@ class Player:
     inventory: Dict[str, int] = field(default_factory=dict)  # item_name -> quantity
     prices: Dict[str, float] = field(default_factory=dict)   # item_name -> selling price
     buy_orders: Dict[str, List[tuple]] = field(default_factory=dict)  # item_name -> [(quantity, vendor_name), ...] (up to 3 vendors)
-    restockers: int = 0  # Warehouse Workers: Each adds +300 max inventory capacity and +500 daily item size limit
+    restockers: int = 0  # Warehouse Workers: Each adds +600 max inventory capacity and +1000 daily item size limit
     marketing_agents: int = 0  # Marketing agents boost customer attraction
     cashiers: int = 0  # Cashiers: Each handles 200 customers/day (owner handles 100 base)
     store_level: int = 1  # Store level (affects inventory capacity)
@@ -751,12 +751,12 @@ class Player:
 
     def get_max_inventory(self) -> int:
         """Get max inventory capacity (total items that can be stored)."""
-        # Warehouse capacity: each warehouse level 1 = 500, +500 per upgrade (level 10 = 5000)
-        warehouse_capacity = sum(warehouse.level * 500 for warehouse in self.warehouses)
+        # Warehouse capacity: each warehouse level 1 = 1000, +1000 per upgrade (level 10 = 10000)
+        warehouse_capacity = sum(warehouse.level * 1000 for warehouse in self.warehouses)
 
         # Warehouse workers add capacity
         total_workers = sum(warehouse.workers for warehouse in self.warehouses)
-        worker_bonus = total_workers * 300
+        worker_bonus = total_workers * 600
 
         return int(warehouse_capacity + worker_bonus)
 
@@ -771,11 +771,11 @@ class Player:
 
     def get_daily_item_size_limit(self) -> float:
         """Get daily item size limit (simulates moving items from warehouse to shelves).
-        Base limit: 250 item size per day
-        Each restocker adds: 500 item size per day
+        Base limit: 500 item size per day
+        Each restocker adds: 1000 item size per day
         """
         total_restockers = sum(warehouse.workers for warehouse in self.warehouses)
-        return 250.0 + (total_restockers * 500.0)
+        return 500.0 + (total_restockers * 1000.0)
 
     def get_xp_multiplier(self) -> float:
         """Get XP gain multiplier from upgrades."""
@@ -6342,7 +6342,7 @@ def warehouse_menu(game_state: GameState, player: Player) -> None:
         print("\n" + "-" * 70)
         total_workers = 0
         for i, warehouse in enumerate(player.warehouses):
-            capacity = warehouse.level * 500
+            capacity = warehouse.level * 1000
             print(f"  Warehouse {i + 1}: Level {warehouse.level}/10 | {warehouse.workers}/5 workers | Capacity: {capacity}")
             total_workers += warehouse.workers
 
@@ -6408,7 +6408,7 @@ def warehouse_menu(game_state: GameState, player: Player) -> None:
                         else:
                             if player.upgrade_warehouse(w_num - 1):
                                 print(f"\n✓ Upgraded Warehouse {w_num} to Level {warehouse.level}")
-                                print(f"  Capacity increased to {warehouse.level * 500} items")
+                                print(f"  Capacity increased to {warehouse.level * 1000} items")
                                 next_cost = 5000.0 * player.get_total_warehouse_level()
                                 print(f"  Next upgrade will cost: ${next_cost:.2f}")
                             else:
