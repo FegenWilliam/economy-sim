@@ -3267,18 +3267,21 @@ def run_day(game_state: GameState, show_details: bool = True) -> Dict[str, float
             game_state.market_prices[selected_items[1].name] = old_price2 * 1.5
             print(f"\n🎉 SPECIAL EVENT! {selected_items[0].name} -50%, {selected_items[1].name} +50% today only!")
 
-    # Calculate base customer count: 300 base + 5 per day
-    base_customer_count = 300 + (game_state.day * 5)
+    # Calculate base customer count: 300 base + 20 per day
+    base_customer_count = 300 + (game_state.day * 20)
 
     # Add permanent customer increase for every 14-day period that has passed
+    # Each milestone adds 100 more than the last: +100, +200, +300, etc.
     fourteen_day_periods = game_state.day // 14
     if fourteen_day_periods > 0:
-        permanent_bonus = 20 * fourteen_day_periods
+        # Sum of 100 + 200 + 300 + ... + (n*100) = 100 * (1 + 2 + 3 + ... + n) = 100 * n*(n+1)/2
+        permanent_bonus = 100 * fourteen_day_periods * (fourteen_day_periods + 1) // 2
         base_customer_count += permanent_bonus
 
         # Show event message only on the actual milestone days
         if game_state.day % 14 == 0 and show_details:
-            print(f"🎊 14-DAY EVENT! +20 permanent customers! (Total permanent bonus: +{permanent_bonus})")
+            current_milestone_bonus = fourteen_day_periods * 100
+            print(f"🎊 14-DAY EVENT! +{current_milestone_bonus} permanent customers! (Total permanent bonus: +{permanent_bonus})")
 
     # Calculate uncapped customers (starts at day 50, +1 every 10 days)
     uncapped_customer_count = 0
@@ -7121,14 +7124,16 @@ def display_customer_forecast(game_state: GameState) -> None:
     print("=" * 60)
     print(f"\nDay {game_state.day} Expected Customers:")
 
-    # Calculate base customer count: 300 base + 5 per day
-    base_customer_count = 300 + (game_state.day * 5)
+    # Calculate base customer count: 300 base + 20 per day
+    base_customer_count = 300 + (game_state.day * 20)
 
     # Add permanent customer increase for every 14-day period that has passed
+    # Each milestone adds 100 more than the last: +100, +200, +300, etc.
     fourteen_day_periods = game_state.day // 14
     event_bonus = 0
     if fourteen_day_periods > 0:
-        event_bonus = 20 * fourteen_day_periods
+        # Sum of 100 + 200 + 300 + ... + (n*100) = 100 * (1 + 2 + 3 + ... + n) = 100 * n*(n+1)/2
+        event_bonus = 100 * fourteen_day_periods * (fourteen_day_periods + 1) // 2
         base_customer_count += event_bonus
 
     # Calculate uncapped customers
